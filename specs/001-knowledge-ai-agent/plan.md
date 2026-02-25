@@ -115,6 +115,7 @@ An internal, invite-only multi-source Agentic RAG platform that allows employees
 | Type checker (Python) | `pyproject.toml` — mypy | `mypy .` |
 | Linter (JS/TS) | `.eslintrc.json` | `pnpm lint` |
 | Formatter (JS/TS) | `.prettierrc` | `pnpm format` |
+| AI Code Assistant | `.github/skills/` (61 files) + `.vscode/settings.json` | All 61 skill files are auto-injected into every Copilot Chat session — browse by category in `.github/copilot-instructions.md` |
 
 ### Agreed Standards
 
@@ -377,8 +378,10 @@ docker-compose.override.yml          # dev: volume mounts, hot-reload, exposed p
 .env.example                         # all required env keys (no values)
 app_config.yaml                      # deploy-time config (upload_max_size_mb, etc.)
 .github/
-└── workflows/
-    └── ci.yml                       # lint, type-check, test, validate
+├── workflows/
+│   └── ci.yml                       # lint, type-check, test, validate
+├── skills/                          # 61 Copilot skill files (auto-loaded via .vscode/settings.json)
+└── copilot-instructions.md          # skill index — searchable by category
 
 # Docker Compose services (9 total):
 # 1. frontend    — Next.js 15 (port 3000)
