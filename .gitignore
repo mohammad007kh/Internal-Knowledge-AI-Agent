@@ -16,7 +16,7 @@ build/
 
 # IDE
 .idea/
-.vscode/
+.vscode/*.json.bak
 *.swp
 *.swo
 
@@ -34,5 +34,3 @@ scripts/
 specs/_defaults/
 templates/
 .specify/
-
-.github/
