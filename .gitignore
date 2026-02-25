@@ -1,0 +1,38 @@
+# Dependencies
+node_modules/
+vendor/
+.venv/
+venv/
+
+# Build outputs
+dist/
+build/
+*.egg-info/
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# SpecKit (internal AI agent scaffolding - not part of the project source)
+memory/
+scripts/
+specs/_defaults/
+templates/
+.specify/
+
+.github/
