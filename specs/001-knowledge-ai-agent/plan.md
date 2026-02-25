@@ -11,8 +11,8 @@
 
 | Setting | Value |
 |---------|-------|
-| Subagents | Disabled — no `.specify/subagents/` folder found; general knowledge used |
-| Available Subagents | None |
+| Subagents | 61 Copilot skill files — loaded via `.vscode/settings.json` → `.github/skills/` |
+| Available Subagents | **Backend/Python (9)**: `fastapi-pro`, `fastapi-router-py`, `fastapi-templates`, `python-pro`, `python-patterns`, `async-python-patterns`, `pydantic-models-py`, `python-testing-patterns`, `python-performance-optimization` · **Database (8)**: `postgresql`, `postgres-best-practices`, `database-design`, `database-architect`, `database-migrations-sql-migrations`, `sql-optimization-patterns`, `sql-pro`, `nosql-expert` · **AI/RAG/LLM (15)**: `langchain-architecture`, `langgraph`, `langfuse`, `rag-engineer`, `rag-implementation`, `llm-app-patterns`, `llm-application-dev-langchain-agent`, `embedding-strategies`, `vector-database-engineer`, `vector-index-tuning`, `hybrid-search-implementation`, `similarity-search-patterns`, `multi-agent-patterns`, `agent-evaluation`, `llm-evaluation` · **Frontend (10)**: `nextjs-app-router-patterns`, `nextjs-best-practices`, `react-best-practices`, `react-patterns`, `react-state-management`, `typescript-pro`, `typescript-expert`, `tailwind-patterns`, `tailwind-design-system`, `wcag-audit-patterns` · **Infrastructure (5)**: `docker-expert`, `api-design-principles`, `api-patterns`, `openapi-spec-generation`, `file-uploads` · **Auth/Security (3)**: `auth-implementation-patterns`, `api-security-best-practices`, `security-scanning-security-hardening` · **Architecture/Quality (11)**: `clean-code`, `architecture-patterns`, `backend-dev-guidelines`, `frontend-dev-guidelines`, `backend-architect`, `senior-fullstack`, `tdd-workflow`, `code-review-excellence`, `error-handling-patterns`, `debugging-strategies`, `architect-review` |
 | Competitive Analysis | No |
 | Review Depth | Full review |
 
