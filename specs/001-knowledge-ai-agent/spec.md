@@ -145,6 +145,8 @@ An admin can trigger a manual re-sync, set a recurring scheduled sync, or config
 3. **Given** delta sync is configured for a database source, **When** sync runs, **Then** only changed or new records are re-processed.
 4. **Given** a sync completes (or fails), **When** the admin views the source, **Then** they see last synced time, change counts, and any error details.
 5. **Given** a sync fails, **When** viewing the source, **Then** the previous successfully synced content remains available.
+6. **Given** a source sync is in progress, **When** a user submits a query against that source, **Then** the system shows the sync status and presents three choices: answer using last synced data, wait for sync to finish and then re-run, or cancel the query.
+7. **Given** a source sync is in progress, **When** the admin views the source in the admin panel, **Then** a real-time sync progress indicator is visible (e.g., percentage complete, records processed, estimated time remaining).
 
 ---
 
@@ -169,8 +171,8 @@ An admin writes plain-language company rules that the system applies to every co
 
 - What happens when a source becomes unavailable mid-conversation (e.g., a database connection drops)?
 - What happens when a user is mid-conversation and their access to a source is revoked?
-- What happens when a source sync is in progress and a user queries that source?
-- What happens when an uploaded file is too large or in an unsupported format?
+- What happens when a source sync is in progress and a user queries that source? → The user is shown the sync status and presented with three choices: (1) receive an answer using the last successfully synced data, (2) wait for sync to complete and then re-run the query, or (3) cancel the query entirely.
+- What happens when an uploaded file is too large or in an unsupported format? → The upload is rejected immediately with a clear error stating the configured size limit and listing supported formats. The size limit is configurable via an application config file (not hardcoded, not in `.env`).
 - What happens when all configured AI providers are unavailable?
 - What happens when the agent produces an answer but the output guardrail subsequently blocks it?
 - What happens when a clarifying question is asked but the user abandons the conversation?
@@ -233,6 +235,10 @@ An admin writes plain-language company rules that the system applies to every co
 
 - **FR-030**: Admins MUST be able to configure which AI model is used for each processing stage of the pipeline independently.
 - **FR-031**: Per-source AI model overrides MUST be configurable for the retrieval and query-generation stages.
+- **FR-032**: When a source sync is in progress and a user queries that source, the system MUST display the sync status and offer three options: answer using last successfully synced data, wait for sync to complete and re-run the query, or cancel. The admin panel MUST show a real-time progress indicator for any active sync operation.
+- **FR-033**: The system MUST automatically attempt to restart any crashed service component without manual intervention, up to a maximum of 3 consecutive retry attempts with increasing wait intervals between each attempt. If a component fails to recover after 3 attempts, the system MUST stop retrying, mark the component as failed, and surface a prominent alert to admins in the health log including the component name, number of attempts made, last error, and timestamp. The system MUST NOT loop indefinitely on restart attempts.
+- **FR-034**: All user-set passwords (account setup, password reset, first-login change) MUST meet a minimum policy: at least 8 characters, at least one uppercase letter, one lowercase letter, and one number. The system MUST reject non-compliant passwords with a clear message stating which rule was not met.
+- **FR-035**: File uploads that exceed the configured maximum file size MUST be rejected immediately with a clear error stating the limit and the file's actual size. Unsupported file formats MUST be rejected with a message listing supported formats. The maximum file size limit MUST be defined in an application configuration file (not hardcoded, not in an environment variable file) so it can be changed without a code deployment. The default value is 50 MB.
 
 ---
 
@@ -257,13 +263,26 @@ An admin writes plain-language company rules that the system applies to every co
 - **SC-001**: Users can submit a natural language question and receive a grounded, sourced answer in under 30 seconds for typical queries.
 - **SC-002**: 95% of answers returned are verifiably grounded in source data — cross-referenceable against cited sources.
 - **SC-003**: Admins can register a new database source and have it ready to query in under 5 minutes from submitting connection details.
-- **SC-004**: Admins can register a document (up to 50 MB) and have it ready to query within 10 minutes of upload.
+- **SC-004**: Admins can register a document within the configured size limit (default 50 MB, adjustable via application config) and have it ready to query within 10 minutes of upload.
 - **SC-005**: Users can complete a full question-and-answer exchange including one clarifying question in under 60 seconds of total interaction time.
 - **SC-006**: Source access changes (grant or revoke) take effect for the next query immediately — no delay or cache lag.
 - **SC-007**: 100% of messages that violate a configured company rule are blocked before the user receives a policy-violating response.
 - **SC-008**: Guardrail activation events are visible in the admin audit log within 5 seconds of occurrence.
-- **SC-009**: The system handles at least 20 simultaneous active users without degraded response quality or timeouts.
+- **SC-009**: The system handles at least 20 simultaneous active users without degraded response quality or timeouts, assuming a deployment with up to 100,000 indexed documents or database rows across all sources.
 - **SC-010**: Manual sync reflects added or changed content in answers within 5 minutes of sync completion.
+- **SC-011**: If any system component crashes, it restarts automatically without manual intervention. Admins can see the crash event, affected component, and recovery status in the admin panel within 60 seconds of the event.
+
+---
+
+## Clarifications
+
+### Session 2026-02-25
+
+- Q: What is the user-visible behavior when a source sync is in progress and a query is submitted against it? → A: The system shows the sync status in the UI. The user is presented with three choices: (1) receive an answer using the last successfully synced data, (2) wait for sync to complete and re-run the query, or (3) cancel the query. The admin panel shows a real-time sync progress indicator.
+- Q: What is the expected data volume scale across all sources? → A: Medium scale — tens to hundreds of sources, up to approximately 100,000 documents or database rows in total across the deployment.
+- Q: What is the system availability expectation? → A: Auto-restart on crash, no on-call obligation. All system errors and crashes must be logged and surfaced to admins in a visible health/error log. Auto-restart is capped at 3 attempts with increasing wait intervals; if recovery fails after 3 attempts, the system stops retrying and raises a prominent admin alert.
+- Q: What is the password policy for user accounts? → A: Strong — minimum 8 characters, at least one uppercase letter, one lowercase letter, and one number. Applied to all password-setting flows.
+- Q: What happens when an uploaded file exceeds the size limit? → A: Hard reject with a clear error stating the limit and the file's actual size. The size limit must be defined in an application config file (not hardcoded, not in `.env`) so it can be changed without a code deployment. Default is 50 MB.
 
 ---
 
@@ -274,4 +293,7 @@ An admin writes plain-language company rules that the system applies to every co
 - The deployment environment has reliable network access to all registered external databases.
 - Admins are technically proficient enough to obtain database connection strings; the system does not guide admins through database setup on the database side.
 - Files are primarily English-language documents; multi-language semantic search is not an MVP requirement.
+- The expected data volume is medium scale: tens to hundreds of sources, up to approximately 100,000 total documents or database rows across the entire deployment. Designs significantly exceeding this scale are out of scope for the MVP.
+- The system targets business-hours availability. It must auto-restart on crash (max 3 attempts, then stop and alert) but has no 24/7 on-call or formal uptime SLA. All errors and recovery events are logged and visible to admins.
+- Passwords must be at least 8 characters with at least one uppercase letter, one lowercase letter, and one number.
 - Answer quality is dependent on AI model capability and source data quality; the system is responsible for grounding, routing, and safety — not for improving the AI model's raw reasoning.
