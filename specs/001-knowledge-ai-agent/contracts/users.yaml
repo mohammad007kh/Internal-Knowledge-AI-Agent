@@ -1,0 +1,221 @@
+openapi: "3.1.0"
+info:
+  title: "Internal Knowledge AI Agent — Users API"
+  version: "1.0.0"
+  description: "User management and invitation endpoints (admin only)."
+
+servers:
+  - url: /api/v1
+
+security:
+  - bearerAuth: []
+
+paths:
+  /users:
+    get:
+      operationId: listUsers
+      summary: List all users
+      tags: [users]
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+            maximum: 200
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            default: 0
+        - name: role
+          in: query
+          schema:
+            type: string
+            enum: [admin, user]
+      responses:
+        "200":
+          description: Paginated user list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserList"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /users/invitations:
+    post:
+      operationId: createInvitation
+      summary: Invite a new user by email
+      tags: [users]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/InvitationRequest"
+      responses:
+        "201":
+          description: Invitation created and email sent
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Invitation"
+        "409":
+          description: Email already has an active account or pending invitation
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+
+  /users/{user_id}:
+    parameters:
+      - name: user_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+
+    patch:
+      operationId: updateUser
+      summary: Update user (role change)
+      tags: [users]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                role:
+                  type: string
+                  enum: [admin, user]
+      responses:
+        "200":
+          description: Updated user
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+    delete:
+      operationId: deactivateUser
+      summary: Deactivate user account
+      tags: [users]
+      responses:
+        "204":
+          description: User deactivated
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: Cannot deactivate the only admin account
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  schemas:
+    User:
+      type: object
+      required: [id, email, role, is_active, created_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        email:
+          type: string
+          format: email
+        role:
+          type: string
+          enum: [admin, user]
+        is_active:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+
+    UserList:
+      type: object
+      required: [items, total, limit, offset]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/User"
+        total:
+          type: integer
+        limit:
+          type: integer
+        offset:
+          type: integer
+
+    InvitationRequest:
+      type: object
+      required: [email, role]
+      properties:
+        email:
+          type: string
+          format: email
+        role:
+          type: string
+          enum: [admin, user]
+
+    Invitation:
+      type: object
+      required: [id, email, role, expires_at, created_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        email:
+          type: string
+          format: email
+        role:
+          type: string
+          enum: [admin, user]
+        expires_at:
+          type: string
+          format: date-time
+        created_at:
+          type: string
+          format: date-time
+
+    Problem:
+      type: object
+      required: [type, title, status, detail]
+      properties:
+        type:
+          type: string
+          format: uri
+        title:
+          type: string
+        status:
+          type: integer
+        detail:
+          type: string
+        request_id:
+          type: string
+
+  responses:
+    Forbidden:
+      description: Insufficient permissions
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"
+    NotFound:
+      description: Resource not found
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"

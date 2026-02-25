@@ -1,0 +1,257 @@
+openapi: "3.1.0"
+info:
+  title: "Internal Knowledge AI Agent — Auth API"
+  version: "1.0.0"
+  description: "Authentication endpoints — login, token refresh, logout, password reset, invitation setup."
+
+servers:
+  - url: /api/v1
+
+paths:
+  /auth/login:
+    post:
+      operationId: login
+      summary: Authenticate user
+      tags: [auth]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email:
+                  type: string
+                  format: email
+                password:
+                  type: string
+                  minLength: 1
+      responses:
+        "200":
+          description: Login successful
+          headers:
+            Set-Cookie:
+              description: "refresh_token=<token>; HttpOnly; SameSite=Strict; Path=/api/v1/auth/refresh; Max-Age=604800"
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TokenResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Account deactivated
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+
+  /auth/refresh:
+    post:
+      operationId: refreshToken
+      summary: Rotate refresh token and get new access token
+      tags: [auth]
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Tokens rotated
+          headers:
+            Set-Cookie:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TokenResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /auth/logout:
+    post:
+      operationId: logout
+      summary: Revoke refresh token
+      tags: [auth]
+      security:
+        - bearerAuth: []
+      responses:
+        "204":
+          description: Logged out; refresh cookie cleared
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /auth/password-reset:
+    post:
+      operationId: requestPasswordReset
+      summary: Request password reset link by email
+      tags: [auth]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email]
+              properties:
+                email:
+                  type: string
+                  format: email
+      responses:
+        "202":
+          description: Reset link sent (always returns 202 regardless of whether email exists)
+
+  /auth/password-reset/confirm:
+    post:
+      operationId: confirmPasswordReset
+      summary: Set new password using reset token
+      tags: [auth]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [token, new_password]
+              properties:
+                token:
+                  type: string
+                new_password:
+                  type: string
+                  description: "Must satisfy password policy: 8+ chars, upper, lower, number (FR-034)"
+      responses:
+        "204":
+          description: Password changed
+        "400":
+          description: Password policy not met
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "410":
+          description: Token expired or already used
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+
+  /auth/setup:
+    post:
+      operationId: acceptInvitation
+      summary: Accept invitation and set up account
+      tags: [auth]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [invitation_token, password]
+              properties:
+                invitation_token:
+                  type: string
+                password:
+                  type: string
+                  description: "Password policy: 8+ chars, upper, lower, number (FR-034)"
+      responses:
+        "200":
+          description: Account created; auto-logged in
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TokenResponse"
+        "400":
+          $ref: "#/components/responses/ValidationError"
+        "410":
+          description: Invitation expired
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+
+  /auth/change-password:
+    post:
+      operationId: changePassword
+      summary: Change own password (voluntary or forced)
+      tags: [auth]
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [current_password, new_password]
+              properties:
+                current_password:
+                  type: string
+                new_password:
+                  type: string
+      responses:
+        "204":
+          description: Password changed; must_change_password cleared
+        "400":
+          $ref: "#/components/responses/ValidationError"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+    cookieAuth:
+      type: apiKey
+      in: cookie
+      name: refresh_token
+
+  schemas:
+    TokenResponse:
+      type: object
+      required: [access_token, token_type, expires_in, must_change_password]
+      properties:
+        access_token:
+          type: string
+        token_type:
+          type: string
+          enum: [Bearer]
+        expires_in:
+          type: integer
+          description: Seconds until access token expires (900 = 15 min)
+        must_change_password:
+          type: boolean
+          description: "True for bootstrap admin on first login (FR-024)"
+
+    Problem:
+      type: object
+      description: "RFC 7807 Problem Details"
+      required: [type, title, status, detail]
+      properties:
+        type:
+          type: string
+          format: uri
+        title:
+          type: string
+        status:
+          type: integer
+        detail:
+          type: string
+        request_id:
+          type: string
+
+  responses:
+    Unauthorized:
+      description: Missing or invalid authentication
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"
+    ValidationError:
+      description: Request validation failed
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"

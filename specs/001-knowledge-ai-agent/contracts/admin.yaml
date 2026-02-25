@@ -1,0 +1,440 @@
+openapi: "3.1.0"
+info:
+  title: "Internal Knowledge AI Agent — Admin API"
+  version: "1.0.0"
+  description: "Guardrail rule management, LLM configuration, and system health endpoints (admin only)."
+
+servers:
+  - url: /api/v1
+
+security:
+  - bearerAuth: []
+
+paths:
+  /admin/guardrails:
+    get:
+      operationId: listGuardrailRules
+      summary: List all company policy guardrail rules
+      tags: [admin, guardrails]
+      parameters:
+        - name: active_only
+          in: query
+          schema:
+            type: boolean
+            default: false
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/GuardrailRule"
+
+    post:
+      operationId: createGuardrailRule
+      summary: Create a new company policy rule
+      tags: [admin, guardrails]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [rule_text]
+              properties:
+                rule_text:
+                  type: string
+                  minLength: 10
+                  description: Plain-language rule applied to all conversations
+                is_active:
+                  type: boolean
+                  default: true
+      responses:
+        "201":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GuardrailRule"
+
+  /admin/guardrails/{rule_id}:
+    parameters:
+      - name: rule_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+
+    patch:
+      operationId: updateGuardrailRule
+      summary: Update rule text or toggle active state
+      tags: [admin, guardrails]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                rule_text:
+                  type: string
+                is_active:
+                  type: boolean
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GuardrailRule"
+
+    delete:
+      operationId: deleteGuardrailRule
+      summary: Delete a guardrail rule
+      tags: [admin, guardrails]
+      responses:
+        "204":
+          description: Rule deleted
+
+  /admin/guardrails/events:
+    get:
+      operationId: listGuardrailEvents
+      summary: Paginated guardrail audit log
+      tags: [admin, guardrails]
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+            maximum: 200
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            default: 0
+        - name: stage
+          in: query
+          schema:
+            type: string
+            enum: [input, output]
+        - name: policy_id
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - name: from
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - name: to
+          in: query
+          schema:
+            type: string
+            format: date-time
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GuardrailEventList"
+
+  /admin/llm-config:
+    get:
+      operationId: listLLMConfigs
+      summary: List all 10 LLM slot configurations
+      tags: [admin, llm]
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/LLMConfig"
+
+  /admin/llm-config/{slot_id}:
+    put:
+      operationId: updateLLMConfig
+      summary: Configure an LLM slot
+      tags: [admin, llm]
+      parameters:
+        - name: slot_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateLLMConfigRequest"
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LLMConfig"
+
+  /admin/health:
+    get:
+      operationId: getSystemHealth
+      summary: Current health status of all system components
+      tags: [admin, health]
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SystemHealth"
+
+  /admin/health/events:
+    get:
+      operationId: listHealthEvents
+      summary: FR-033 crash and restart event log
+      tags: [admin, health]
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            default: 0
+        - name: component_name
+          in: query
+          schema:
+            type: string
+        - name: event_type
+          in: query
+          schema:
+            type: string
+            enum: [crash, restart_attempt, restart_ok, restart_failed]
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthEventList"
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  schemas:
+    GuardrailRule:
+      type: object
+      required: [id, rule_text, is_active, created_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        rule_text:
+          type: string
+        is_active:
+          type: boolean
+        created_by:
+          type: string
+          format: uuid
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    GuardrailEvent:
+      type: object
+      required: [id, original_content, trigger_reason, action_taken, stage, created_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        message_id:
+          type: string
+          format: uuid
+          nullable: true
+        policy_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: "NULL for baseline protections (jailbreak/injection)"
+        original_content:
+          type: string
+        trigger_reason:
+          type: string
+        action_taken:
+          type: string
+          enum: [blocked, sanitized]
+        stage:
+          type: string
+          enum: [input, output]
+        created_at:
+          type: string
+          format: date-time
+
+    GuardrailEventList:
+      type: object
+      required: [items, total, limit, offset]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/GuardrailEvent"
+        total:
+          type: integer
+        limit:
+          type: integer
+        offset:
+          type: integer
+
+    LLMConfig:
+      type: object
+      required: [id, slot_name, provider, model_name, temperature, max_tokens, is_default, is_active]
+      properties:
+        id:
+          type: string
+          format: uuid
+        slot_name:
+          type: string
+          description: "e.g., 'default', 'fast', 'reasoning'"
+        provider:
+          type: string
+          description: "'openai' | 'anthropic' | 'azure_openai' | 'local'"
+        model_name:
+          type: string
+        temperature:
+          type: number
+          minimum: 0
+          maximum: 2
+        max_tokens:
+          type: integer
+        is_default:
+          type: boolean
+        is_active:
+          type: boolean
+        # NOTE: api_key_encrypted is NEVER returned in responses
+
+    UpdateLLMConfigRequest:
+      type: object
+      properties:
+        slot_name:
+          type: string
+        provider:
+          type: string
+        model_name:
+          type: string
+        temperature:
+          type: number
+        max_tokens:
+          type: integer
+        api_key:
+          type: string
+          nullable: true
+          description: "Write-only — set new API key. Never returned in GET responses."
+        is_default:
+          type: boolean
+        is_active:
+          type: boolean
+        extra_config:
+          type: object
+          description: "Provider-specific params (e.g., base_url for Azure)"
+          additionalProperties: true
+
+    ComponentHealth:
+      type: object
+      required: [name, status]
+      properties:
+        name:
+          type: string
+        status:
+          type: string
+          enum: [healthy, degraded, failed, unknown]
+        last_seen:
+          type: string
+          format: date-time
+          nullable: true
+        restart_count:
+          type: integer
+          description: "FR-033: consecutive restart attempts since last successful start"
+        details:
+          type: string
+          nullable: true
+
+    SystemHealth:
+      type: object
+      required: [overall_status, components, checked_at]
+      properties:
+        overall_status:
+          type: string
+          enum: [healthy, degraded, failed]
+        components:
+          type: array
+          items:
+            $ref: "#/components/schemas/ComponentHealth"
+        checked_at:
+          type: string
+          format: date-time
+
+    HealthEvent:
+      type: object
+      required: [id, component_name, event_type, timestamp]
+      properties:
+        id:
+          type: string
+          format: uuid
+        component_name:
+          type: string
+        event_type:
+          type: string
+          enum: [crash, restart_attempt, restart_ok, restart_failed]
+        attempt_number:
+          type: integer
+          nullable: true
+        error_detail:
+          type: string
+          nullable: true
+        timestamp:
+          type: string
+          format: date-time
+
+    HealthEventList:
+      type: object
+      required: [items, total, limit, offset]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/HealthEvent"
+        total:
+          type: integer
+        limit:
+          type: integer
+        offset:
+          type: integer
+
+    Problem:
+      type: object
+      required: [type, title, status, detail]
+      properties:
+        type:
+          type: string
+          format: uri
+        title:
+          type: string
+        status:
+          type: integer
+        detail:
+          type: string
+        request_id:
+          type: string

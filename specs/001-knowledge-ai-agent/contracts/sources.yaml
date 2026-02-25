@@ -1,0 +1,517 @@
+openapi: "3.1.0"
+info:
+  title: "Internal Knowledge AI Agent — Sources API"
+  version: "1.0.0"
+  description: "Source registration, inspection, sync management, and access control."
+
+servers:
+  - url: /api/v1
+
+security:
+  - bearerAuth: []
+
+paths:
+  /config/limits:
+    get:
+      operationId: getConfigLimits
+      summary: Get upload limits and supported file types (used by frontend FR-035 validation)
+      tags: [config]
+      security: []
+      responses:
+        "200":
+          description: Upload configuration
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [upload_max_size_mb, supported_file_types]
+                properties:
+                  upload_max_size_mb:
+                    type: integer
+                    description: "From app_config.yaml — default 50"
+                  supported_file_types:
+                    type: array
+                    items:
+                      type: string
+                    example: [pdf, docx, xlsx, csv, txt, md]
+
+  /sources:
+    get:
+      operationId: listSources
+      summary: List sources (all for admin; only accessible sources for user)
+      tags: [sources]
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            default: 0
+        - name: type
+          in: query
+          schema:
+            type: string
+            enum: [database, document]
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SourceList"
+
+    post:
+      operationId: createSource
+      summary: Register a new source
+      tags: [sources]
+      description: |
+        For document sources: returns a presigned MinIO PUT URL.
+        Upload the file directly to MinIO, then call POST /{source_id}/sync to ingest.
+        For database sources: triggers test_connection() and schema inspection immediately.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateSourceRequest"
+      responses:
+        "201":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SourceCreateResponse"
+        "400":
+          $ref: "#/components/responses/ValidationError"
+
+  /sources/{source_id}:
+    parameters:
+      - name: source_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+
+    get:
+      operationId: getSource
+      summary: Source detail including sync status
+      tags: [sources]
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SourceDetail"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+    patch:
+      operationId: updateSource
+      summary: Update source metadata, approve description, toggle citations
+      tags: [sources]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateSourceRequest"
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Source"
+
+    delete:
+      operationId: deleteSource
+      summary: Soft-delete source and deactivate all associated chunks
+      tags: [sources]
+      responses:
+        "204":
+          description: Source deleted
+
+  /sources/{source_id}/inspect:
+    post:
+      operationId: inspectSource
+      summary: Re-trigger source inspection (schema/content re-inspection)
+      tags: [sources]
+      description: "Returns a diff of old vs new description for admin review. Admin must PATCH is_approved=true to apply."
+      parameters:
+        - name: source_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  description_previous:
+                    type: string
+                  description_new:
+                    type: string
+
+  /sources/{source_id}/sync:
+    post:
+      operationId: triggerSync
+      summary: Trigger manual sync
+      tags: [sources]
+      parameters:
+        - name: source_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                mode:
+                  type: string
+                  enum: [full, delta]
+                  default: full
+      responses:
+        "202":
+          description: Sync job queued
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  sync_log_id:
+                    type: string
+                    format: uuid
+        "409":
+          description: Sync already in progress
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+
+  /sources/{source_id}/sync/status:
+    get:
+      operationId: getSyncStatus
+      summary: Get current sync progress for a source
+      tags: [sources]
+      parameters:
+        - name: source_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SyncStatus"
+
+  /sources/{source_id}/upload-url:
+    get:
+      operationId: getUploadUrl
+      summary: Get presigned MinIO PUT URL for file upload
+      tags: [sources]
+      parameters:
+        - name: source_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: filename
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: content_type
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [upload_url, expires_in]
+                properties:
+                  upload_url:
+                    type: string
+                    format: uri
+                    description: Presigned PUT URL — upload directly to MinIO from frontend
+                  expires_in:
+                    type: integer
+                    description: Seconds until presigned URL expires
+
+  /sources/{source_id}/access:
+    get:
+      operationId: listSourceAccess
+      summary: List users with access to this source
+      tags: [sources]
+      parameters:
+        - name: source_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/SourceAccessEntry"
+
+  /sources/{source_id}/access/{user_id}:
+    parameters:
+      - name: source_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - name: user_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+
+    put:
+      operationId: grantSourceAccess
+      summary: Grant user access to this source
+      tags: [sources]
+      responses:
+        "204":
+          description: Access granted
+
+    delete:
+      operationId: revokeSourceAccess
+      summary: Revoke user access to this source
+      tags: [sources]
+      responses:
+        "204":
+          description: Access revoked
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  schemas:
+    Source:
+      type: object
+      required: [id, name, type, mode, is_approved, citations_enabled, created_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        description:
+          type: string
+          nullable: true
+        type:
+          type: string
+          enum: [database, document]
+        mode:
+          type: string
+          enum: [live, snapshot]
+        is_approved:
+          type: boolean
+        citations_enabled:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    
+    SourceDetail:
+      allOf:
+        - $ref: "#/components/schemas/Source"
+        - type: object
+          properties:
+            sync_config:
+              $ref: "#/components/schemas/SyncConfig"
+            last_sync:
+              $ref: "#/components/schemas/SyncStatus"
+
+    SourceList:
+      type: object
+      required: [items, total, limit, offset]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Source"
+        total:
+          type: integer
+        limit:
+          type: integer
+        offset:
+          type: integer
+
+    CreateSourceRequest:
+      type: object
+      required: [name, type]
+      properties:
+        name:
+          type: string
+        type:
+          type: string
+          enum: [database, document]
+        connector_type:
+          type: string
+          enum: [postgres, mssql, mysql, mongodb, document]
+          description: Required for database sources
+        connection_config:
+          type: object
+          description: "Connection parameters — encrypted at rest. NEVER returned in responses."
+          additionalProperties: true
+        citations_enabled:
+          type: boolean
+          default: true
+        sync_mode:
+          type: string
+          enum: [manual, scheduled, delta]
+          default: manual
+        cron_expression:
+          type: string
+          nullable: true
+          description: "Required if sync_mode = scheduled"
+
+    SourceCreateResponse:
+      allOf:
+        - $ref: "#/components/schemas/Source"
+        - type: object
+          properties:
+            upload_url:
+              type: string
+              format: uri
+              nullable: true
+              description: "Presigned MinIO PUT URL for document sources"
+
+    UpdateSourceRequest:
+      type: object
+      properties:
+        name:
+          type: string
+        description:
+          type: string
+        is_approved:
+          type: boolean
+        citations_enabled:
+          type: boolean
+        sync_mode:
+          type: string
+          enum: [manual, scheduled, delta]
+        cron_expression:
+          type: string
+          nullable: true
+
+    SyncConfig:
+      type: object
+      properties:
+        mode:
+          type: string
+          enum: [manual, scheduled, delta]
+        cron_expression:
+          type: string
+          nullable: true
+        last_synced_at:
+          type: string
+          format: date-time
+          nullable: true
+
+    SyncStatus:
+      type: object
+      properties:
+        is_running:
+          type: boolean
+        progress_percent:
+          type: integer
+          minimum: 0
+          maximum: 100
+          nullable: true
+        records_processed:
+          type: integer
+          nullable: true
+        estimated_seconds_remaining:
+          type: integer
+          nullable: true
+        status:
+          type: string
+          enum: [idle, running, completed, failed]
+        last_sync_log_id:
+          type: string
+          format: uuid
+          nullable: true
+        error_detail:
+          type: string
+          nullable: true
+
+    SourceAccessEntry:
+      type: object
+      properties:
+        user_id:
+          type: string
+          format: uuid
+        email:
+          type: string
+        granted_at:
+          type: string
+          format: date-time
+        granted_by:
+          type: string
+          format: uuid
+          nullable: true
+
+    Problem:
+      type: object
+      required: [type, title, status, detail]
+      properties:
+        type:
+          type: string
+          format: uri
+        title:
+          type: string
+        status:
+          type: integer
+        detail:
+          type: string
+        request_id:
+          type: string
+
+  responses:
+    ValidationError:
+      description: Request validation failed
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"
+    NotFound:
+      description: Resource not found
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"
