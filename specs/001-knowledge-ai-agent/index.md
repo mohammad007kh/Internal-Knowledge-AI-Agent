@@ -9,7 +9,7 @@
 | T-005 | Next.js 15 App Scaffold — App Router, shadcn/ui, Tailwind, TanStack Query Provider | Phase 0 — Foundation | Done ✓ |
 | T-006 | Makefile targets (dev, test, lint, build, migrate) | Phase 0 — Foundation | Done ✓ |
 | T-007 | GitHub Actions CI Pipeline — Lint, Test, Build Gate | Phase 0 — Foundation | Done ✓ |
-| T-008 | pytest Foundation — conftest, Fixtures, Async Test Client, Test Database | Phase 0 — Foundation | Not Started |
+| T-008 | pytest Foundation — conftest, Fixtures, Async Test Client, Test Database | Phase 0 — Foundation | Done ✓ |
 | T-009 | GitHub Actions CI Pipeline — Playwright E2E Job | Phase 0 — Foundation | Not Started |
 | T-010 | Structured Logging Middleware + X-Request-ID Correlation | Phase 0 — Foundation | Not Started |
 | T-011 | RFC 7807 Error Handler + FastAPI Exception Hierarchy | Phase 0 — Foundation | Not Started |
