@@ -9,6 +9,7 @@ from src.api.middleware.error_handler import register_exception_handlers
 from src.api.middleware.logging_middleware import LoggingMiddleware
 from src.api.v1.health import router as health_router
 from src.api.v1.router import api_v1_router
+from src.middleware.rate_limit import RateLimitMiddleware
 
 
 @asynccontextmanager
@@ -32,8 +33,9 @@ def create_app() -> FastAPI:
     # ── Exception handlers (FIRST — before anything else) ──
     register_exception_handlers(app)
 
-    # ── Middleware ──
+    # ── Middleware (outermost first) ──
     app.add_middleware(LoggingMiddleware)
+    app.add_middleware(RateLimitMiddleware, redis_client=None)  # T-018 wires Redis
 
     # ── Routes ──
     app.include_router(health_router, tags=["health"])
