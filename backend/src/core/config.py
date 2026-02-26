@@ -1,0 +1,54 @@
+import os
+
+import yaml
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+class Settings(BaseSettings):
+    # Database
+    DATABASE_URL: str
+    REDIS_URL: str = "redis://localhost:6379/0"
+    # Auth
+    JWT_SECRET_KEY: str
+    JWT_REFRESH_SECRET_KEY: str
+    JWT_ALGORITHM: str = "HS256"
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 15
+    REFRESH_TOKEN_EXPIRE_DAYS: int = 7
+    # MinIO
+    MINIO_ENDPOINT: str
+    MINIO_ACCESS_KEY: str
+    MINIO_SECRET_KEY: str
+    MINIO_BUCKET: str = "knowledge-agent"
+    MINIO_SECURE: bool = False
+    # Langfuse
+    LANGFUSE_SECRET_KEY: str = ""
+    LANGFUSE_PUBLIC_KEY: str = ""
+    LANGFUSE_HOST: str = "http://localhost:3001"
+    # Bootstrap admin
+    BOOTSTRAP_ADMIN_EMAIL: str
+    BOOTSTRAP_ADMIN_PASSWORD: str
+    # Encryption
+    ENCRYPTION_KEY: str
+    # Logging
+    LOG_LEVEL: str = "info"
+    # App config (loaded from YAML)
+    upload_max_size_bytes: int = 52428800
+    upload_supported_formats: list[str] = ["pdf", "docx", "xlsx", "csv", "txt", "md"]
+
+    model_config = SettingsConfigDict(env_file=".env", case_sensitive=True)
+
+    def model_post_init(self, __context: object) -> None:
+        config_path = os.environ.get("APP_CONFIG_PATH", "app_config.yaml")
+        if os.path.exists(config_path):
+            with open(config_path) as f:
+                data = yaml.safe_load(f)
+            fu = data.get("file_upload", {})
+            if "max_size_bytes" in fu:
+                object.__setattr__(self, "upload_max_size_bytes", fu["max_size_bytes"])
+            if "supported_formats" in fu:
+                object.__setattr__(
+                    self, "upload_supported_formats", fu["supported_formats"]
+                )
+
+
+settings = Settings()
