@@ -67,6 +67,7 @@ async def bootstrap_admin() -> None:
             admin = User(
                 email=email,
                 hashed_password=hashed,
+                full_name="Admin",
                 role=UserRole.admin,
                 is_active=True,
                 must_change_password=True,

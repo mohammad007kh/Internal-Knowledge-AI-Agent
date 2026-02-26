@@ -22,7 +22,7 @@
 | T-018 | Redis Async Connection Factory and Cache Helper Utilities | Phase 0 — Foundation | Done ✓ |
 | T-019 | Celery Application Factory, Worker Dockerfile CMD, and Beat Scheduler | Phase 0 — Foundation | Done |
 | T-020 | Bootstrap First Admin Account from Environment Variables (FR-024) | Phase 0 — Foundation | Done ✓ |
-| T-021 | User & Invitation ORM Models + Alembic Migration | Phase 1 — Auth & User Management | Not Started |
+| T-021 | User & Invitation ORM Models + Alembic Migration | Phase 1 — Auth & User Management | Done ✓ |
 | T-022 | bcrypt Password Hashing Service + Validation Policy | Phase 1 — Auth & User Management | Not Started |
 | T-023 | User Repository + User Service (Business Logic Layer) | Phase 1 — Auth & User Management | Not Started |
 | T-024 | Pydantic v2 Request/Response Schemas for Auth & User Endpoints | Phase 1 — Auth & User Management | Not Started |
