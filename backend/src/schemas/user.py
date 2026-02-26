@@ -1,0 +1,49 @@
+"""Pydantic v2 schemas for user-management endpoints (T-024).
+
+Every endpoint handler MUST call ``UserResponse.model_validate(orm_obj)``
+before returning — never expose raw ORM objects.
+"""
+
+import uuid
+from datetime import datetime
+
+from pydantic import BaseModel, ConfigDict, EmailStr
+
+from src.models.user import UserRole
+
+
+# ---------------------------------------------------------------------------
+# Response
+# ---------------------------------------------------------------------------
+
+class UserResponse(BaseModel):
+    """Public representation of a user — hashed_password is never exposed."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    email: EmailStr
+    full_name: str
+    role: UserRole
+    is_active: bool
+    created_at: datetime
+
+
+class UserListResponse(BaseModel):
+    """Paginated list of users."""
+
+    items: list[UserResponse]
+    total: int
+    limit: int
+    offset: int
+
+
+# ---------------------------------------------------------------------------
+# Request
+# ---------------------------------------------------------------------------
+
+class UpdateUserRequest(BaseModel):
+    """PATCH /users/{id} body — all fields optional."""
+
+    full_name: str | None = None
+    is_active: bool | None = None

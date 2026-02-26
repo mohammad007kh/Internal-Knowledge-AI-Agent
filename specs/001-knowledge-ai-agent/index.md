@@ -25,7 +25,7 @@
 | T-021 | User & Invitation ORM Models + Alembic Migration | Phase 1 — Auth & User Management | Done ✓ |
 | T-022 | bcrypt Password Hashing Service + Validation Policy | Phase 1 — Auth & User Management | Done ✓ |
 | T-023 | User Repository + User Service (Business Logic Layer) | Phase 1 — Auth & User Management | Done ✓ |
-| T-024 | Pydantic v2 Request/Response Schemas for Auth & User Endpoints | Phase 1 — Auth & User Management | Not Started |
+| T-024 | Pydantic v2 Request/Response Schemas for Auth & User Endpoints | Phase 1 — Auth & User Management | Done ✓ |
 | T-025 | Auth Service | Phase 1 — Auth & User Management | Not Started |
 | T-026 | Auth FastAPI Router (7 endpoints) | Phase 1 — Auth & User Management | Not Started |
 | T-027 | FastAPI Auth Dependencies (`get_current_user`, `require_role`) | Phase 1 — Auth & User Management | Not Started |
