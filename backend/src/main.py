@@ -13,14 +13,17 @@ from src.api.v1.health import router as health_router
 from src.api.v1.router import api_v1_router
 from src.middleware.rate_limit import RateLimitMiddleware
 from src.middleware.security_headers import SecurityHeadersMiddleware
+from src.core.redis import init_redis, close_redis
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # Startup: wire container, run migrations, bootstrap admin
     container.wire(packages=["src.api"])
+    await init_redis()
     yield
-    # Shutdown: close DB connections
+    # Shutdown: close DB connections, close Redis
+    await close_redis()
 
 
 def create_app() -> FastAPI:
@@ -38,7 +41,7 @@ def create_app() -> FastAPI:
 
     # ── Middleware (outermost first) ──
     app.add_middleware(LoggingMiddleware)
-    app.add_middleware(RateLimitMiddleware, redis_client=None)  # T-018 wires Redis
+    app.add_middleware(RateLimitMiddleware)
     app.add_middleware(
         SecurityHeadersMiddleware,
         is_https=settings.ENVIRONMENT == "production",

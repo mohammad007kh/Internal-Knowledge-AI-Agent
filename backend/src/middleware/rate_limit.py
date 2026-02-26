@@ -11,6 +11,8 @@ from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.types import ASGIApp
 
+import src.core.redis as redis_module
+
 logger = logging.getLogger(__name__)
 
 # (route_prefix, limit, window_seconds)
@@ -43,9 +45,8 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
     Falls back to allow-all when Redis is unavailable.
     """
 
-    def __init__(self, app: ASGIApp, redis_client=None) -> None:  # noqa: ANN001
+    def __init__(self, app: ASGIApp) -> None:
         super().__init__(app)
-        self._redis = redis_client
 
     async def dispatch(self, request: Request, call_next: Callable) -> Response:
         rule = _match_rule(request.url.path)
@@ -60,10 +61,11 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
 
         remaining = limit
         reset_at = int(now) + window
+        redis = redis_module.redis_client
 
-        if self._redis is not None:
+        if redis is not None:
             try:
-                async with self._redis.pipeline(transaction=True) as pipe:
+                async with redis.pipeline(transaction=True) as pipe:
                     pipe.zremrangebyscore(key, 0, window_start)
                     pipe.zadd(key, {str(now): now})
                     pipe.zcard(key)

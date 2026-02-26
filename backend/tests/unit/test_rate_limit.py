@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import pytest
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from src.middleware.rate_limit import (
     RateLimitMiddleware,
@@ -11,6 +11,8 @@ from src.middleware.rate_limit import (
     _match_rule,
     RATE_LIMIT_RULES,
 )
+
+import src.core.redis as redis_module
 
 
 # ── Helper-function tests ──────────────────────────────────────
@@ -99,8 +101,11 @@ def _app_with_redis(_mock_redis_pipeline):
     """Build a minimal FastAPI app with RateLimitMiddleware + mock Redis."""
     from fastapi import FastAPI
 
+    original = redis_module.redis_client
+
     def _factory(count: int):
         mock_redis = _mock_redis_pipeline(count)
+        redis_module.redis_client = mock_redis
 
         inner_app = FastAPI()
 
@@ -112,10 +117,11 @@ def _app_with_redis(_mock_redis_pipeline):
         async def login():
             return {"token": "fake"}
 
-        inner_app.add_middleware(RateLimitMiddleware, redis_client=mock_redis)
+        inner_app.add_middleware(RateLimitMiddleware)
         return inner_app
 
-    return _factory
+    yield _factory
+    redis_module.redis_client = original
 
 
 @pytest.mark.asyncio
@@ -201,7 +207,7 @@ async def test_no_redis_allows_request():
     async def ping():
         return {"ping": "pong"}
 
-    test_app.add_middleware(RateLimitMiddleware, redis_client=None)
+    test_app.add_middleware(RateLimitMiddleware)
 
     async with AsyncClient(
         transport=ASGITransport(app=test_app), base_url="http://test"
@@ -233,12 +239,13 @@ async def test_redis_error_allows_request():
     async def ping():
         return {"ping": "pong"}
 
-    test_app.add_middleware(RateLimitMiddleware, redis_client=redis)
+    test_app.add_middleware(RateLimitMiddleware)
 
-    async with AsyncClient(
-        transport=ASGITransport(app=test_app), base_url="http://test"
-    ) as client:
-        resp = await client.get("/api/v1/ping")
+    with patch.object(redis_module, "redis_client", redis):
+        async with AsyncClient(
+            transport=ASGITransport(app=test_app), base_url="http://test"
+        ) as client:
+            resp = await client.get("/api/v1/ping")
 
     assert resp.status_code == 200
 
@@ -255,7 +262,7 @@ async def test_non_api_route_not_limited():
     async def health():
         return {"status": "ok"}
 
-    test_app.add_middleware(RateLimitMiddleware, redis_client=None)
+    test_app.add_middleware(RateLimitMiddleware)
 
     async with AsyncClient(
         transport=ASGITransport(app=test_app), base_url="http://test"
@@ -331,15 +338,16 @@ async def test_auth_login_11th_request_returns_429():
     async def login():
         return {"token": "fake"}
 
-    test_app.add_middleware(RateLimitMiddleware, redis_client=_FakeRedis())
+    test_app.add_middleware(RateLimitMiddleware)
 
-    async with AsyncClient(
-        transport=ASGITransport(app=test_app), base_url="http://test"
-    ) as client:
-        statuses: list[int] = []
-        for _ in range(11):
-            resp = await client.post("/api/v1/auth/login")
-            statuses.append(resp.status_code)
+    with patch.object(redis_module, "redis_client", _FakeRedis()):
+        async with AsyncClient(
+            transport=ASGITransport(app=test_app), base_url="http://test"
+        ) as client:
+            statuses: list[int] = []
+            for _ in range(11):
+                resp = await client.post("/api/v1/auth/login")
+                statuses.append(resp.status_code)
 
     # First 10 should succeed, 11th should be 429
     assert statuses[:10] == [200] * 10, f"Expected 10 successes, got {statuses[:10]}"
