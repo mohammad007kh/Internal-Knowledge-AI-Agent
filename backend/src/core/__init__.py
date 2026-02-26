@@ -15,6 +15,15 @@ from src.core.exceptions import (
     UnprocessableError,
 )
 from src.core.logging import get_logger
+from src.core.security import (
+    clear_refresh_cookie,
+    create_access_token,
+    create_refresh_token,
+    revoke_refresh_token,
+    set_refresh_cookie,
+    verify_access_token,
+    verify_refresh_token,
+)
 
 __all__ = [
     "AppError",
@@ -27,8 +36,15 @@ __all__ = [
     "ServiceUnavailableError",
     "UnauthorizedError",
     "UnprocessableError",
+    "clear_refresh_cookie",
     "container",
+    "create_access_token",
+    "create_refresh_token",
     "get_db",
     "get_logger",
+    "revoke_refresh_token",
+    "set_refresh_cookie",
     "settings",
+    "verify_access_token",
+    "verify_refresh_token",
 ]
