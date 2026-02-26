@@ -121,3 +121,4 @@ No `SC-` (success criterion) tags were found in any task file; the table below c
 | T-006 | Makefile targets (dev, test, lint, build, migrate) | Done | Y | 2026-02-26 |
 | T-007 | GitHub Actions CI (lint → test → build) | Done | Y | 2026-02-26 |
 | T-008 | pytest Foundation (async fixtures, test DB, HTTP client) | Done | Y | 2026-02-26 |
+| T-009 | Playwright E2E Scaffold (smoke tests, CI workflow) | Done | Y | 2026-02-26 |
