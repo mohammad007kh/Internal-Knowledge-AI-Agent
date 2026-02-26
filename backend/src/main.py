@@ -14,6 +14,7 @@ from src.api.v1.router import api_v1_router
 from src.middleware.rate_limit import RateLimitMiddleware
 from src.middleware.security_headers import SecurityHeadersMiddleware
 from src.core.redis import init_redis, close_redis
+from src.core.bootstrap import bootstrap_admin
 
 
 @asynccontextmanager
@@ -21,6 +22,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # Startup: wire container, run migrations, bootstrap admin
     container.wire(packages=["src.api"])
     await init_redis()
+    await bootstrap_admin()
     yield
     # Shutdown: close DB connections, close Redis
     await close_redis()

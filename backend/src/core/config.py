@@ -25,8 +25,8 @@ class Settings(BaseSettings):
     LANGFUSE_PUBLIC_KEY: str = ""
     LANGFUSE_HOST: str = "http://localhost:3001"
     # Bootstrap admin
-    BOOTSTRAP_ADMIN_EMAIL: str
-    BOOTSTRAP_ADMIN_PASSWORD: str
+    BOOTSTRAP_ADMIN_EMAIL: str | None = None
+    BOOTSTRAP_ADMIN_PASSWORD: str | None = None
     # Encryption
     ENCRYPTION_KEY: str
     # Logging
