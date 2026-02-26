@@ -131,3 +131,4 @@ No `SC-` (success criterion) tags were found in any task file; the table below c
 | T-016 | Rate Limiting Middleware (IP-based, auth endpoint stricter limits) | Done | Y | 2026-02-26 |
 | T-017 | CORS, CSRF Protection, and Security Response Headers | Done | Y | 2025-07-22 |
 | T-018 | Redis Async Connection Factory and Cache Helper Utilities | Done | Y | 2025-07-22 |
+| T-019 | Celery Application Factory, Worker Dockerfile CMD, and Beat Scheduler | Done | Y | 2025-07-22 |
