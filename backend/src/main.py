@@ -5,6 +5,7 @@ from fastapi import FastAPI
 
 from src.core.container import container
 from src.core.logging import configure_logging
+from src.api.middleware.error_handler import register_exception_handlers
 from src.api.middleware.logging_middleware import LoggingMiddleware
 from src.api.v1.health import router as health_router
 
@@ -24,6 +25,11 @@ def create_app() -> FastAPI:
         version="0.1.0",
         lifespan=lifespan,
     )
+
+    # ── Exception handlers (FIRST — before anything else) ──
+    register_exception_handlers(app)
+
+    # ── Middleware ──
     app.add_middleware(LoggingMiddleware)
     app.include_router(health_router, tags=["health"])
     return app
