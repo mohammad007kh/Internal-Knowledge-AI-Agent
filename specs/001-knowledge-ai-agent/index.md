@@ -18,7 +18,7 @@
 | T-014 | Alembic Migration Workflow — Naming Convention, Generator Script, and Upgrade-on-Startup | Phase 0 — Foundation | Done ✓ |
 | T-015 | FastAPI v1 Router Registration Pattern + Main.py Wiring | Phase 0 — Foundation | Done ✓ |
 | T-016 | Rate Limiting Middleware (IP-based, auth endpoint stricter limits) | Phase 0 — Foundation | Done ✓ |
-| T-017 | CORS, CSRF Protection, and Security Response Headers | Phase 0 — Foundation | Not Started |
+| T-017 | CORS, CSRF Protection, and Security Response Headers | Phase 0 — Foundation | Done ✓ |
 | T-018 | Redis Async Connection Factory and Cache Helper Utilities | Phase 0 — Foundation | Not Started |
 | T-019 | Celery Application Factory, Worker Dockerfile CMD, and Beat Scheduler | Phase 0 — Foundation | Not Started |
 | T-020 | Bootstrap First Admin Account from Environment Variables (FR-024) | Phase 0 — Foundation | Not Started |
