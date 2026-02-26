@@ -64,6 +64,14 @@ class InternalError(AppError):
     title = "Internal Server Error"
 
 
+class ValidationError(AppError):
+    """Business-rule validation failure (e.g. expired token)."""
+
+    status_code = 422
+    error_type = "validation_error"
+    title = "Validation Error"
+
+
 class ServiceUnavailableError(AppError):
     status_code = 503
     error_type = "service_unavailable"

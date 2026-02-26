@@ -134,3 +134,5 @@ No `SC-` (success criterion) tags were found in any task file; the table below c
 | T-019 | Celery Application Factory, Worker Dockerfile CMD, and Beat Scheduler | Done | Y | 2025-07-22 |
 | T-020 | Bootstrap First Admin Account from Environment Variables (FR-024) | Done | Y | 2025-07-22 |
 | T-021 | User & Invitation ORM Models + Alembic Migration | Done | Y | 2025-07-24 |
+| T-022 | bcrypt Password Hashing Service + Validation Policy | Done | Y | 2025-07-24 |
+| T-023 | User Repository + User Service (Business Logic Layer) | Done | Y | 2025-07-24 |
