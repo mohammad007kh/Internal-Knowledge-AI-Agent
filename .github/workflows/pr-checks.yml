@@ -1,0 +1,18 @@
+name: PR Checks
+
+on:
+  pull_request:
+    types: [opened, edited, synchronize]
+
+jobs:
+  title-format:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate PR title (conventional commits)
+        run: |
+          TITLE="${{ github.event.pull_request.title }}"
+          echo "PR title: $TITLE"
+          echo "$TITLE" | grep -qE '^(feat|fix|chore|docs|test|refactor|style|ci)\(.+\): .+' \
+            && echo "Title OK" \
+            || (echo "ERROR: PR title must match: type(scope): description" && exit 1)
