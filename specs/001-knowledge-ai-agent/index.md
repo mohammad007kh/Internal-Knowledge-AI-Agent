@@ -12,7 +12,7 @@
 | T-008 | pytest Foundation — conftest, Fixtures, Async Test Client, Test Database | Phase 0 — Foundation | Done ✓ |
 | T-009 | GitHub Actions CI Pipeline — Playwright E2E Job | Phase 0 — Foundation | Done ✓ |
 | T-010 | Structured Logging Middleware + X-Request-ID Correlation | Phase 0 — Foundation | Done ✓ |
-| T-011 | RFC 7807 Error Handler + FastAPI Exception Hierarchy | Phase 0 — Foundation | Not Started |
+| T-011 | RFC 7807 Error Handler + FastAPI Exception Hierarchy | Phase 0 — Foundation | Done ✓ |
 | T-012 | JWT Utility — 15-min Access Token + 7-day Rotating httpOnly Refresh Cookie | Phase 0 — Foundation | Not Started |
 | T-013 | Base ORM Models — TimestampMixin, SoftDeleteMixin, UUIDMixin, and Common Patterns | Phase 0 — Foundation | Not Started |
 | T-014 | Alembic Migration Workflow — Naming Convention, Generator Script, and Upgrade-on-Startup | Phase 0 — Foundation | Not Started |
