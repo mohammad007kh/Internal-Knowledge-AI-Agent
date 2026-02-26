@@ -15,7 +15,7 @@ from src.core.bootstrap import bootstrap_admin
 
 def _mock_settings(
     email: str | None = "admin@example.com",
-    password: str | None = "Admin1234",
+    password: str | None = "Admin1234!",
 ) -> MagicMock:
     """Return a mock ``settings`` object with bootstrap credentials."""
     s = MagicMock()
@@ -70,7 +70,7 @@ async def test_bootstrap_creates_admin_when_no_users(
 ) -> None:
     """First run: table is empty → admin row must be inserted."""
     mock_settings.BOOTSTRAP_ADMIN_EMAIL = "admin@example.com"
-    mock_settings.BOOTSTRAP_ADMIN_PASSWORD = "Admin1234"
+    mock_settings.BOOTSTRAP_ADMIN_PASSWORD = "Admin1234!"
 
     session = _mock_session(user_count=0)
     real_factory = _mock_session_factory(session)
@@ -94,7 +94,7 @@ async def test_bootstrap_skips_when_users_exist(
 ) -> None:
     """Second run: users already present → nothing created."""
     mock_settings.BOOTSTRAP_ADMIN_EMAIL = "admin@example.com"
-    mock_settings.BOOTSTRAP_ADMIN_PASSWORD = "Admin1234"
+    mock_settings.BOOTSTRAP_ADMIN_PASSWORD = "Admin1234!"
 
     session = _mock_session(user_count=1)
     real_factory = _mock_session_factory(session)
@@ -131,5 +131,5 @@ async def test_bootstrap_raises_on_weak_password(
     mock_settings.BOOTSTRAP_ADMIN_EMAIL = "admin@example.com"
     mock_settings.BOOTSTRAP_ADMIN_PASSWORD = "weak"
 
-    with pytest.raises(ValueError, match="Password policy violation"):
+    with pytest.raises(ValueError, match="Password must be at least 8 characters"):
         await bootstrap_admin()

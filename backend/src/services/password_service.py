@@ -1,25 +1,33 @@
-"""Password hashing and policy validation service.
+"""Password hashing and policy validation service (T-022).
 
-Stub created by T-020 (bootstrap admin).  Will be fully implemented in T-022.
+This is the **only** place in the codebase where passwords are hashed or
+validated.  No other module should import ``bcrypt`` directly.
 """
 
 import re
 
 import bcrypt
 
+_SPECIAL_CHARS = r"!@#$%^&*()\-_=+\[\]{}|;:',.<>?/"
+"""Regex character-class fragment listing allowed special characters."""
+
+_BCRYPT_ROUNDS = 12
+"""Work-factor used for bcrypt hashing (cost = 12)."""
+
 
 class PasswordService:
     """Centralised password operations — hash, verify, and policy checks.
 
     This is the **only** place in the codebase where passwords are hashed or
-    validated.  No other module should call bcrypt / passlib directly.
+    validated.  No other module should call ``bcrypt`` directly.
     """
 
     @staticmethod
     def hash_password(password: str) -> str:
-        """Return a bcrypt hash of *password*."""
+        """Return a bcrypt hash of *password* using cost-factor 12."""
         return bcrypt.hashpw(
-            password.encode("utf-8"), bcrypt.gensalt()
+            password.encode("utf-8"),
+            bcrypt.gensalt(rounds=_BCRYPT_ROUNDS),
         ).decode("utf-8")
 
     @staticmethod
@@ -31,20 +39,38 @@ class PasswordService:
 
     @staticmethod
     def validate_password_policy(password: str) -> None:
-        """Raise ``ValueError`` if *password* does not meet policy (FR-034).
+        """Raise ``ValueError`` if *password* does not meet policy.
 
-        Policy: min 8 chars, ≥1 uppercase, ≥1 lowercase, ≥1 digit.
+        Policy (FR-AUTH-1 / FR-AUTH-3):
+
+        * Length between 8 and 128 characters (inclusive).
+        * At least one uppercase letter.
+        * At least one digit.
+        * At least one special character from
+          ``!@#$%^&*()-_=+[]{}|;:',.<>?/``.
+
+        When used inside a Pydantic ``field_validator``, the ``ValueError``
+        is automatically converted to a ``ValidationError`` with a
+        field-level error message.
         """
         errors: list[str] = []
+
         if len(password) < 8:
-            errors.append("at least 8 characters")
+            errors.append("Password must be at least 8 characters.")
+        if len(password) > 128:
+            errors.append("Password must not exceed 128 characters.")
         if not re.search(r"[A-Z]", password):
-            errors.append("at least one uppercase letter")
-        if not re.search(r"[a-z]", password):
-            errors.append("at least one lowercase letter")
-        if not re.search(r"\d", password):
-            errors.append("at least one digit")
-        if errors:
-            raise ValueError(
-                f"Password policy violation: {', '.join(errors)}"
+            errors.append(
+                "Password must contain at least one uppercase letter."
             )
+        if not re.search(r"\d", password):
+            errors.append(
+                "Password must contain at least one digit."
+            )
+        if not re.search(rf"[{_SPECIAL_CHARS}]", password):
+            errors.append(
+                "Password must contain at least one special character."
+            )
+
+        if errors:
+            raise ValueError(errors[0])
