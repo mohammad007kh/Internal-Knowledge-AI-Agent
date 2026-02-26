@@ -31,6 +31,9 @@ class Settings(BaseSettings):
     ENCRYPTION_KEY: str
     # Logging
     LOG_LEVEL: str = "info"
+    # Security / CORS
+    FRONTEND_URL: str = "http://localhost:3000"
+    ENVIRONMENT: str = "development"
     # App config (loaded from YAML)
     upload_max_size_bytes: int = 52428800
     upload_supported_formats: list[str] = ["pdf", "docx", "xlsx", "csv", "txt", "md"]
