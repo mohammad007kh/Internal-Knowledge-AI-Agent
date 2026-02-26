@@ -2,12 +2,12 @@
 
 | ID | Title | Phase | Status |
 |---|---|---|---|
-| T-001 | Project Scaffolding — Directory Structure, Tooling Configuration, and Monorepo Root | Phase 0 — Foundation | Not Started |
-| T-002 | Docker Compose 9-Service Configuration with Healthchecks | Phase 0 — Foundation | Not Started |
-| T-003 | PostgreSQL + pgvector Init, Alembic Baseline Migration, and DB Healthcheck | Phase 0 — Foundation | Not Started |
-| T-004 | FastAPI Application Factory, Dependency Injection Container, and Core Settings | Phase 0 — Foundation | Not Started |
-| T-005 | Next.js 15 App Scaffold — App Router, shadcn/ui, Tailwind, TanStack Query Provider | Phase 0 — Foundation | Not Started |
-| T-006 | Makefile targets (dev, test, lint, build, migrate) | Phase 0 — Foundation | Not Started |
+| T-001 | Project Scaffolding — Directory Structure, Tooling Configuration, and Monorepo Root | Phase 0 — Foundation | Done ✓ |
+| T-002 | Docker Compose 9-Service Configuration with Healthchecks | Phase 0 — Foundation | Done ✓ |
+| T-003 | PostgreSQL + pgvector Init, Alembic Baseline Migration, and DB Healthcheck | Phase 0 — Foundation | Done ✓ |
+| T-004 | FastAPI Application Factory, Dependency Injection Container, and Core Settings | Phase 0 — Foundation | Done ✓ |
+| T-005 | Next.js 15 App Scaffold — App Router, shadcn/ui, Tailwind, TanStack Query Provider | Phase 0 — Foundation | Done ✓ |
+| T-006 | Makefile targets (dev, test, lint, build, migrate) | Phase 0 — Foundation | Done ✓ |
 | T-007 | GitHub Actions CI Pipeline — Lint, Test, Build Gate | Phase 0 — Foundation | Not Started |
 | T-008 | pytest Foundation — conftest, Fixtures, Async Test Client, Test Database | Phase 0 — Foundation | Not Started |
 | T-009 | GitHub Actions CI Pipeline — Playwright E2E Job | Phase 0 — Foundation | Not Started |

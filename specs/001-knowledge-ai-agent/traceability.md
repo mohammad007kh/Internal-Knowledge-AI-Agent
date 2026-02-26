@@ -106,3 +106,16 @@ No `SC-` (success criterion) tags were found in any task file; the table below c
 | SC references found | 0 |
 | Requirements with broadest task coverage | FR-019 (21 tasks), FR-020 (21 tasks), FR-033 (16 tasks) |
 | Final gate task | T-099 — depends on all Phase 9 tasks; blocks nothing |
+
+---
+
+## 4. Implementation Status
+
+| ID | Title | Status | Verified | Completed |
+|---|---|---|---|---|
+| T-001 | Project Scaffolding — Directory Structure, Tooling Configuration, and Monorepo Root | Done | Y | 2025-07-14 |
+| T-002 | Docker Compose — 9-Service Stack | Done | Y | 2025-07-14 |
+| T-003 | PostgreSQL + pgvector Init, Alembic Baseline Migration, and DB Healthcheck | Done | Y | 2025-07-14 |
+| T-004 | FastAPI Application Factory, Dependency Injection Container, and Core Settings | Done | Y | 2025-07-14 |
+| T-005 | Next.js 15 App Scaffold — App Router, shadcn/ui, Tailwind, TanStack Query Provider | Done | Y | 2026-02-26 |
+| T-006 | Makefile targets (dev, test, lint, build, migrate) | Done | Y | 2026-02-26 |
