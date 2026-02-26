@@ -126,3 +126,4 @@ No `SC-` (success criterion) tags were found in any task file; the table below c
 | T-011 | RFC 7807 Error Handler + AppError Exception Hierarchy | Done | Y | 2026-02-26 |
 | T-012 | JWT Utility — Access Token + Rotating httpOnly Refresh Cookie | Done | Y | 2026-02-26 |
 | T-013 | Base ORM Models — TimestampMixin, SoftDeleteMixin, UUIDMixin + BaseRepository | Done | Y | 2026-02-26 |
+| T-014 | Alembic Migration Workflow — Naming, Startup, FR Template | Done | Y | 2025-07-22 |
