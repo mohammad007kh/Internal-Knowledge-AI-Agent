@@ -28,7 +28,7 @@ Format 1 tasks (T-001–T-005, T-007–T-010, T-012–T-024) and Format 3 tasks 
 | T-027 | FastAPI Auth Dependencies (`get_current_user`, `require_role`) | T-012, T-023, T-025 | T-026, T-028, T-030, T-053, T-064, T-070 | Done ✓ |
 | T-028 | Users FastAPI Router (CRUD + Invitation) | T-015, T-023, T-024, T-027, T-029 | T-030, T-036 | Done ✓ |
 | T-029 | Email Service (Invitation + Password Reset) | T-004 | T-026, T-028, T-030 |
-| T-030 | Frontend Auth Pages (Login, Setup, Password Reset) | T-005, T-026, T-031, T-032 | T-036, T-038 |
+| T-030 | Frontend Auth Pages (Login, Setup, Password Reset) | T-005, T-026, T-031, T-032 | T-036, T-038 | Done ✓ |
 | T-031 | Frontend Auth TanStack Query Hooks | T-005, T-025, T-026, T-032 | T-030, T-033, T-038 | Done ✓ |
 | T-032 | Frontend Auth React Context (`useAuth`) | T-005, T-031 | T-030, T-033, T-038 | Done ✓ |
 | T-033 | Admin Users Page (Frontend) | T-028, T-031, T-032, T-038 | T-036, T-039 |
@@ -142,6 +142,7 @@ No `SC-` (success criterion) tags were found in any task file; the table below c
 | T-027 | Auth Dependencies – Container Wiring & require_authenticated | Done | Y | 2025-07-27 |
 | T-028 | Users FastAPI Router (CRUD + Invitation) | Done | Y | 2025-07-28 |
 | T-029 | Email Service (Invitation + Password Reset) | Done | Y | 2025-07-27 |
+| T-030 | Frontend Auth Pages (Login, Setup, Password Reset) | Done | Y | 2025-07-28 |
 | T-031 | Frontend Auth TanStack Query Hooks | Done | Y | 2025-07-28 |
 | T-032 | Frontend Auth React Context (`useAuth`) | Done | Y | 2025-07-28 |
 | T-035 | Auth Integration Tests (Backend) | Done | Y | 2025-07-28 |
