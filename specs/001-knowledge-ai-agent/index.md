@@ -36,7 +36,7 @@
 | T-032 | Frontend Auth React Context (`useAuth`) | Phase 1 — Auth & User Management | Not Started |
 | T-033 | Admin Users Page (Frontend) | Phase 1 — Auth & User Management | Not Started |
 | T-034 | Change-Password Page (Frontend) | Phase 1 — Auth & User Management | Not Started |
-| T-035 | Auth Integration Tests (Backend) | Phase 1 — Auth & User Management | Not Started |
+| T-035 | Auth Integration Tests (Backend) | Phase 1 — Auth & User Management | Done ✓ |
 | T-036 | Playwright E2E: Auth Flows | Phase 1 — Auth & User Management | Not Started |
 | T-037 | Router Wiring and Container Registration (Phase 1 Completion) | Phase 1 — Auth & User Management | Not Started |
 | T-038 | Next.js Middleware for Auth Route Protection | Phase 1 — Auth & User Management | Not Started |

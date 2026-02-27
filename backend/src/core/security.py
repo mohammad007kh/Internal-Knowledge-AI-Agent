@@ -170,7 +170,7 @@ def set_refresh_cookie(response: Response, token: str) -> None:
         value=token,
         httponly=True,
         samesite="strict",
-        secure=True,
+        secure=settings.COOKIE_SECURE,
         max_age=settings.REFRESH_TOKEN_EXPIRE_DAYS * 86400,
         path="/api/v1/auth",
     )
@@ -192,7 +192,7 @@ def set_csrf_cookie(response: Response, token: str) -> None:
         value=token,
         httponly=False,
         samesite="strict",
-        secure=True,
+        secure=settings.COOKIE_SECURE,
         max_age=settings.REFRESH_TOKEN_EXPIRE_DAYS * 86400,
         path="/",
     )

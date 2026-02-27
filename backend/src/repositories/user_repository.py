@@ -52,3 +52,14 @@ class UserRepository(BaseRepository[User]):
         )
         result = await self._session.execute(stmt)
         return result.scalar_one_or_none()
+
+    async def count_active(self) -> int:
+        """Return the number of active, non-deleted users."""
+        stmt = (
+            select(func.count())
+            .select_from(User)
+            .where(User.is_active.is_(True))
+            .where(User.deleted_at.is_(None))
+        )
+        result = await self._session.execute(stmt)
+        return result.scalar_one()

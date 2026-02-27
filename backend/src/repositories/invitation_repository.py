@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import uuid
 from datetime import datetime, timezone
 
 from sqlalchemy import select, update
@@ -33,3 +34,26 @@ class InvitationRepository(BaseRepository[Invitation]):
         )
         result = await self._session.execute(stmt)
         return result.scalar_one_or_none()
+
+    async def get_pending_by_email(self, email: str) -> Invitation | None:
+        """Return the pending (not accepted, not expired) invitation for *email*."""
+        now = datetime.now(timezone.utc)
+        stmt = (
+            select(Invitation)
+            .where(Invitation.email == email.lower())
+            .where(Invitation.accepted_at.is_(None))
+            .where(Invitation.expires_at > now)
+            .order_by(Invitation.created_at.desc())
+            .limit(1)
+        )
+        result = await self._session.execute(stmt)
+        return result.scalar_one_or_none()
+
+    async def revoke_pending(self, invitation_id: uuid.UUID) -> None:
+        """Revoke a pending invitation by expiring it immediately."""
+        stmt = (
+            update(Invitation)
+            .where(Invitation.id == invitation_id)
+            .values(expires_at=datetime.now(timezone.utc))
+        )
+        await self._session.execute(stmt)

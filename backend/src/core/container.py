@@ -6,6 +6,7 @@ from src.repositories.invitation_repository import InvitationRepository
 from src.repositories.refresh_token_repository import RefreshTokenRepository
 from src.repositories.user_repository import UserRepository
 from src.services.auth_service import AuthService
+from src.services.email_service import EmailService
 from src.services.password_service import PasswordService
 from src.services.user_service import UserService
 
@@ -25,11 +26,14 @@ class Container(containers.DeclarativeContainer):
 
     # ── Services ────────────────────────────────────────────────────
     password_service = providers.Factory(PasswordService)
+    email_service = providers.Factory(EmailService)
     user_service = providers.Factory(
         UserService,
         user_repo=user_repo,
         invitation_repo=invitation_repo,
         password_service=password_service,
+        refresh_token_repo=refresh_token_repo,
+        email_service=email_service,
     )
     auth_service = providers.Factory(
         AuthService,

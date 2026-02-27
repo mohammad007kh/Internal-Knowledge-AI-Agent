@@ -141,3 +141,4 @@ No `SC-` (success criterion) tags were found in any task file; the table below c
 | T-026 | Auth Router – Login, Refresh, Logout, Setup & Password Flows | Done | Y | 2025-07-27 |
 | T-027 | Auth Dependencies – Container Wiring & require_authenticated | Done | Y | 2025-07-27 |
 | T-029 | Email Service (Invitation + Password Reset) | Done | Y | 2025-07-27 |
+| T-035 | Auth Integration Tests (Backend) | Done | Y | 2025-07-28 |

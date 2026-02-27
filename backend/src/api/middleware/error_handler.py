@@ -16,6 +16,20 @@ logger = logging.getLogger(__name__)
 _PROBLEM_CONTENT_TYPE = "application/problem+json"
 
 
+def _sanitize_validation_errors(errors: list) -> list:
+    """Convert non-JSON-serializable Exception objects in Pydantic v2 ctx to strings."""
+    sanitized = []
+    for err in errors:
+        e = dict(err)
+        if "ctx" in e and isinstance(e["ctx"], dict):
+            e["ctx"] = {
+                k: str(v) if isinstance(v, Exception) else v
+                for k, v in e["ctx"].items()
+            }
+        sanitized.append(e)
+    return sanitized
+
+
 def _problem_response(
     *,
     type_: str,
@@ -72,7 +86,7 @@ def register_exception_handlers(app: "FastAPI") -> None:
             status=422,
             detail="Request body or parameters failed validation.",
             instance=str(request.url.path),
-            extra={"errors": exc.errors()},
+            extra={"errors": _sanitize_validation_errors(exc.errors())},
         )
 
     @app.exception_handler(404)

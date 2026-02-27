@@ -3,6 +3,7 @@ import secrets
 from typing import Callable
 
 from fastapi import Request, Response
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.types import ASGIApp
@@ -16,6 +17,9 @@ CSRF_COOKIE = "csrf_token"
 CSRF_EXEMPT_PREFIXES = [
     "/api/v1/auth/login",
     "/api/v1/auth/refresh",
+    "/api/v1/auth/setup",
+    "/api/v1/auth/password-reset",
+    "/api/v1/auth/password-reset/confirm",
     "/health",
     "/docs",
     "/openapi.json",
@@ -78,7 +82,13 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
                     media_type="application/problem+json",
                 )
 
-        response = await call_next(request)
+        try:
+            response = await call_next(request)
+        except RequestValidationError as exc:
+            return JSONResponse(
+                status_code=422,
+                content={"status": 422, "type": "validation_error", "detail": exc.errors()},
+            )
 
         # ── Security headers ──
         for header, value in SECURITY_HEADERS.items():

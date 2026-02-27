@@ -100,30 +100,40 @@ def _make_invitation(
 
 @pytest.fixture()
 def mocks():
-    """Return a tuple of (user_repo, invitation_repo, password_service)
+    """Return a 5-tuple of
+    (user_repo, invitation_repo, password_service,
+     refresh_token_repo, email_service)
     wired with sensible async defaults."""
     user_repo = MagicMock()
     user_repo.get_by_email = AsyncMock(return_value=None)
     user_repo.create = AsyncMock(side_effect=lambda **kw: SimpleNamespace(**kw, id=uuid.uuid4()))
     user_repo.set_active = AsyncMock(return_value=None)
     user_repo.list_active = AsyncMock(return_value=[])
+    user_repo.count_active = AsyncMock(return_value=0)
 
     inv_repo = MagicMock()
     inv_repo.get_by_token = AsyncMock(return_value=None)
     inv_repo.create = AsyncMock(side_effect=lambda **kw: SimpleNamespace(**kw, id=uuid.uuid4()))
     inv_repo.mark_accepted = AsyncMock(return_value=None)
+    inv_repo.get_pending_by_email = AsyncMock(return_value=None)
 
     pw_svc = MagicMock()
     pw_svc.validate_password_policy = MagicMock(return_value=None)  # no-op by default
     pw_svc.hash_password = MagicMock(return_value="$2b$12$hashed_value_here")
 
-    return user_repo, inv_repo, pw_svc
+    refresh_repo = MagicMock()
+    refresh_repo.revoke_all_for_user = AsyncMock(return_value=None)
+
+    email_svc = MagicMock()
+    email_svc.send_invitation = AsyncMock(return_value=None)
+
+    return user_repo, inv_repo, pw_svc, refresh_repo, email_svc
 
 
 @pytest.fixture()
 def service(mocks):
-    user_repo, inv_repo, pw_svc = mocks
-    return UserService(user_repo, inv_repo, pw_svc)
+    user_repo, inv_repo, pw_svc, refresh_repo, email_svc = mocks
+    return UserService(user_repo, inv_repo, pw_svc, refresh_repo, email_svc)
 
 
 # ---------------------------------------------------------------------------
@@ -136,7 +146,7 @@ class TestRegister:
 
     @pytest.mark.asyncio
     async def test_happy_path_creates_user(self, service, mocks) -> None:
-        user_repo, _, pw_svc = mocks
+        user_repo, _, pw_svc, _, _ = mocks
         user = await service.register("Alice@Example.COM", VALID_PASSWORD, "Alice")
 
         pw_svc.validate_password_policy.assert_called_once_with(VALID_PASSWORD)
@@ -150,7 +160,7 @@ class TestRegister:
 
     @pytest.mark.asyncio
     async def test_duplicate_email_raises_conflict(self, service, mocks) -> None:
-        user_repo, _, _ = mocks
+        user_repo, _, _, _, _ = mocks
         user_repo.get_by_email.return_value = _make_user()
 
         with pytest.raises(ConflictError, match="already registered"):
@@ -158,7 +168,7 @@ class TestRegister:
 
     @pytest.mark.asyncio
     async def test_weak_password_raises_value_error(self, service, mocks) -> None:
-        _, _, pw_svc = mocks
+        _, _, pw_svc, _, _ = mocks
         pw_svc.validate_password_policy.side_effect = ValueError("too short")
 
         with pytest.raises(ValueError, match="too short"):
@@ -175,10 +185,10 @@ class TestInvite:
 
     @pytest.mark.asyncio
     async def test_happy_path_creates_invitation(self, service, mocks) -> None:
-        user_repo, inv_repo, _ = mocks
+        user_repo, inv_repo, _, _, email_svc = mocks
         admin = _make_user(role=UserRole.admin)
 
-        invitation = await service.invite(admin, "newbie@example.com", UserRole.user)
+        invitation, raw_token = await service.invite(admin, "newbie@example.com", UserRole.user)
 
         inv_repo.create.assert_awaited_once()
         call_kwargs = inv_repo.create.call_args.kwargs
@@ -187,6 +197,8 @@ class TestInvite:
         assert call_kwargs["invited_by"] == admin.id
         assert "token" in call_kwargs
         assert "expires_at" in call_kwargs
+        assert isinstance(raw_token, str)
+        email_svc.send_invitation.assert_awaited_once_with("newbie@example.com", raw_token)
 
     @pytest.mark.asyncio
     async def test_non_admin_raises_forbidden(self, service) -> None:
@@ -197,7 +209,7 @@ class TestInvite:
 
     @pytest.mark.asyncio
     async def test_existing_email_raises_conflict(self, service, mocks) -> None:
-        user_repo, _, _ = mocks
+        user_repo, _, _, _, _ = mocks
         admin = _make_user(role=UserRole.admin)
         user_repo.get_by_email.return_value = _make_user(email="existing@example.com")
 
@@ -206,7 +218,7 @@ class TestInvite:
 
     @pytest.mark.asyncio
     async def test_invitation_expiry_is_7_days(self, service, mocks) -> None:
-        _, inv_repo, _ = mocks
+        _, inv_repo, _, _, _ = mocks
         admin = _make_user(role=UserRole.admin)
         before = datetime.now(timezone.utc)
 
@@ -229,7 +241,7 @@ class TestAcceptInvitation:
 
     @pytest.mark.asyncio
     async def test_happy_path_creates_user(self, service, mocks) -> None:
-        _, inv_repo, pw_svc = mocks
+        _, inv_repo, pw_svc, _, _ = mocks
         invitation = _make_invitation(token="valid-tok")
         inv_repo.get_by_token.return_value = invitation
 
@@ -241,7 +253,7 @@ class TestAcceptInvitation:
 
     @pytest.mark.asyncio
     async def test_unknown_token_raises_not_found(self, service, mocks) -> None:
-        _, inv_repo, _ = mocks
+        _, inv_repo, _, _, _ = mocks
         inv_repo.get_by_token.return_value = None
 
         with pytest.raises(NotFoundError, match="not found"):
@@ -249,7 +261,7 @@ class TestAcceptInvitation:
 
     @pytest.mark.asyncio
     async def test_already_used_raises_conflict(self, service, mocks) -> None:
-        _, inv_repo, _ = mocks
+        _, inv_repo, _, _, _ = mocks
         inv = _make_invitation(accepted_at=datetime.now(timezone.utc))
         inv_repo.get_by_token.return_value = inv
 
@@ -258,7 +270,7 @@ class TestAcceptInvitation:
 
     @pytest.mark.asyncio
     async def test_expired_token_raises_validation_error(self, service, mocks) -> None:
-        _, inv_repo, _ = mocks
+        _, inv_repo, _, _, _ = mocks
         inv = _make_invitation(expired=True)
         inv_repo.get_by_token.return_value = inv
 
@@ -267,7 +279,7 @@ class TestAcceptInvitation:
 
     @pytest.mark.asyncio
     async def test_weak_password_raises_value_error(self, service, mocks) -> None:
-        _, inv_repo, pw_svc = mocks
+        _, inv_repo, pw_svc, _, _ = mocks
         inv = _make_invitation()
         inv_repo.get_by_token.return_value = inv
         pw_svc.validate_password_policy.side_effect = ValueError("too short")
@@ -286,13 +298,14 @@ class TestDeactivateUser:
 
     @pytest.mark.asyncio
     async def test_happy_path_delegates_to_repo(self, service, mocks) -> None:
-        user_repo, _, _ = mocks
+        user_repo, _, _, refresh_repo, _ = mocks
         admin = _make_user(role=UserRole.admin)
         target_id = uuid.uuid4()
 
         await service.deactivate_user(admin, target_id)
 
         user_repo.set_active.assert_awaited_once_with(target_id, False)
+        refresh_repo.revoke_all_for_user.assert_awaited_once_with(target_id)
 
     @pytest.mark.asyncio
     async def test_non_admin_raises_forbidden(self, service) -> None:
@@ -312,15 +325,18 @@ class TestListUsers:
 
     @pytest.mark.asyncio
     async def test_happy_path_returns_list(self, service, mocks) -> None:
-        user_repo, _, _ = mocks
+        user_repo, _, _, _, _ = mocks
         users = [_make_user(), _make_user(email="bob@example.com")]
         user_repo.list_active.return_value = users
+        user_repo.count_active.return_value = 2
         admin = _make_user(role=UserRole.admin)
 
-        result = await service.list_users(admin, limit=10, offset=0)
+        result, total = await service.list_users(admin, limit=10, offset=0)
 
         assert result == users
+        assert total == 2
         user_repo.list_active.assert_awaited_once_with(limit=10, offset=0)
+        user_repo.count_active.assert_awaited_once()
 
     @pytest.mark.asyncio
     async def test_non_admin_raises_forbidden(self, service) -> None:

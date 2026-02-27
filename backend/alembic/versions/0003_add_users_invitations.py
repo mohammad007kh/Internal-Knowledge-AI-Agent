@@ -18,7 +18,7 @@ from sqlalchemy.dialects import postgresql
 
 # Revision identifiers — used by Alembic to chain migrations.
 revision: str = "0003"
-down_revision: str | None = "0002"
+down_revision: str | None = "0001"
 branch_labels = None
 depends_on = None
 

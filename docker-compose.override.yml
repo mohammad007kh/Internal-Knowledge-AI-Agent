@@ -2,6 +2,10 @@
 # This file is automatically merged by `docker compose up`
 # Do NOT commit secrets or prod-only settings here.
 services:
+  db:
+    ports:
+      - "5434:5432"
+
   backend:
     volumes:
       - ./backend/src:/app/src

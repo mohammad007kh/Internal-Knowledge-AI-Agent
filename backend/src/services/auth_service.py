@@ -11,7 +11,7 @@ import secrets
 from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
-from src.core.exceptions import ForbiddenError, NotFoundError, UnauthorizedError
+from src.core.exceptions import BadRequestError, ForbiddenError, NotFoundError, UnauthorizedError
 from src.core.security import create_access_token
 from src.repositories.refresh_token_repository import RefreshTokenRepository
 from src.repositories.user_repository import UserRepository
@@ -56,7 +56,7 @@ class AuthService:
             raise UnauthorizedError("Invalid email or password")
 
         if not user.is_active:
-            raise ForbiddenError("Account is disabled")
+            raise UnauthorizedError("Account is disabled")
 
         return await self._issue_tokens(user)
 
@@ -174,7 +174,7 @@ class AuthService:
         if not self._password_svc.verify_password(
             current_password, user.hashed_password
         ):
-            raise UnauthorizedError("Current password is incorrect")
+            raise BadRequestError("Current password is incorrect")
 
         hashed = self._password_svc.hash_password(new_password)
         await self._user_repo.update(

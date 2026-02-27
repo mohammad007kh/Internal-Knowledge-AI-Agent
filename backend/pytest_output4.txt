@@ -1,0 +1,156 @@
+﻿============================= test session starts =============================
+platform win32 -- Python 3.11.7, pytest-9.0.2, pluggy-1.6.0
+rootdir: D:\Projects\Internal Knowledge AI Agent\backend
+configfile: pyproject.toml
+plugins: anyio-4.12.1, Faker-40.5.1, langsmith-0.7.7, asyncio-1.3.0, cov-7.0.0
+asyncio: mode=Mode.AUTO, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collected 19 items
+
+tests\integration\test_auth_login.py ....                                [ 21%]
+tests\integration\test_auth_password.py .....F                           [ 52%]
+tests\integration\test_auth_refresh_logout.py ...                        [ 68%]
+tests\integration\test_users_router.py ......                            [100%]
+
+================================== FAILURES ===================================
+________________ TestInvitationSetup.test_setup_weak_password _________________
+..\.venv\Lib\site-packages\starlette\_exception_handler.py:42: in wrapped_app
+    await app(scope, receive, sender)
+..\.venv\Lib\site-packages\fastapi\routing.py:105: in app
+    response = await f(request)
+               ^^^^^^^^^^^^^^^^
+..\.venv\Lib\site-packages\fastapi\routing.py:489: in app
+    raise validation_error
+E   fastapi.exceptions.RequestValidationError: 1 validation error:
+E     {'type': 'value_error', 'loc': ('body', 'password'), 'msg': 'Value error, Password must be at least 8 characters.', 'input': 'weak', 'ctx': {'error': ValueError('Password must be at least 8 characters.')}}
+E   
+E     File "D:\Projects\Internal Knowledge AI Agent\backend\src\api\v1\auth.py", line 125, in setup
+E       POST /api/v1/auth/setup
+
+The above exception was the direct cause of the following exception:
+tests\integration\test_auth_password.py:78: in test_setup_weak_password
+    resp = await client.post(
+..\.venv\Lib\site-packages\httpx\_client.py:1859: in post
+    return await self.request(
+..\.venv\Lib\site-packages\httpx\_client.py:1540: in request
+    return await self.send(request, auth=auth, follow_redirects=follow_redirects)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+..\.venv\Lib\site-packages\httpx\_client.py:1629: in send
+    response = await self._send_handling_auth(
+..\.venv\Lib\site-packages\httpx\_client.py:1657: in _send_handling_auth
+    response = await self._send_handling_redirects(
+..\.venv\Lib\site-packages\httpx\_client.py:1694: in _send_handling_redirects
+    response = await self._send_single_request(request)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+..\.venv\Lib\site-packages\httpx\_client.py:1730: in _send_single_request
+    response = await transport.handle_async_request(request)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+..\.venv\Lib\site-packages\httpx\_transports\asgi.py:170: in handle_async_request
+    await self.app(scope, receive, send)
+..\.venv\Lib\site-packages\fastapi\applications.py:1160: in __call__
+    await super().__call__(scope, receive, send)
+..\.venv\Lib\site-packages\starlette\applications.py:107: in __call__
+    await self.middleware_stack(scope, receive, send)
+..\.venv\Lib\site-packages\starlette\middleware\errors.py:186: in __call__
+    raise exc
+..\.venv\Lib\site-packages\starlette\middleware\errors.py:164: in __call__
+    await self.app(scope, receive, _send)
+..\.venv\Lib\site-packages\starlette\middleware\cors.py:87: in __call__
+    await self.app(scope, receive, send)
+..\.venv\Lib\site-packages\starlette\middleware\base.py:191: in __call__
+    with recv_stream, send_stream, collapse_excgroups():
+C:\Users\moham\AppData\Local\Programs\Python\Python311\Lib\contextlib.py:158: in __exit__
+    self.gen.throw(typ, value, traceback)
+..\.venv\Lib\site-packages\starlette\_utils.py:87: in collapse_excgroups
+    raise exc
+..\.venv\Lib\site-packages\starlette\middleware\base.py:193: in __call__
+    response = await self.dispatch_func(request, call_next)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src\middleware\security_headers.py:86: in dispatch
+    response = await call_next(request)
+               ^^^^^^^^^^^^^^^^^^^^^^^^
+..\.venv\Lib\site-packages\starlette\middleware\base.py:168: in call_next
+    raise app_exc from app_exc.__cause__ or app_exc.__context__
+..\.venv\Lib\site-packages\starlette\middleware\base.py:144: in coro
+    await self.app(scope, receive_or_disconnect, send_no_error)
+..\.venv\Lib\site-packages\starlette\middleware\base.py:191: in __call__
+    with recv_stream, send_stream, collapse_excgroups():
+C:\Users\moham\AppData\Local\Programs\Python\Python311\Lib\contextlib.py:158: in __exit__
+    self.gen.throw(typ, value, traceback)
+..\.venv\Lib\site-packages\starlette\_utils.py:87: in collapse_excgroups
+    raise exc
+..\.venv\Lib\site-packages\starlette\middleware\base.py:193: in __call__
+    response = await self.dispatch_func(request, call_next)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src\middleware\rate_limit.py:98: in dispatch
+    response = await call_next(request)
+               ^^^^^^^^^^^^^^^^^^^^^^^^
+..\.venv\Lib\site-packages\starlette\middleware\base.py:168: in call_next
+    raise app_exc from app_exc.__cause__ or app_exc.__context__
+..\.venv\Lib\site-packages\starlette\middleware\base.py:144: in coro
+    await self.app(scope, receive_or_disconnect, send_no_error)
+..\.venv\Lib\site-packages\starlette\middleware\base.py:191: in __call__
+    with recv_stream, send_stream, collapse_excgroups():
+C:\Users\moham\AppData\Local\Programs\Python\Python311\Lib\contextlib.py:158: in __exit__
+    self.gen.throw(typ, value, traceback)
+..\.venv\Lib\site-packages\starlette\_utils.py:87: in collapse_excgroups
+    raise exc
+..\.venv\Lib\site-packages\starlette\middleware\base.py:193: in __call__
+    response = await self.dispatch_func(request, call_next)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src\api\middleware\logging_middleware.py:20: in dispatch
+    response = await call_next(request)
+               ^^^^^^^^^^^^^^^^^^^^^^^^
+..\.venv\Lib\site-packages\starlette\middleware\base.py:168: in call_next
+    raise app_exc from app_exc.__cause__ or app_exc.__context__
+..\.venv\Lib\site-packages\starlette\middleware\base.py:144: in coro
+    await self.app(scope, receive_or_disconnect, send_no_error)
+..\.venv\Lib\site-packages\starlette\middleware\exceptions.py:63: in __call__
+    await wrap_app_handling_exceptions(self.app, conn)(scope, receive, send)
+..\.venv\Lib\site-packages\starlette\_exception_handler.py:53: in wrapped_app
+    raise exc
+..\.venv\Lib\site-packages\starlette\_exception_handler.py:42: in wrapped_app
+    await app(scope, receive, sender)
+..\.venv\Lib\site-packages\fastapi\middleware\asyncexitstack.py:18: in __call__
+    await self.app(scope, receive, send)
+..\.venv\Lib\site-packages\starlette\routing.py:716: in __call__
+    await self.middleware_stack(scope, receive, send)
+..\.venv\Lib\site-packages\starlette\routing.py:736: in app
+    await route.handle(scope, receive, send)
+..\.venv\Lib\site-packages\starlette\routing.py:290: in handle
+    await self.app(scope, receive, send)
+..\.venv\Lib\site-packages\fastapi\routing.py:119: in app
+    await wrap_app_handling_exceptions(app, request)(scope, receive, send)
+..\.venv\Lib\site-packages\starlette\_exception_handler.py:59: in wrapped_app
+    response = await handler(conn, exc)
+               ^^^^^^^^^^^^^^^^^^^^^^^^
+src\api\middleware\error_handler.py:69: in validation_error_handler
+    return _problem_response(
+src\api\middleware\error_handler.py:37: in _problem_response
+    return JSONResponse(
+..\.venv\Lib\site-packages\starlette\responses.py:189: in __init__
+    super().__init__(content, status_code, headers, media_type, background)
+..\.venv\Lib\site-packages\starlette\responses.py:46: in __init__
+    self.body = self.render(content)
+                ^^^^^^^^^^^^^^^^^^^^
+..\.venv\Lib\site-packages\starlette\responses.py:192: in render
+    return json.dumps(
+C:\Users\moham\AppData\Local\Programs\Python\Python311\Lib\json\__init__.py:238: in dumps
+    **kw).encode(obj)
+          ^^^^^^^^^^^
+C:\Users\moham\AppData\Local\Programs\Python\Python311\Lib\json\encoder.py:200: in encode
+    chunks = self.iterencode(o, _one_shot=True)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+C:\Users\moham\AppData\Local\Programs\Python\Python311\Lib\json\encoder.py:258: in iterencode
+    return _iterencode(o, 0)
+           ^^^^^^^^^^^^^^^^^
+C:\Users\moham\AppData\Local\Programs\Python\Python311\Lib\json\encoder.py:180: in default
+    raise TypeError(f'Object of type {o.__class__.__name__} '
+E   TypeError: Object of type ValueError is not JSON serializable
+---------------------------- Captured stdout call -----------------------------
+{"method": "POST", "path": "/api/v1/auth/setup", "exc_info": true, "event": "unhandled_exception", "request_id": "abfa7f36-1e9e-426d-98d1-51a593c8e178", "level": "error", "timestamp": "2026-02-27T18:37:50.695906Z"}
+{"method": "POST", "path": "/api/v1/auth/setup", "status_code": 500, "duration_ms": 5.19, "event": "request_completed", "request_id": "abfa7f36-1e9e-426d-98d1-51a593c8e178", "level": "info", "timestamp": "2026-02-27T18:37:50.697969Z"}
+------------------------------ Captured log call ------------------------------
+WARNING  src.api.middleware.error_handler:error_handler.py:68 Validation error on [/api/v1/auth/setup]: [{'type': 'value_error', 'loc': ('body', 'password'), 'msg': 'Value error, Password must be at least 8 characters.', 'input': 'weak', 'ctx': {'error': ValueError('Password must be at least 8 characters.')}}]
+=========================== short test summary info ===========================
+FAILED tests/integration/test_auth_password.py::TestInvitationSetup::test_setup_weak_password
+======================== 1 failed, 18 passed in 27.10s ========================
