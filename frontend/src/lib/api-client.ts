@@ -1,3 +1,4 @@
+import { getToken } from '@/lib/token-store'
 import axios from 'axios'
 
 const BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000'
@@ -28,13 +29,11 @@ export function parseErrorResponse(error: unknown): Error {
   return new Error('An unexpected error occurred')
 }
 
-// Request interceptor — inject Bearer token from cookie (readable by JS)
+// Request interceptor — inject Bearer token from in-memory token store
 apiClient.interceptors.request.use((config) => {
-  if (typeof document !== 'undefined') {
-    const match = document.cookie.match(/(?:^|;\s*)access_token=([^;]+)/)
-    if (match) {
-      config.headers.Authorization = `Bearer ${decodeURIComponent(match[1])}`
-    }
+  const token = getToken()
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`
   }
   return config
 })
