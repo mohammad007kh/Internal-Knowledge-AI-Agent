@@ -29,6 +29,14 @@ class Settings(BaseSettings):
     BOOTSTRAP_ADMIN_PASSWORD: str | None = None
     # Encryption
     ENCRYPTION_KEY: str
+    # Email
+    SMTP_HOST: str = "localhost"
+    SMTP_PORT: int = 587
+    SMTP_USER: str | None = None
+    SMTP_PASSWORD: str | None = None
+    SMTP_FROM: str = "noreply@knowledge-agent.internal"
+    SMTP_USE_TLS: bool = True
+    EMAIL_LOG_ONLY: bool = False
     # Logging
     LOG_LEVEL: str = "info"
     # Security / CORS
