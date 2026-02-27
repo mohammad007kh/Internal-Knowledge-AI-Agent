@@ -114,7 +114,7 @@ async def verify_refresh_token(token: str, db: AsyncSession):
     from src.models.refresh_token import UserRefreshToken
 
     result = await db.execute(
-        select(UserRefreshToken).where(UserRefreshToken.token == token)
+        select(UserRefreshToken).where(UserRefreshToken.token_hash == token)
     )
     row = result.scalar_one_or_none()
     if row is None:
@@ -141,7 +141,7 @@ async def revoke_refresh_token(token: str, db: AsyncSession) -> None:
     from src.models.refresh_token import UserRefreshToken
 
     result = await db.execute(
-        select(UserRefreshToken).where(UserRefreshToken.token == token)
+        select(UserRefreshToken).where(UserRefreshToken.token_hash == token)
     )
     row = result.scalar_one_or_none()
     if row is not None:

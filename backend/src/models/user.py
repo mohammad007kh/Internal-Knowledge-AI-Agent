@@ -64,6 +64,11 @@ class User(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
         back_populates="user",
         cascade="all, delete-orphan",
     )
+    reset_tokens: Mapped[list["PasswordResetToken"]] = relationship(  # noqa: F821
+        "PasswordResetToken",
+        back_populates="user",
+        cascade="all, delete-orphan",
+    )
     invitations_sent: Mapped[list["Invitation"]] = relationship(
         "Invitation",
         back_populates="invited_by_user",
@@ -109,4 +114,44 @@ class Invitation(Base, UUIDMixin, TimestampMixin):
         "User",
         back_populates="invitations_sent",
         foreign_keys=[invited_by],
+    )
+
+
+# ---------------------------------------------------------------------------
+# Password Reset Token
+# ---------------------------------------------------------------------------
+
+class PasswordResetToken(Base, UUIDMixin, TimestampMixin):
+    """One-time-use token for password-reset flow.
+
+    The raw token is returned to the caller (e.g. for e-mail) but only
+    the SHA-256 hex-digest is persisted.
+    """
+
+    __tablename__ = "password_reset_tokens"
+
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    token_hash: Mapped[str] = mapped_column(
+        String(64),
+        unique=True,
+        index=True,
+        nullable=False,
+    )
+    expires_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+    )
+    used_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        default=None,
+    )
+
+    # -- relationships -------------------------------------------------------
+    user: Mapped["User"] = relationship(
+        "User", back_populates="reset_tokens",
     )

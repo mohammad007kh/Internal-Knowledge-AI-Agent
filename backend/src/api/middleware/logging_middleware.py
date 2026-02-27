@@ -15,6 +15,7 @@ class LoggingMiddleware(BaseHTTPMiddleware):
         bind_contextvars(request_id=request_id)
 
         start = time.perf_counter()
+        response = None
         try:
             response = await call_next(request)
         except Exception as exc:

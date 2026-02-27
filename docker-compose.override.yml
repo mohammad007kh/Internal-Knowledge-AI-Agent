@@ -1,0 +1,20 @@
+# Development overrides: bind mounts for hot-reload
+# This file is automatically merged by `docker compose up`
+# Do NOT commit secrets or prod-only settings here.
+services:
+  backend:
+    volumes:
+      - ./backend/src:/app/src
+
+  frontend:
+    volumes:
+      - ./frontend/src:/app/src
+      - ./frontend/public:/app/public
+
+  worker:
+    volumes:
+      - ./backend/src:/app/src
+
+  beat:
+    volumes:
+      - ./backend/src:/app/src

@@ -1,34 +1,106 @@
-# Dependencies
-node_modules/
-vendor/
-.venv/
-venv/
-
-# Build outputs
+# =============================================================
+# Python
+# =============================================================
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg
+*.egg-info/
 dist/
 build/
-*.egg-info/
+eggs/
+.eggs/
+lib/
+lib64/
+*.pyo
+*.pyd
 
-# Environment
+# Virtual environments
+.venv/
+venv/
+vendor/
+env/
+ENV/
+
+# pytest / coverage
+.pytest_cache/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+*.cover
+
+# mypy
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# ruff
+.ruff_cache/
+
+# =============================================================
+# Node / Next.js
+# =============================================================
+node_modules/
+.npm/
+.yarn/
+.next/
+out/
+frontend/dist/
+frontend/build/
+
+# =============================================================
+# Environment Variables (CRITICAL — never commit secrets)
+# =============================================================
 .env
 .env.local
 .env.*.local
+.env.development
+.env.test
+.env.production
 
-# IDE
-.idea/
-.vscode/*.json.bak
-*.swp
-*.swo
+# =============================================================
+# Docker
+# =============================================================
+.docker/
 
-# OS
+# =============================================================
+# Editors & OS
+# =============================================================
 .DS_Store
 Thumbs.db
+desktop.ini
+*.swp
+*.swo
+*.orig
+.idea/
+.vscode/**
+!.vscode/extensions.json
+!.vscode/settings.json
 
-# Logs
+# =============================================================
+# Logs & Temp
+# =============================================================
 *.log
 logs/
+tmp/
+temp/
 
-# SpecKit (internal AI agent scaffolding - not part of the project source)
+# =============================================================
+# Alembic
+# =============================================================
+backend/alembic/versions/__pycache__/
+
+# =============================================================
+# Testing
+# =============================================================
+playwright-report/
+test-results/
+
+# =============================================================
+# SpecKit (internal AI agent scaffolding - not part of project source)
+# =============================================================
 memory/
 scripts/
 specs/_defaults/

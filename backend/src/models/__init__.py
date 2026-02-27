@@ -8,11 +8,12 @@ import them from a single place::
 
 from src.models.base import Base
 from src.models.refresh_token import UserRefreshToken
-from src.models.user import Invitation, User, UserRole
+from src.models.user import Invitation, PasswordResetToken, User, UserRole
 
 __all__ = [
     "Base",
     "Invitation",
+    "PasswordResetToken",
     "User",
     "UserRefreshToken",
     "UserRole",

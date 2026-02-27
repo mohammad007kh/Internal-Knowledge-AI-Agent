@@ -1,0 +1,7 @@
+file_upload:
+  max_size_bytes: 52428800  # 50 MB default — change here, NOT in .env
+  supported_formats: [pdf, docx, xlsx, csv, txt, md]
+
+bootstrap:
+  admin_email_env: BOOTSTRAP_ADMIN_EMAIL
+  admin_password_env: BOOTSTRAP_ADMIN_PASSWORD

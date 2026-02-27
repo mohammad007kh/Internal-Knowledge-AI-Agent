@@ -137,3 +137,4 @@ No `SC-` (success criterion) tags were found in any task file; the table below c
 | T-022 | bcrypt Password Hashing Service + Validation Policy | Done | Y | 2025-07-24 |
 | T-023 | User Repository + User Service (Business Logic Layer) | Done | Y | 2025-07-24 |
 | T-024 | Pydantic v2 Request/Response Schemas for Auth & User Endpoints | Done | Y | 2025-07-24 |
+| T-025 | Auth Service | Done | Y | 2025-07-26 |

@@ -68,5 +68,9 @@
     { "file": ".github/skills/error-handling-patterns.md" },
     { "file": ".github/skills/debugging-strategies.md" },
     { "file": ".github/skills/architect-review.md" }
-  ]
+  ],
+  "chat.tools.terminal.autoApprove": {
+    "git add": true,
+    "git commit": true
+  }
 }

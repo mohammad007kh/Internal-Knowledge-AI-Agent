@@ -1,8 +1,9 @@
 """UserRefreshToken ORM model.
 
 Each row represents one issued refresh token for a user.
-Tokens are opaque UUID-4 strings (not JWTs).  They are rotated on every
-successful token-refresh request and revoked on logout.
+Tokens are stored as SHA-256 hashes (hex digest, 64 chars).  The raw
+token is returned to the client but never persisted.  They are rotated
+on every successful token-refresh request and revoked on logout.
 
 Relationships
 -------------
@@ -29,8 +30,8 @@ class UserRefreshToken(Base, UUIDMixin, TimestampMixin):
         ForeignKey("users.id", ondelete="CASCADE"),
         nullable=False,
     )
-    token: Mapped[str] = mapped_column(
-        String(36),
+    token_hash: Mapped[str] = mapped_column(
+        String(64),
         unique=True,
         index=True,
         nullable=False,
