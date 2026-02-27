@@ -148,3 +148,4 @@ No `SC-` (success criterion) tags were found in any task file; the table below c
 | T-034 | Change-Password Page (Frontend) | Done | Y | 2025-07-28 |
 | T-035 | Auth Integration Tests (Backend) | Done | Y | 2025-07-28 |
 | T-037 | Router Wiring and Container Registration (Phase 1 Completion) | Done | Y | 2026-02-28 |
+| T-038 | Next.js Middleware for Auth Route Protection | Done | Y | 2026-02-28 |

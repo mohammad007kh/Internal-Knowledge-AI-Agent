@@ -2,6 +2,7 @@
 
 import { refreshTokenApi } from '@/lib/api/auth'
 import { setToken } from '@/lib/token-store'
+import Cookies from 'js-cookie'
 import {
   type ReactNode,
   createContext,
@@ -99,12 +100,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     (token: string) => {
       setAccessTokenState(token)
       scheduleRefresh(token)
+      // Write readable cookie for Next.js Edge middleware
+      const payload = decodeJwt(token)
+      if (payload) {
+        Cookies.set('__access', token, {
+          expires: new Date(payload.exp * 1000),
+          sameSite: 'strict',
+          secure: process.env.NODE_ENV === 'production',
+          // NOT httpOnly — must be readable from middleware
+        })
+      }
     },
     [scheduleRefresh]
   )
 
   const clearAccessToken = useCallback(() => {
     setAccessTokenState(null)
+    Cookies.remove('__access')
     if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current)
   }, [])
 
