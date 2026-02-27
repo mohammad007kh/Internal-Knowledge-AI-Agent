@@ -47,3 +47,16 @@ class UpdateUserRequest(BaseModel):
 
     full_name: str | None = None
     is_active: bool | None = None
+
+
+class InvitationCreateRequest(BaseModel):
+    """POST /users/invitations body."""
+
+    email: EmailStr
+    role: UserRole = UserRole.user
+
+
+class RoleChangeRequest(BaseModel):
+    """PATCH /users/{id}/role body."""
+
+    role: UserRole
