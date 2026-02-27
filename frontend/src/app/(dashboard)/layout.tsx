@@ -1,4 +1,4 @@
-import { ThemeToggle } from "@/components/theme-toggle";
+import { ThemeToggle } from '@/components/theme-toggle'
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   return (
@@ -8,9 +8,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         <div className="flex h-14 items-center border-b border-border px-4">
           <span className="font-semibold text-card-foreground">Knowledge AI</span>
         </div>
-        <nav className="flex-1 p-4">
-          {/* Navigation links will be added in T-008 */}
-        </nav>
+        <nav className="flex-1 p-4">{/* Navigation links will be added in T-008 */}</nav>
         <div className="border-t border-border p-4">
           <ThemeToggle />
         </div>
@@ -27,5 +25,5 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         <main className="flex-1">{children}</main>
       </div>
     </div>
-  );
+  )
 }
