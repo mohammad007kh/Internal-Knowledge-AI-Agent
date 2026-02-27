@@ -3,6 +3,7 @@
 from src.core.config import settings
 from src.core.container import container
 from src.core.database import get_db
+from src.core.deps import get_current_user, require_authenticated, require_role
 from src.core.exceptions import (
     AppError,
     BadRequestError,
@@ -40,8 +41,11 @@ __all__ = [
     "container",
     "create_access_token",
     "create_refresh_token",
+    "get_current_user",
     "get_db",
     "get_logger",
+    "require_authenticated",
+    "require_role",
     "revoke_refresh_token",
     "set_refresh_cookie",
     "settings",

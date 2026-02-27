@@ -25,7 +25,7 @@ Format 1 tasks (T-001–T-005, T-007–T-010, T-012–T-024) and Format 3 tasks 
 | T-011 | RFC 7807 Error Handler + FastAPI Exception Hierarchy | T-004 | T-025, T-026, T-053, T-064, T-070 |
 | T-025 | Auth Service | T-012, T-013, T-022, T-023 | T-026, T-030, T-037 |
 | T-026 | Auth FastAPI Router (7 endpoints) | T-015, T-016, T-017, T-024, T-025, T-027 | T-030, T-036, T-037 |
-| T-027 | FastAPI Auth Dependencies (`get_current_user`, `require_role`) | T-012, T-023, T-025 | T-026, T-028, T-030, T-053, T-064, T-070 |
+| T-027 | FastAPI Auth Dependencies (`get_current_user`, `require_role`) | T-012, T-023, T-025 | T-026, T-028, T-030, T-053, T-064, T-070 | Done ✓ |
 | T-028 | Users FastAPI Router (CRUD + Invitation) | T-015, T-023, T-024, T-027, T-029 | T-030, T-036 |
 | T-029 | Email Service (Invitation + Password Reset) | T-004 | T-026, T-028, T-030 |
 | T-030 | Frontend Auth Pages (Login, Setup, Password Reset) | T-005, T-026, T-031, T-032 | T-036, T-038 |
