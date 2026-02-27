@@ -20,7 +20,7 @@ def mock_db_session():
 @pytest.fixture(autouse=True)
 def mock_redis():
     """Mock Redis client for unit tests."""
-    with patch("src.core.cache.redis_client", new=AsyncMock()) as mock:
+    with patch("src.core.redis.redis_client", new=AsyncMock()) as mock:
         yield mock
 
 

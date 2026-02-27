@@ -301,6 +301,7 @@ class TestDeactivateUser:
         user_repo, _, _, refresh_repo, _ = mocks
         admin = _make_user(role=UserRole.admin)
         target_id = uuid.uuid4()
+        user_repo.set_active.return_value = _make_user()  # truthy → user found
 
         await service.deactivate_user(admin, target_id)
 

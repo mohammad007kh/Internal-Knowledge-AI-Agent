@@ -29,7 +29,7 @@
 | T-025 | Auth Service | Phase 1 — Auth & User Management | Done ✓ |
 | T-026 | Auth FastAPI Router (7 endpoints) | Phase 1 — Auth & User Management | Done ✓ |
 | T-027 | FastAPI Auth Dependencies (`get_current_user`, `require_role`) | Phase 1 — Auth & User Management | Done ✓ |
-| T-028 | Users FastAPI Router (CRUD + Invitation) | Phase 1 — Auth & User Management | Not Started |
+| T-028 | Users FastAPI Router (CRUD + Invitation) | Phase 1 — Auth & User Management | Done ✓ |
 | T-029 | Email Service (Invitation + Password Reset) | Phase 1 — Auth & User Management | Done ✓ |
 | T-030 | Frontend Auth Pages (Login, Setup, Password Reset) | Phase 1 — Auth & User Management | Not Started |
 | T-031 | Frontend Auth TanStack Query Hooks | Phase 1 — Auth & User Management | Not Started |
