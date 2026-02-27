@@ -31,7 +31,7 @@ Format 1 tasks (T-001–T-005, T-007–T-010, T-012–T-024) and Format 3 tasks 
 | T-030 | Frontend Auth Pages (Login, Setup, Password Reset) | T-005, T-026, T-031, T-032 | T-036, T-038 | Done ✓ |
 | T-031 | Frontend Auth TanStack Query Hooks | T-005, T-025, T-026, T-032 | T-030, T-033, T-038 | Done ✓ |
 | T-032 | Frontend Auth React Context (`useAuth`) | T-005, T-031 | T-030, T-033, T-038 | Done ✓ |
-| T-033 | Admin Users Page (Frontend) | T-028, T-031, T-032, T-038 | T-036, T-039 |
+| T-033 | Admin Users Page (Frontend) | T-028, T-031, T-032, T-038 | T-036, T-039 | Done ✓ |
 | T-034 | Change-Password Page (Frontend) | T-030, T-031, T-032 | T-036 | Done ✓ |
 | T-035 | Auth Integration Tests (Backend) | T-008, T-025, T-026, T-027, T-028, T-029 | T-039 |
 | T-036 | Playwright E2E: Auth Flows | T-009, T-030, T-031, T-032, T-034, T-035 | T-039 |
@@ -145,6 +145,7 @@ No `SC-` (success criterion) tags were found in any task file; the table below c
 | T-030 | Frontend Auth Pages (Login, Setup, Password Reset) | Done | Y | 2025-07-28 |
 | T-031 | Frontend Auth TanStack Query Hooks | Done | Y | 2025-07-28 |
 | T-032 | Frontend Auth React Context (`useAuth`) | Done | Y | 2025-07-28 |
+| T-033 | Admin Users Page (Frontend) | Done | Y | 2026-02-28 |
 | T-034 | Change-Password Page (Frontend) | Done | Y | 2025-07-28 |
 | T-035 | Auth Integration Tests (Backend) | Done | Y | 2025-07-28 |
 | T-037 | Router Wiring and Container Registration (Phase 1 Completion) | Done | Y | 2026-02-28 |
