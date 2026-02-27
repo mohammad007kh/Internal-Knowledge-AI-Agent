@@ -179,3 +179,20 @@ def set_refresh_cookie(response: Response, token: str) -> None:
 def clear_refresh_cookie(response: Response) -> None:
     """Delete the ``refresh_token`` cookie from *response*."""
     response.delete_cookie(key="refresh_token", path="/api/v1/auth")
+
+
+def set_csrf_cookie(response: Response, token: str) -> None:
+    """Attach a non-httpOnly CSRF cookie readable by JavaScript.
+
+    The client must echo this value in an ``X-CSRF-Token`` header on
+    state-changing requests.
+    """
+    response.set_cookie(
+        key="csrf_token",
+        value=token,
+        httponly=False,
+        samesite="strict",
+        secure=True,
+        max_age=settings.REFRESH_TOKEN_EXPIRE_DAYS * 86400,
+        path="/",
+    )

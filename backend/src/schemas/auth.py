@@ -35,6 +35,7 @@ class TokenResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
     expires_in: int  # seconds
+    must_change_password: bool = False
 
 
 # ---------------------------------------------------------------------------
@@ -98,6 +99,35 @@ class ChangePasswordRequest(BaseModel):
     """POST /auth/change-password body."""
 
     current_password: str
+    new_password: str
+
+    @field_validator("new_password")
+    @classmethod
+    def validate_pw(cls, v: str) -> str:
+        PasswordService.validate_password_policy(v)
+        return v
+
+
+# ---------------------------------------------------------------------------
+# Password reset
+# ---------------------------------------------------------------------------
+
+
+class PasswordResetRequest(BaseModel):
+    """POST /auth/password-reset body."""
+
+    email: EmailStr
+
+    @field_validator("email", mode="before")
+    @classmethod
+    def normalise_email(cls, v: str) -> str:
+        return v.strip().lower()
+
+
+class PasswordResetConfirmRequest(BaseModel):
+    """POST /auth/password-reset/confirm body."""
+
+    token: str
     new_password: str
 
     @field_validator("new_password")
