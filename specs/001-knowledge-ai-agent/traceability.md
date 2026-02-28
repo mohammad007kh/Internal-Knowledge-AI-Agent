@@ -154,3 +154,4 @@ No `SC-` (success criterion) tags were found in any task file; the table below c
 | T-039 | Phase 1 Sign-Off Checklist | Done | Y | 2026-02-28 |
 | T-040 | Source ORM Model + Alembic Migration (0006_sources) | Done | Y | 2026-02-28 |
 | T-041 | Source Repository (SourceRepository) | Done | Y | 2026-02-28 |
+| T-042 | Source Service (SourceService) | Done | Y | 2026-02-28 |
