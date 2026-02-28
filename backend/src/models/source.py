@@ -22,6 +22,8 @@ from src.models.base import Base, TimestampMixin, UUIDMixin
 from src.models.enums import SourceType
 
 if TYPE_CHECKING:
+    from src.models.chunk import Chunk
+    from src.models.document import Document
     from src.models.user import User
 
 
@@ -51,6 +53,18 @@ class Source(Base, UUIDMixin, TimestampMixin):
         "User",
         back_populates="sources",
         lazy="selectin",
+    )
+    documents: Mapped[list[Document]] = relationship(
+        "Document",
+        back_populates="source",
+        cascade="all, delete-orphan",
+        lazy="raise",
+    )
+    chunks: Mapped[list[Chunk]] = relationship(
+        "Chunk",
+        back_populates="source",
+        cascade="all, delete-orphan",
+        lazy="raise",
     )
 
     def __repr__(self) -> str:  # pragma: no cover

@@ -17,7 +17,10 @@ from logging.config import fileConfig
 
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
+import src.models.chunk  # noqa: F401  — T-051
+import src.models.document  # noqa: F401  — T-051
 import src.models.refresh_token  # noqa: F401  — T-012
+import src.models.source  # noqa: F401  — T-040
 import src.models.user  # noqa: F401  — T-020
 from alembic import context
 
@@ -34,8 +37,6 @@ from src.models.base import Base  # noqa: F401
 
 # Future model imports (uncomment as tasks are implemented):
 # import src.models.invitation         # T-020 (if separate file)
-# import src.models.source             # T-040
-# import src.models.document_chunk     # T-040
 # import src.models.sync_job           # T-040
 # import src.models.chat_session       # T-060
 # import src.models.chat_message       # T-060
