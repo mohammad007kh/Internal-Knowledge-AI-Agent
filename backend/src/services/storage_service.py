@@ -57,14 +57,55 @@ class StorageService:
         logger.info("StorageService: uploaded %d bytes to %s", len(data), object_key)
         return object_key
 
-    async def download_bytes(self, object_key: str) -> bytes:
-        """Download and return raw bytes for *object_key*."""
+    async def download_bytes(
+        self,
+        object_key: str,
+        bucket: str | None = None,
+    ) -> bytes:
+        """Download and return raw bytes for *object_key*.
+
+        Parameters
+        ----------
+        object_key:
+            Object name / path inside the bucket.
+        bucket:
+            Bucket name.  Falls back to the instance default when *None*.
+        """
+        bucket_name = bucket if bucket is not None else self._bucket
         response: Any = self._client.get_object(
-            bucket_name=self._bucket,
+            bucket_name=bucket_name,
             object_name=object_key,
         )
         try:
-            return response.read()
+            return response.read()  # type: ignore[no-any-return]
         finally:
             response.close()
             response.release_conn()
+
+    async def object_exists(
+        self,
+        object_key: str,
+        bucket: str | None = None,
+    ) -> bool:
+        """Return *True* when *object_key* exists in the bucket.
+
+        Uses ``stat_object`` under the hood; any exception (including
+        ``S3Error`` for a missing object) is caught and returns *False* so
+        callers can treat this as a simple boolean probe.
+
+        Parameters
+        ----------
+        object_key:
+            Object name / path inside the bucket.
+        bucket:
+            Bucket name.  Falls back to the instance default when *None*.
+        """
+        bucket_name = bucket if bucket is not None else self._bucket
+        try:
+            self._client.stat_object(
+                bucket_name=bucket_name,
+                object_name=object_key,
+            )
+            return True
+        except Exception:  # noqa: BLE001
+            return False

@@ -13,7 +13,7 @@ from . import web_url_connector  # noqa: F401
 from .base import BaseConnector, Document
 from .registry import CONNECTOR_REGISTRY, get_connector, register
 
-# from . import file_upload_connector  # noqa: F401 — T-047
+from . import file_upload_connector  # noqa: F401
 # from . import database_connector     # noqa: F401 — T-048
 # from . import confluence_connector   # noqa: F401 — T-049
 # from . import sharepoint_connector   # noqa: F401 — T-049
