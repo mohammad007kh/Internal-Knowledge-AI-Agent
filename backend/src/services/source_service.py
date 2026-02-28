@@ -185,7 +185,7 @@ class SourceService:
         try:
             source = await self.get_source(source_id)
             config = await self.get_source_config(source_id)
-            from src.connectors.registry import get_connector  # type: ignore[import-not-found]
+            from src.connectors.registry import get_connector  # noqa: PLC0415
 
             connector = get_connector(source.source_type)
             return bool(await connector.test(config))

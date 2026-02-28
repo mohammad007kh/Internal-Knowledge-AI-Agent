@@ -1,5 +1,6 @@
-"""Pydantic v2 schemas for Source endpoints (T-042).
+"""Pydantic v2 schemas for Source endpoints (T-043).
 
+FR-020: ``config_encrypted`` MUST NOT appear in any API response schema.
 Every endpoint handler MUST call ``SourceResponse.model_validate(orm_obj)``
 before returning — never expose raw ORM objects or ``config_encrypted``.
 """
@@ -10,41 +11,73 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from src.models.enums import SourceType
 
 # ---------------------------------------------------------------------------
-# Request
+# Input schemas
 # ---------------------------------------------------------------------------
 
 
 class SourceCreate(BaseModel):
     """Request body for POST /sources."""
 
-    name: str = Field(..., min_length=1, max_length=255)
-    source_type: SourceType
-    config: dict[str, Any] = Field(default_factory=dict)
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    name: str = Field(
+        ...,
+        min_length=1,
+        max_length=255,
+        description="Human-readable source name, unique per owner.",
+    )
+    source_type: SourceType = Field(
+        ...,
+        description="Connector type identifier.",
+    )
+    config: dict[str, Any] = Field(
+        default_factory=dict,
+        description=(
+            "Connection configuration (credentials, URLs, etc.). "
+            "Encrypted at rest; never returned in responses."
+        ),
+    )
+
+    @field_validator("name")
+    @classmethod
+    def name_no_slash(cls, v: str) -> str:
+        """Source names must not contain '/' (used as path separator)."""
+        if "/" in v:
+            raise ValueError("Source name must not contain '/'.")
+        return v
 
 
 class SourceUpdate(BaseModel):
     """Request body for PATCH /sources/{id} — all fields optional."""
 
-    name: str | None = Field(None, min_length=1, max_length=255)
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    name: str | None = Field(
+        None,
+        min_length=1,
+        max_length=255,
+    )
+    config: dict[str, Any] | None = Field(
+        None,
+        description="Full replacement of the connection config when provided.",
+    )
     is_active: bool | None = None
-    config: dict[str, Any] | None = None
 
 
 # ---------------------------------------------------------------------------
-# Response
+# Response schemas — NO config_encrypted field intentionally (FR-020)
 # ---------------------------------------------------------------------------
 
 
 class SourceResponse(BaseModel):
-    """Public representation of a Source.
+    """Full source representation returned by the API.
 
-    ``config_encrypted`` is intentionally absent — callers must never receive
-    raw credentials.
+    ``config_encrypted`` is deliberately absent (FR-020).
     """
 
     model_config = ConfigDict(from_attributes=True)
@@ -58,10 +91,29 @@ class SourceResponse(BaseModel):
     updated_at: datetime
 
 
-class SourceListResponse(BaseModel):
-    """Paginated list of sources."""
+class SourceListItem(BaseModel):
+    """Slim representation used inside paginated lists."""
 
-    items: list[SourceResponse]
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    name: str
+    source_type: SourceType
+    is_active: bool
+    created_at: datetime
+
+
+class PaginatedSources(BaseModel):
+    """Envelope for paginated source lists."""
+
+    items: list[SourceListItem]
     total: int
     limit: int
     offset: int
+
+
+class TestConnectionResponse(BaseModel):
+    """Result of POST /sources/{id}/test-connection."""
+
+    success: bool
+    message: str = ""

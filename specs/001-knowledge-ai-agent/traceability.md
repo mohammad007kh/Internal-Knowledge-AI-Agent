@@ -155,3 +155,4 @@ No `SC-` (success criterion) tags were found in any task file; the table below c
 | T-040 | Source ORM Model + Alembic Migration (0006_sources) | Done | Y | 2026-02-28 |
 | T-041 | Source Repository (SourceRepository) | Done | Y | 2026-02-28 |
 | T-042 | Source Service (SourceService) | Done | Y | 2026-02-28 |
+| T-043 | Source Pydantic Schemas (SourceCreate/Update/Response/ListItem/PaginatedSources/TestConnectionResponse) | Done | Y | 2026-02-28 |
