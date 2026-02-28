@@ -156,3 +156,4 @@ No `SC-` (success criterion) tags were found in any task file; the table below c
 | T-041 | Source Repository (SourceRepository) | Done | Y | 2026-02-28 |
 | T-042 | Source Service (SourceService) | Done | Y | 2026-02-28 |
 | T-043 | Source Pydantic Schemas (SourceCreate/Update/Response/ListItem/PaginatedSources/TestConnectionResponse) | Done | Y | 2026-02-28 |
+| T-044 | Sources FastAPI Router (CRUD + test-connection endpoints, ownership/admin guard) | Done | Y | 2026-02-28 |
