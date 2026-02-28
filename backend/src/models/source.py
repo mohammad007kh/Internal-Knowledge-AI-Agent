@@ -25,6 +25,7 @@ if TYPE_CHECKING:
     from src.models.chunk import Chunk
     from src.models.document import Document
     from src.models.source_permission import SourcePermission
+    from src.models.sync_job import SyncJob
     from src.models.user import User
 
 
@@ -69,6 +70,12 @@ class Source(Base, UUIDMixin, TimestampMixin):
     )
     permissions: Mapped[list[SourcePermission]] = relationship(
         "SourcePermission",
+        back_populates="source",
+        cascade="all, delete-orphan",
+        lazy="raise",
+    )
+    sync_jobs: Mapped[list[SyncJob]] = relationship(
+        "SyncJob",
         back_populates="source",
         cascade="all, delete-orphan",
         lazy="raise",

@@ -1,9 +1,10 @@
 """Shared application-level enums.
 
 Implements T-040: Source ORM Models.
+Implements T-060: SyncJob ORM Model.
 
 UserRole lives in src.models.user to avoid a circular-import chain;
-only SourceType is defined here.
+only SourceType and SyncStatus are defined here.
 """
 
 from __future__ import annotations
@@ -19,3 +20,12 @@ class SourceType(enum.StrEnum):
     DATABASE = "database"
     CONFLUENCE = "confluence"
     SHAREPOINT = "sharepoint"
+
+
+class SyncStatus(enum.StrEnum):
+    """Lifecycle states for a SyncJob run."""
+
+    PENDING = "pending"
+    RUNNING = "running"
+    SUCCESS = "success"
+    FAILED = "failed"
