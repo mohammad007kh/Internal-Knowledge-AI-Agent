@@ -1,24 +1,24 @@
-"""Connector package — concrete connectors are imported here for ``@register`` side-effects (T-045).
+"""Connector package — imports register all concrete connectors into CONNECTOR_REGISTRY.
+
+Import order does not matter; each connector self-registers via @register().
 
 Public surface::
 
-    from src.connectors import BaseConnector, Document, CONNECTOR_REGISTRY, get_connector, register
-
-Concrete connectors are intentionally commented out until their tasks are complete.
-Un-comment each import as the corresponding task lands:
+    from src.connectors import (
+        BaseConnector, Document, CONNECTOR_REGISTRY, get_connector, register,
+        ConfluenceConnector, DatabaseConnector, FileUploadConnector,
+        SharePointConnector, WebUrlConnector,
+    )
 """
-# Concrete connectors — imported solely for registration side-effect.
-# Un-comment as each task is completed:
-from . import (
-    database_connector,  # noqa: F401
-    file_upload_connector,  # noqa: F401
-    web_url_connector,  # noqa: F401
-)
-from .base import BaseConnector, Document
-from .registry import CONNECTOR_REGISTRY, get_connector, register
+from src.connectors.base import BaseConnector, Document
 
-# from . import confluence_connector   # noqa: F401 — T-049
-# from . import sharepoint_connector   # noqa: F401 — T-049
+# Concrete implementations — side-effect imports trigger @register()
+from src.connectors.confluence_connector import ConfluenceConnector  # noqa: F401
+from src.connectors.database_connector import DatabaseConnector  # noqa: F401
+from src.connectors.file_upload_connector import FileUploadConnector  # noqa: F401
+from src.connectors.registry import CONNECTOR_REGISTRY, get_connector, register
+from src.connectors.sharepoint_connector import SharePointConnector  # noqa: F401
+from src.connectors.web_url_connector import WebUrlConnector  # noqa: F401
 
 __all__ = [
     "BaseConnector",
@@ -26,4 +26,9 @@ __all__ = [
     "CONNECTOR_REGISTRY",
     "get_connector",
     "register",
+    "ConfluenceConnector",
+    "DatabaseConnector",
+    "FileUploadConnector",
+    "SharePointConnector",
+    "WebUrlConnector",
 ]
