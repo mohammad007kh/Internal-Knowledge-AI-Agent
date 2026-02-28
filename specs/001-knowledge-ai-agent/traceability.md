@@ -160,3 +160,4 @@ No `SC-` (success criterion) tags were found in any task file; the table below c
 | T-045 | Connector Base + Registry (Document, BaseConnector ABC, CONNECTOR_REGISTRY, @register, get_connector; fix T-042 API mismatch) | Done | Y | 2026-02-28 |
 | T-046 | WebUrl Connector (WebUrlConnector, robots.txt respect, BeautifulSoup extraction, MinIO HTML archive; StorageService stub) | Done | Y | 2026-02-28 |
 | T-047 | File Upload Connector (FileUploadConnector for pdf/docx/xlsx/csv/txt/md; AppConfig/get_app_config backed by app_config.yaml; StorageService download_bytes optional bucket + object_exists; PyPDF2/python-docx/openpyxl deps) | Done | Y | 2026-02-28 |
+| T-048 | Database Connector (DatabaseConnector, LIMIT/OFFSET pagination, FR-020 connection-string redaction, test_connection probe) | Done | Y | 2026-02-28 |
