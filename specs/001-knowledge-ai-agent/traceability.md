@@ -151,4 +151,6 @@ No `SC-` (success criterion) tags were found in any task file; the table below c
 | T-037 | Router Wiring and Container Registration (Phase 1 Completion) | Done | Y | 2026-02-28 |
 | T-038 | Next.js Middleware for Auth Route Protection | Done | Y | 2026-02-28 |
 | T-036 | Playwright E2E: Auth Flows | Deferred | N | 2026-02-28 |
-| T-039 | Phase 1 Sign-Off Checklist | Done | Y | 2026-02-28 || T-040 | Source ORM Model + Alembic Migration (0006_sources) | Done | Y | 2026-02-28 |
+| T-039 | Phase 1 Sign-Off Checklist | Done | Y | 2026-02-28 |
+| T-040 | Source ORM Model + Alembic Migration (0006_sources) | Done | Y | 2026-02-28 |
+| T-041 | Source Repository (SourceRepository) | Done | Y | 2026-02-28 |
