@@ -187,7 +187,7 @@ class SourceService:
             config = await self.get_source_config(source_id)
             from src.connectors.registry import get_connector  # noqa: PLC0415
 
-            connector = get_connector(source.source_type)
-            return bool(await connector.test(config))
+            connector = get_connector(source.source_type, config)
+            return bool(await connector.test_connection())
         except Exception:  # noqa: BLE001
             return False
