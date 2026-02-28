@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -29,7 +29,7 @@ class InvitationRepository(BaseRepository[Invitation]):
         stmt = (
             update(Invitation)
             .where(Invitation.token == token)
-            .values(accepted_at=datetime.now(timezone.utc))
+            .values(accepted_at=datetime.now(UTC))
             .returning(Invitation)
         )
         result = await self._session.execute(stmt)
@@ -37,7 +37,7 @@ class InvitationRepository(BaseRepository[Invitation]):
 
     async def get_pending_by_email(self, email: str) -> Invitation | None:
         """Return the pending (not accepted, not expired) invitation for *email*."""
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         stmt = (
             select(Invitation)
             .where(Invitation.email == email.lower())
@@ -54,6 +54,6 @@ class InvitationRepository(BaseRepository[Invitation]):
         stmt = (
             update(Invitation)
             .where(Invitation.id == invitation_id)
-            .values(expires_at=datetime.now(timezone.utc))
+            .values(expires_at=datetime.now(UTC))
         )
         await self._session.execute(stmt)

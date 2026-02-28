@@ -1,15 +1,18 @@
-import uuid
 import time
+import uuid
+from collections.abc import Awaitable, Callable
+
 import structlog
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
+from starlette.responses import Response
 from structlog.contextvars import bind_contextvars, clear_contextvars
 
 logger = structlog.get_logger(__name__)
 
 
 class LoggingMiddleware(BaseHTTPMiddleware):
-    async def dispatch(self, request: Request, call_next):
+    async def dispatch(self, request: Request, call_next: Callable[[Request], Awaitable[Response]]) -> Response:
         clear_contextvars()
         request_id = request.headers.get("X-Request-ID") or str(uuid.uuid4())
         bind_contextvars(request_id=request_id)
@@ -18,7 +21,7 @@ class LoggingMiddleware(BaseHTTPMiddleware):
         response = None
         try:
             response = await call_next(request)
-        except Exception as exc:
+        except Exception:
             logger.exception("unhandled_exception", method=request.method, path=request.url.path)
             raise
         finally:

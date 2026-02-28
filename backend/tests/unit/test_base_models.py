@@ -7,10 +7,7 @@ from __future__ import annotations
 
 import uuid
 
-import pytest
-
-from src.models.base import Base, UUIDMixin, TimestampMixin, SoftDeleteMixin
-
+from src.models.base import Base, SoftDeleteMixin, TimestampMixin, UUIDMixin
 
 # ---------------------------------------------------------------------------
 # Minimal concrete model used across all tests
@@ -40,7 +37,7 @@ def test_uuid_mixin_column_has_uuid_default():
 
 def test_uuid_mixin_default_produces_unique_values():
     """Invoking the column default produces distinct UUID values."""
-    col = _Thing.__table__.columns["id"]
+    _Thing.__table__.columns["id"]
     # ColumnDefault wraps the callable; invoke via __call__ with no context
     a = uuid.uuid4()
     b = uuid.uuid4()

@@ -24,7 +24,7 @@ redis_client: Redis | None = None
 async def init_redis() -> None:
     """Initialise the Redis connection pool. Call once in lifespan startup."""
     global redis_client  # noqa: PLW0603
-    redis_client = aioredis.from_url(
+    redis_client = aioredis.from_url(  # type: ignore[no-untyped-call]
         settings.REDIS_URL,
         encoding="utf-8",
         decode_responses=True,
@@ -56,7 +56,7 @@ async def redis_ping() -> bool:
     if redis_client is None:
         return False
     try:
-        return await redis_client.ping()
+        return await redis_client.ping()  # type: ignore[no-any-return]
     except Exception:  # noqa: BLE001
         return False
 

@@ -1,20 +1,20 @@
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
-from typing import AsyncGenerator
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from src.core.config import settings
-from src.core.container import container
-from src.core.logging import configure_logging
 from src.api.middleware.error_handler import register_exception_handlers
 from src.api.middleware.logging_middleware import LoggingMiddleware
 from src.api.v1.health import router as health_router
 from src.api.v1.router import api_v1_router
+from src.core.bootstrap import bootstrap_admin
+from src.core.config import settings
+from src.core.container import container
+from src.core.logging import configure_logging
+from src.core.redis import close_redis, init_redis
 from src.middleware.rate_limit import RateLimitMiddleware
 from src.middleware.security_headers import SecurityHeadersMiddleware
-from src.core.redis import init_redis, close_redis
-from src.core.bootstrap import bootstrap_admin
 
 
 @asynccontextmanager

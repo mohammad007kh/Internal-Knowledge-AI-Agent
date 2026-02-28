@@ -22,7 +22,6 @@ from src.core.deps import get_current_user, require_authenticated, require_role
 from src.core.exceptions import ForbiddenError, UnauthorizedError
 from src.models.user import User, UserRole
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -240,8 +239,9 @@ class TestNoDuplicatedJWTLogic:
     """AC-8: deps.py must not import jose or manually decode tokens."""
 
     def test_no_jose_import(self):
-        import src.core.deps as deps_module
         import inspect
+
+        import src.core.deps as deps_module
 
         source = inspect.getsource(deps_module)
         assert "from jose" not in source

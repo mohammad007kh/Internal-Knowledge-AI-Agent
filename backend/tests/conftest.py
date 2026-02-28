@@ -6,28 +6,28 @@ from pathlib import Path
 import pytest
 import pytest_asyncio
 from dotenv import load_dotenv
-from httpx import AsyncClient, ASGITransport
-from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
+from httpx import ASGITransport, AsyncClient
 from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 # Load .env before importing anything from src so that Settings can resolve
 # all required fields AND alembic's env.py gets DATABASE_URL in os.environ.
 _backend_dir = Path(__file__).parent.parent  # backend/
 load_dotenv(_backend_dir / ".env", override=True)
 
-from src.main import create_app  # noqa: E402
-from src.core.config import settings  # noqa: E402
-from src.core.database import get_db  # noqa: E402
-from src.models.user import User, UserRole  # noqa: E402
-from src.services.password_service import PasswordService  # noqa: E402
-from src.repositories.user_repository import UserRepository  # noqa: E402
-from src.repositories.invitation_repository import InvitationRepository  # noqa: E402
-from src.repositories.refresh_token_repository import RefreshTokenRepository  # noqa: E402
-from src.services.auth_service import AuthService  # noqa: E402
-from src.services.email_service import EmailService  # noqa: E402
-from src.services.user_service import UserService  # noqa: E402
 from src.api.v1.auth import _get_auth_service  # noqa: E402
 from src.api.v1.users import _get_user_service  # noqa: E402
+from src.core.config import settings  # noqa: E402
+from src.core.database import get_db  # noqa: E402
+from src.main import create_app  # noqa: E402
+from src.models.user import User, UserRole  # noqa: E402
+from src.repositories.invitation_repository import InvitationRepository  # noqa: E402
+from src.repositories.refresh_token_repository import RefreshTokenRepository  # noqa: E402
+from src.repositories.user_repository import UserRepository  # noqa: E402
+from src.services.auth_service import AuthService  # noqa: E402
+from src.services.email_service import EmailService  # noqa: E402
+from src.services.password_service import PasswordService  # noqa: E402
+from src.services.user_service import UserService  # noqa: E402
 
 TEST_DATABASE_URL = settings.DATABASE_URL.replace(
     "/knowledge_agent", "/test_knowledge_agent"

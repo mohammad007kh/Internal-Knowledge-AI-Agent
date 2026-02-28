@@ -2,18 +2,17 @@
 
 from __future__ import annotations
 
-import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
+
+import src.core.redis as redis_module
 from src.middleware.rate_limit import (
+    RATE_LIMIT_RULES,
     RateLimitMiddleware,
     _get_client_ip,
     _match_rule,
-    RATE_LIMIT_RULES,
 )
-
-import src.core.redis as redis_module
-
 
 # ── Helper-function tests ──────────────────────────────────────
 

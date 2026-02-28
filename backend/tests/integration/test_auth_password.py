@@ -1,9 +1,10 @@
 """Integration tests for password-reset and change-password endpoints."""
 import secrets
-from datetime import datetime, timezone, timedelta
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from httpx import AsyncClient
+
 from src.models.user import Invitation, User
 from tests.conftest import get_access_token
 
@@ -71,7 +72,7 @@ class TestInvitationSetup:
         inv = Invitation(
             email="newuser@example.com",
             token=raw,
-            expires_at=datetime.now(timezone.utc) + timedelta(days=7),
+            expires_at=datetime.now(UTC) + timedelta(days=7),
         )
         db_session.add(inv)
         await db_session.flush()

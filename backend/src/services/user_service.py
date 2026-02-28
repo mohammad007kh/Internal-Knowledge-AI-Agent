@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import secrets
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from src.core.exceptions import (
     ConflictError,
@@ -93,7 +93,7 @@ class UserService:
             await self._invitations.revoke_pending(existing.id)
 
         token = secrets.token_urlsafe()
-        expires_at = datetime.now(timezone.utc) + timedelta(
+        expires_at = datetime.now(UTC) + timedelta(
             days=INVITATION_EXPIRY_DAYS,
         )
 
@@ -125,7 +125,7 @@ class UserService:
             raise NotFoundError("Invitation not found.")
         if invitation.accepted_at:
             raise ConflictError("Invitation already used.")
-        if invitation.expires_at < datetime.now(timezone.utc):
+        if invitation.expires_at < datetime.now(UTC):
             raise ValidationError("Invitation has expired.")
 
         self._pw.validate_password_policy(password)

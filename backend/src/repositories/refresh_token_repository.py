@@ -8,7 +8,7 @@ revocation patterns that don't map to simple CRUD.
 from __future__ import annotations
 
 import hashlib
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
 from sqlalchemy import select, update
@@ -42,7 +42,7 @@ class RefreshTokenRepository:
             select(UserRefreshToken).where(
                 UserRefreshToken.token_hash == token_hash,
                 UserRefreshToken.revoked_at.is_(None),
-                UserRefreshToken.expires_at > datetime.now(timezone.utc),
+                UserRefreshToken.expires_at > datetime.now(UTC),
             )
         )
         return result.scalar_one_or_none()
@@ -54,7 +54,7 @@ class RefreshTokenRepository:
         record = UserRefreshToken(
             user_id=user_id,
             token_hash=_hash_token(raw_token),
-            expires_at=datetime.now(timezone.utc) + timedelta(days=7),
+            expires_at=datetime.now(UTC) + timedelta(days=7),
         )
         self._db.add(record)
         await self._db.commit()
@@ -66,7 +66,7 @@ class RefreshTokenRepository:
         await self._db.execute(
             update(UserRefreshToken)
             .where(UserRefreshToken.id == token_id)
-            .values(revoked_at=datetime.now(timezone.utc))
+            .values(revoked_at=datetime.now(UTC))
         )
         await self._db.commit()
 
@@ -78,7 +78,7 @@ class RefreshTokenRepository:
                 UserRefreshToken.user_id == user_id,
                 UserRefreshToken.revoked_at.is_(None),
             )
-            .values(revoked_at=datetime.now(timezone.utc))
+            .values(revoked_at=datetime.now(UTC))
         )
         await self._db.commit()
 
@@ -97,7 +97,7 @@ class RefreshTokenRepository:
                 PasswordResetToken.user_id == user_id,
                 PasswordResetToken.used_at.is_(None),
             )
-            .values(used_at=datetime.now(timezone.utc))
+            .values(used_at=datetime.now(UTC))
         )
         record = PasswordResetToken(
             user_id=user_id,
@@ -116,7 +116,7 @@ class RefreshTokenRepository:
             select(PasswordResetToken).where(
                 PasswordResetToken.token_hash == token_hash,
                 PasswordResetToken.used_at.is_(None),
-                PasswordResetToken.expires_at > datetime.now(timezone.utc),
+                PasswordResetToken.expires_at > datetime.now(UTC),
             )
         )
         return result.scalar_one_or_none()
@@ -126,6 +126,6 @@ class RefreshTokenRepository:
         await self._db.execute(
             update(PasswordResetToken)
             .where(PasswordResetToken.id == token_id)
-            .values(used_at=datetime.now(timezone.utc))
+            .values(used_at=datetime.now(UTC))
         )
         await self._db.commit()

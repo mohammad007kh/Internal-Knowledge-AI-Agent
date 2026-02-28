@@ -49,7 +49,7 @@ FAKE_RESET = "url-safe-reset-token"
 # ------------------------------------------------------------------ #
 
 
-class _FakeRole(str, enum.Enum):
+class _FakeRole(enum.StrEnum):
     admin = "admin"
     user = "user"
 

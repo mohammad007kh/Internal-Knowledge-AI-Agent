@@ -21,7 +21,7 @@ os.environ.setdefault("MINIO_ACCESS_KEY", "testaccess")
 os.environ.setdefault("MINIO_SECRET_KEY", "testsecret")
 os.environ.setdefault("ENCRYPTION_KEY", "dGVzdGVuY3J5cHRpb25rZXkxMjM0NTY3ODk=")
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
@@ -35,7 +35,6 @@ from src.core.deps import get_current_user
 from src.core.exceptions import ConflictError, ForbiddenError, NotFoundError
 from src.models.user import User, UserRole
 from src.services.user_service import UserService
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -52,8 +51,8 @@ def _make_user(**overrides) -> User:
         role=UserRole.admin,
         is_active=True,
         must_change_password=False,
-        created_at=datetime.now(timezone.utc),
-        updated_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
+        updated_at=datetime.now(UTC),
     )
     defaults.update(overrides)
     user = MagicMock(spec=User)

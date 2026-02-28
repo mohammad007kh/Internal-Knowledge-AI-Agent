@@ -8,7 +8,6 @@ from pydantic import BaseModel, EmailStr, field_validator
 
 from src.services.password_service import PasswordService
 
-
 # ---------------------------------------------------------------------------
 # Login
 # ---------------------------------------------------------------------------

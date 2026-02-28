@@ -4,7 +4,7 @@ All database interactions are mocked — no real DB is required.
 """
 
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -35,7 +35,7 @@ class TestCreateAccessToken:
         # Craft a token whose expiry is already in the past.
         data = {
             "sub": str(uuid.uuid4()),
-            "exp": datetime.now(timezone.utc) - timedelta(seconds=1),
+            "exp": datetime.now(UTC) - timedelta(seconds=1),
             "type": "access",
         }
         token = jwt.encode(data, settings.JWT_SECRET_KEY, algorithm=ALGORITHM)
@@ -51,7 +51,7 @@ class TestCreateAccessToken:
     def test_wrong_type_raises(self):
         data = {
             "sub": "user-123",
-            "exp": datetime.now(timezone.utc) + timedelta(minutes=5),
+            "exp": datetime.now(UTC) + timedelta(minutes=5),
             "type": "refresh",
         }
         token = jwt.encode(data, settings.JWT_SECRET_KEY, algorithm=ALGORITHM)
@@ -85,8 +85,8 @@ class TestVerifyRefreshToken:
     async def test_revoked_token_raises(self):
         db = AsyncMock()
         row = MagicMock()
-        row.revoked_at = datetime.now(timezone.utc)
-        row.expires_at = datetime.now(timezone.utc) + timedelta(days=7)
+        row.revoked_at = datetime.now(UTC)
+        row.expires_at = datetime.now(UTC) + timedelta(days=7)
         result_mock = MagicMock()
         result_mock.scalar_one_or_none.return_value = row
         db.execute = AsyncMock(return_value=result_mock)
@@ -99,7 +99,7 @@ class TestVerifyRefreshToken:
         db = AsyncMock()
         row = MagicMock()
         row.revoked_at = None
-        row.expires_at = datetime.now(timezone.utc) - timedelta(days=1)
+        row.expires_at = datetime.now(UTC) - timedelta(days=1)
         result_mock = MagicMock()
         result_mock.scalar_one_or_none.return_value = row
         db.execute = AsyncMock(return_value=result_mock)
@@ -112,7 +112,7 @@ class TestVerifyRefreshToken:
         db = AsyncMock()
         row = MagicMock()
         row.revoked_at = None
-        row.expires_at = datetime.now(timezone.utc) + timedelta(days=7)
+        row.expires_at = datetime.now(UTC) + timedelta(days=7)
         result_mock = MagicMock()
         result_mock.scalar_one_or_none.return_value = row
         db.execute = AsyncMock(return_value=result_mock)

@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING
+from collections.abc import Sequence
+from typing import TYPE_CHECKING, Any
 
 from fastapi import Request
 from fastapi.exceptions import RequestValidationError
@@ -16,7 +17,7 @@ logger = logging.getLogger(__name__)
 _PROBLEM_CONTENT_TYPE = "application/problem+json"
 
 
-def _sanitize_validation_errors(errors: list) -> list:
+def _sanitize_validation_errors(errors: Sequence[Any]) -> list[Any]:
     """Convert non-JSON-serializable Exception objects in Pydantic v2 ctx to strings."""
     sanitized = []
     for err in errors:
@@ -37,9 +38,9 @@ def _problem_response(
     status: int,
     detail: str,
     instance: str,
-    extra: dict | None = None,
+    extra: dict[str, Any] | None = None,
 ) -> JSONResponse:
-    body: dict = {
+    body: dict[str, Any] = {
         "type": f"https://knowledge-agent.internal/errors/{type_}",
         "title": title,
         "status": status,
@@ -55,7 +56,7 @@ def _problem_response(
     )
 
 
-def register_exception_handlers(app: "FastAPI") -> None:
+def register_exception_handlers(app: FastAPI) -> None:
     """Attach all exception handlers to the app.  Call from create_app()."""
 
     @app.exception_handler(AppError)

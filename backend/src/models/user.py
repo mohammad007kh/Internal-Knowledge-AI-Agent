@@ -17,6 +17,7 @@ from __future__ import annotations
 import enum
 import uuid
 from datetime import datetime
+from typing import TYPE_CHECKING
 
 from sqlalchemy import Boolean, DateTime, Enum, ForeignKey, String
 from sqlalchemy.dialects.postgresql import UUID
@@ -24,12 +25,14 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from src.models.base import Base, SoftDeleteMixin, TimestampMixin, UUIDMixin
 
+if TYPE_CHECKING:
+    from src.models.refresh_token import UserRefreshToken
 
 # ---------------------------------------------------------------------------
 # Enum
 # ---------------------------------------------------------------------------
 
-class UserRole(str, enum.Enum):
+class UserRole(enum.StrEnum):
     """Application-level roles used for RBAC."""
 
     admin = "admin"
@@ -59,17 +62,17 @@ class User(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
     )
 
     # -- relationships -------------------------------------------------------
-    refresh_tokens: Mapped[list["UserRefreshToken"]] = relationship(  # noqa: F821
+    refresh_tokens: Mapped[list[UserRefreshToken]] = relationship(
         "UserRefreshToken",
         back_populates="user",
         cascade="all, delete-orphan",
     )
-    reset_tokens: Mapped[list["PasswordResetToken"]] = relationship(  # noqa: F821
+    reset_tokens: Mapped[list[PasswordResetToken]] = relationship(
         "PasswordResetToken",
         back_populates="user",
         cascade="all, delete-orphan",
     )
-    invitations_sent: Mapped[list["Invitation"]] = relationship(
+    invitations_sent: Mapped[list[Invitation]] = relationship(
         "Invitation",
         back_populates="invited_by_user",
         foreign_keys="Invitation.invited_by",
@@ -110,7 +113,7 @@ class Invitation(Base, UUIDMixin, TimestampMixin):
     )
 
     # -- relationships -------------------------------------------------------
-    invited_by_user: Mapped["User | None"] = relationship(
+    invited_by_user: Mapped[User | None] = relationship(
         "User",
         back_populates="invitations_sent",
         foreign_keys=[invited_by],
@@ -152,6 +155,6 @@ class PasswordResetToken(Base, UUIDMixin, TimestampMixin):
     )
 
     # -- relationships -------------------------------------------------------
-    user: Mapped["User"] = relationship(
+    user: Mapped[User] = relationship(
         "User", back_populates="reset_tokens",
     )

@@ -13,7 +13,7 @@ Covers:
 """
 
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from types import SimpleNamespace
 
 import pytest
@@ -28,7 +28,6 @@ from src.schemas.auth import (
     TokenResponse,
 )
 from src.schemas.user import UpdateUserRequest, UserListResponse, UserResponse
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -46,10 +45,10 @@ def _orm_user(**overrides):
         "full_name": "Alice Smith",
         "role": "user",
         "is_active": True,
-        "created_at": datetime.now(timezone.utc),
+        "created_at": datetime.now(UTC),
         "hashed_password": "$2b$12$fakehash",
         "deleted_at": None,
-        "updated_at": datetime.now(timezone.utc),
+        "updated_at": datetime.now(UTC),
         "must_change_password": False,
     }
     defaults.update(overrides)

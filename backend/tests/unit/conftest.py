@@ -3,6 +3,7 @@ Unit test fixtures — mock all external I/O so unit tests run without
 a real database, Redis, or MinIO.
 """
 from unittest.mock import AsyncMock, MagicMock, patch
+
 import pytest
 
 

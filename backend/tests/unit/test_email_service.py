@@ -21,7 +21,6 @@ import pytest
 
 from src.services.email_service import EmailService
 
-
 # ── Fixtures ──────────────────────────────────────────────────────────
 
 @pytest.fixture()

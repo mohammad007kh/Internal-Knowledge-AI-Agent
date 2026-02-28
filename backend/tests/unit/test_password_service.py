@@ -8,12 +8,10 @@ Tests cover:
 * No false positives on a valid password
 """
 
-import re
 
 import pytest
 
-from src.services.password_service import PasswordService, _BCRYPT_ROUNDS
-
+from src.services.password_service import _BCRYPT_ROUNDS, PasswordService
 
 # ---------------------------------------------------------------------------
 # Helpers

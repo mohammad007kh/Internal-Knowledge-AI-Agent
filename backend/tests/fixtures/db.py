@@ -5,8 +5,8 @@ backend/tests/conftest.py (session-scoped). This module provides
 helpers for direct DB access in tests.
 """
 import pytest
-from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncSession
 
 
 @pytest.fixture

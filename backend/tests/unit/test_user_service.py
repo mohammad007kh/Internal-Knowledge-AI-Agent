@@ -35,9 +35,9 @@ list_users
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -49,7 +49,6 @@ from src.core.exceptions import (
 )
 from src.models.user import UserRole
 from src.services.user_service import INVITATION_EXPIRY_DAYS, UserService
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -83,9 +82,9 @@ def _make_invitation(
 ) -> SimpleNamespace:
     """Lightweight stand-in for an ``Invitation`` ORM instance."""
     if expired:
-        expires_at = datetime.now(timezone.utc) - timedelta(days=1)
+        expires_at = datetime.now(UTC) - timedelta(days=1)
     else:
-        expires_at = datetime.now(timezone.utc) + timedelta(days=INVITATION_EXPIRY_DAYS)
+        expires_at = datetime.now(UTC) + timedelta(days=INVITATION_EXPIRY_DAYS)
 
     return SimpleNamespace(
         id=uuid.uuid4(),
@@ -147,7 +146,7 @@ class TestRegister:
     @pytest.mark.asyncio
     async def test_happy_path_creates_user(self, service, mocks) -> None:
         user_repo, _, pw_svc, _, _ = mocks
-        user = await service.register("Alice@Example.COM", VALID_PASSWORD, "Alice")
+        await service.register("Alice@Example.COM", VALID_PASSWORD, "Alice")
 
         pw_svc.validate_password_policy.assert_called_once_with(VALID_PASSWORD)
         pw_svc.hash_password.assert_called_once_with(VALID_PASSWORD)
@@ -220,7 +219,7 @@ class TestInvite:
     async def test_invitation_expiry_is_7_days(self, service, mocks) -> None:
         _, inv_repo, _, _, _ = mocks
         admin = _make_user(role=UserRole.admin)
-        before = datetime.now(timezone.utc)
+        before = datetime.now(UTC)
 
         await service.invite(admin, "invitee@example.com", UserRole.user)
 
@@ -245,7 +244,7 @@ class TestAcceptInvitation:
         invitation = _make_invitation(token="valid-tok")
         inv_repo.get_by_token.return_value = invitation
 
-        user = await service.accept_invitation("valid-tok", "Bob", VALID_PASSWORD)
+        await service.accept_invitation("valid-tok", "Bob", VALID_PASSWORD)
 
         pw_svc.validate_password_policy.assert_called_once_with(VALID_PASSWORD)
         pw_svc.hash_password.assert_called_once_with(VALID_PASSWORD)
@@ -262,7 +261,7 @@ class TestAcceptInvitation:
     @pytest.mark.asyncio
     async def test_already_used_raises_conflict(self, service, mocks) -> None:
         _, inv_repo, _, _, _ = mocks
-        inv = _make_invitation(accepted_at=datetime.now(timezone.utc))
+        inv = _make_invitation(accepted_at=datetime.now(UTC))
         inv_repo.get_by_token.return_value = inv
 
         with pytest.raises(ConflictError, match="already used"):

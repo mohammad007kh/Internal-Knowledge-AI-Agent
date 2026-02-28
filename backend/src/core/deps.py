@@ -14,6 +14,7 @@ These are the **only** places where access tokens are decoded outside of tests.
 
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
 from uuid import UUID
 
 from fastapi import Depends
@@ -66,7 +67,7 @@ async def get_current_user(
 require_authenticated = get_current_user
 
 
-def require_role(*roles: UserRole):
+def require_role(*roles: UserRole) -> Callable[..., Awaitable[User]]:
     """Return a FastAPI dependency that enforces one of *roles*.
 
     Usage::

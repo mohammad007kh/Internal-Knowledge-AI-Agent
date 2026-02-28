@@ -15,8 +15,9 @@ Create Date: 2026-02-26
 """
 
 import sqlalchemy as sa
-from alembic import op
 from sqlalchemy.dialects import postgresql
+
+from alembic import op
 
 # Revision identifiers — used by Alembic to chain migrations.
 revision: str = "0004"

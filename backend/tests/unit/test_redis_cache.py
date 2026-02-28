@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -17,7 +17,6 @@ from src.core.redis import (
     init_redis,
     redis_ping,
 )
-
 
 # ── Fixtures ────────────────────────────────────────────────────────────────────
 

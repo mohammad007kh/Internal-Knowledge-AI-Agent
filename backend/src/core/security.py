@@ -14,7 +14,8 @@ Refresh tokens
 """
 
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
+from typing import TYPE_CHECKING, Any
 
 from fastapi import Response
 from jose import JWTError, jwt
@@ -22,6 +23,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.config import settings
 from src.core.exceptions import UnauthorizedError
+
+if TYPE_CHECKING:
+    from src.models.refresh_token import UserRefreshToken
 
 ALGORITHM = "HS256"
 
@@ -31,7 +35,7 @@ ALGORITHM = "HS256"
 # ---------------------------------------------------------------------------
 
 
-def create_access_token(payload: dict) -> str:
+def create_access_token(payload: dict[str, Any]) -> str:
     """Encode *payload* as a signed JWT access token.
 
     Parameters
@@ -45,14 +49,14 @@ def create_access_token(payload: dict) -> str:
         Signed JWT string.
     """
     data = payload.copy()
-    expire = datetime.now(timezone.utc) + timedelta(
+    expire = datetime.now(UTC) + timedelta(
         minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES
     )
     data.update({"exp": expire, "type": "access"})
-    return jwt.encode(data, settings.JWT_SECRET_KEY, algorithm=ALGORITHM)
+    return jwt.encode(data, settings.JWT_SECRET_KEY, algorithm=ALGORITHM)  # type: ignore[no-any-return]
 
 
-def verify_access_token(token: str) -> dict:
+def verify_access_token(token: str) -> dict[str, Any]:
     """Decode and validate a JWT access token.
 
     Parameters
@@ -74,7 +78,7 @@ def verify_access_token(token: str) -> dict:
         payload = jwt.decode(token, settings.JWT_SECRET_KEY, algorithms=[ALGORITHM])
         if payload.get("type") != "access":
             raise UnauthorizedError("Invalid token type.")
-        return payload
+        return payload  # type: ignore[no-any-return]
     except JWTError as e:
         raise UnauthorizedError("Token is invalid or expired.") from e
 
@@ -89,7 +93,7 @@ def create_refresh_token() -> str:
     return str(uuid.uuid4())
 
 
-async def verify_refresh_token(token: str, db: AsyncSession):
+async def verify_refresh_token(token: str, db: AsyncSession) -> "UserRefreshToken":
     """Look up *token* in the database and validate it.
 
     Parameters
@@ -121,7 +125,7 @@ async def verify_refresh_token(token: str, db: AsyncSession):
         raise UnauthorizedError("Refresh token not found.")
     if row.revoked_at is not None:
         raise UnauthorizedError("Refresh token has been revoked.")
-    if row.expires_at < datetime.now(timezone.utc):
+    if row.expires_at < datetime.now(UTC):
         raise UnauthorizedError("Refresh token has expired.")
     return row
 
@@ -145,7 +149,7 @@ async def revoke_refresh_token(token: str, db: AsyncSession) -> None:
     )
     row = result.scalar_one_or_none()
     if row is not None:
-        row.revoked_at = datetime.now(timezone.utc)
+        row.revoked_at = datetime.now(UTC)
         await db.flush()
 
 

@@ -1,6 +1,7 @@
 import asyncio
-from sqlalchemy.ext.asyncio import create_async_engine
+
 from sqlalchemy import text
+from sqlalchemy.ext.asyncio import create_async_engine
 
 URL = "postgresql+asyncpg://postgres:postgres@localhost:5434/test_knowledge_agent"
 

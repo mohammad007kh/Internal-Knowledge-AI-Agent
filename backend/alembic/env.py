@@ -15,8 +15,11 @@ import asyncio
 import os
 from logging.config import fileConfig
 
-from alembic import context
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
+
+import src.models.refresh_token  # noqa: F401  — T-012
+import src.models.user  # noqa: F401  — T-020
+from alembic import context
 
 # ─── Import all models here so Base.metadata is fully populated ─────────────
 # Add new model imports below as tables are created.  Each import registers
@@ -28,9 +31,6 @@ from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 # 3. Run: alembic revision --autogenerate -m "description_of_change"
 # 4. Review the generated migration, then: alembic upgrade head
 from src.models.base import Base  # noqa: F401
-import src.models.refresh_token  # noqa: F401  — T-012
-
-import src.models.user  # noqa: F401  — T-020
 
 # Future model imports (uncomment as tasks are implemented):
 # import src.models.invitation         # T-020 (if separate file)

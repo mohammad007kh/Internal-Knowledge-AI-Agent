@@ -1,5 +1,8 @@
 import logging
+from typing import Any
+
 import structlog
+
 from src.core.config import settings
 
 
@@ -19,5 +22,5 @@ def configure_logging() -> None:
     )
 
 
-def get_logger(name: str = __name__):
+def get_logger(name: str = __name__) -> Any:
     return structlog.get_logger(name)

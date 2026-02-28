@@ -1,6 +1,6 @@
 import os
 
-import yaml
+import yaml  # type: ignore[import-untyped]
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -63,4 +63,4 @@ class Settings(BaseSettings):
                 )
 
 
-settings = Settings()
+settings = Settings()  # type: ignore[call-arg]

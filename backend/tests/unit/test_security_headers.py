@@ -1,6 +1,5 @@
 import pytest
 from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse
 from httpx import ASGITransport, AsyncClient
 
 from src.middleware.security_headers import (
@@ -8,7 +7,6 @@ from src.middleware.security_headers import (
     SecurityHeadersMiddleware,
     _is_csrf_exempt,
 )
-
 
 # ── Helpers ──────────────────────────────────────────────────────────
 

@@ -2,6 +2,7 @@
 
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useRouter, useSearchParams } from 'next/navigation'
+import { Suspense } from 'react'
 import { useForm } from 'react-hook-form'
 import { toast } from 'sonner'
 import { z } from 'zod'
@@ -28,7 +29,7 @@ const setupSchema = z
   })
 type SetupFormValues = z.infer<typeof setupSchema>
 
-export default function SetupPage() {
+function SetupForm() {
   const params = useSearchParams()
   const router = useRouter()
   const inviteToken = params.get('token') ?? ''
@@ -111,5 +112,13 @@ export default function SetupPage() {
         </form>
       </CardContent>
     </Card>
+  )
+}
+
+export default function SetupPage() {
+  return (
+    <Suspense fallback={<Card><CardHeader><CardTitle>Loading…</CardTitle></CardHeader></Card>}>
+      <SetupForm />
+    </Suspense>
   )
 }

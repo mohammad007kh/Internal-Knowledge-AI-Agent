@@ -3,6 +3,7 @@ Integration test fixtures — use real DB (test_knowledge_agent),
 mock only external third-party services (MinIO, Celery, LLM).
 """
 from unittest.mock import AsyncMock, MagicMock, patch
+
 import pytest
 
 

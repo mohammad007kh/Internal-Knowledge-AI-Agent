@@ -12,12 +12,16 @@ user_id → users.id  (CASCADE DELETE — tokens are cleaned up with the user)
 
 import uuid
 from datetime import datetime
+from typing import TYPE_CHECKING
 
 from sqlalchemy import DateTime, ForeignKey, String
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from src.models.base import Base, TimestampMixin, UUIDMixin
+
+if TYPE_CHECKING:
+    from src.models.user import User
 
 
 class UserRefreshToken(Base, UUIDMixin, TimestampMixin):
@@ -47,6 +51,6 @@ class UserRefreshToken(Base, UUIDMixin, TimestampMixin):
     )
 
     # -- relationships -------------------------------------------------------
-    user: Mapped["User"] = relationship(  # noqa: F821
+    user: Mapped["User"] = relationship(
         "User", back_populates="refresh_tokens",
     )

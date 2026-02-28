@@ -8,7 +8,8 @@ authentication lifecycle.
 from __future__ import annotations
 
 import secrets
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
+from typing import TYPE_CHECKING
 from uuid import UUID
 
 from src.core.exceptions import BadRequestError, ForbiddenError, NotFoundError, UnauthorizedError
@@ -17,6 +18,9 @@ from src.repositories.refresh_token_repository import RefreshTokenRepository
 from src.repositories.user_repository import UserRepository
 from src.services.password_service import PasswordService
 from src.services.user_service import UserService
+
+if TYPE_CHECKING:
+    from src.models.user import User
 
 
 class AuthService:
@@ -119,7 +123,7 @@ class AuthService:
             return None
 
         raw = secrets.token_urlsafe(32)
-        expires_at = datetime.now(timezone.utc) + timedelta(hours=1)
+        expires_at = datetime.now(UTC) + timedelta(hours=1)
         await self._refresh_repo.create_password_reset_token(
             user.id, raw, expires_at
         )
@@ -188,7 +192,7 @@ class AuthService:
     # Helpers                                                             #
     # ------------------------------------------------------------------ #
 
-    async def _issue_tokens(self, user) -> tuple[str, str, bool]:
+    async def _issue_tokens(self, user: User) -> tuple[str, str, bool]:
         """Create an access + refresh token pair for *user*.
 
         Returns ``(access_token, raw_refresh_token, must_change_password)``.

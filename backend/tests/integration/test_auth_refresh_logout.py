@@ -1,6 +1,7 @@
 """Integration tests for refresh and logout endpoints."""
 import pytest
 from httpx import AsyncClient
+
 from src.models.user import User
 from tests.conftest import get_access_token
 

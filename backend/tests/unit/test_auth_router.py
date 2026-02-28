@@ -12,7 +12,7 @@ produce the expected RFC 7807 status codes.
 from __future__ import annotations
 
 import os
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
@@ -34,13 +34,10 @@ from src.api.v1.auth import _get_auth_service, router
 from src.core.deps import require_authenticated
 from src.core.exceptions import (
     BadRequestError,
-    ConflictError,
-    NotFoundError,
     UnauthorizedError,
 )
 from src.models.user import User, UserRole
 from src.services.auth_service import AuthService
-
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -56,8 +53,8 @@ def _make_user(**overrides) -> User:
         role=UserRole.user,
         is_active=True,
         must_change_password=False,
-        created_at=datetime.now(timezone.utc),
-        updated_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
+        updated_at=datetime.now(UTC),
     )
     defaults.update(overrides)
     user = MagicMock(spec=User)

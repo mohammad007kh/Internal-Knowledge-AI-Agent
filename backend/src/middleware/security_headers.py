@@ -1,6 +1,6 @@
 import logging
 import secrets
-from typing import Callable
+from collections.abc import Awaitable, Callable
 
 from fastapi import Request, Response
 from fastapi.exceptions import RequestValidationError
@@ -59,7 +59,7 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         super().__init__(app)
         self._is_https = is_https
 
-    async def dispatch(self, request: Request, call_next: Callable) -> Response:
+    async def dispatch(self, request: Request, call_next: Callable[[Request], Awaitable[Response]]) -> Response:
         # ── CSRF check for state-mutating methods ──
         if request.method in MUTATION_METHODS and not _is_csrf_exempt(request):
             csrf_header = request.headers.get(CSRF_HEADER)

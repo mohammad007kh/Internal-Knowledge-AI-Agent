@@ -2,6 +2,7 @@
 
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useRouter, useSearchParams } from 'next/navigation'
+import { Suspense } from 'react'
 import { useForm } from 'react-hook-form'
 import { toast } from 'sonner'
 import { z } from 'zod'
@@ -28,7 +29,7 @@ const confirmSchema = z
   })
 type ConfirmFormValues = z.infer<typeof confirmSchema>
 
-export default function PasswordResetConfirmPage() {
+function PasswordResetConfirmForm() {
   const params = useSearchParams()
   const router = useRouter()
   const resetToken = params.get('token') ?? ''
@@ -115,5 +116,13 @@ export default function PasswordResetConfirmPage() {
         </form>
       </CardContent>
     </Card>
+  )
+}
+
+export default function PasswordResetConfirmPage() {
+  return (
+    <Suspense fallback={<Card><CardHeader><CardTitle>Loading…</CardTitle></CardHeader></Card>}>
+      <PasswordResetConfirmForm />
+    </Suspense>
   )
 }

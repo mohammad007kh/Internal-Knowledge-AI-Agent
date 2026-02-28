@@ -11,7 +11,6 @@ from pydantic import BaseModel, ConfigDict, EmailStr
 
 from src.models.user import UserRole
 
-
 # ---------------------------------------------------------------------------
 # Response
 # ---------------------------------------------------------------------------
