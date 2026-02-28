@@ -19,6 +19,7 @@ from typing import Any, cast
 
 from cryptography.fernet import Fernet
 
+from src.connectors.factory import ConnectorFactory
 from src.core.config import Settings
 from src.core.exceptions import ConflictError, NotFoundError
 from src.models.source import Source
@@ -29,9 +30,15 @@ from src.schemas.source import SourceCreate, SourceUpdate
 class SourceService:
     """Business-logic layer for Source CRUD and config encryption."""
 
-    def __init__(self, source_repo: SourceRepository, settings: Settings) -> None:
+    def __init__(
+        self,
+        source_repo: SourceRepository,
+        settings: Settings,
+        connector_factory: ConnectorFactory,
+    ) -> None:
         self._repo = source_repo
         self._fernet = Fernet(settings.ENCRYPTION_KEY.encode())
+        self._connector_factory = connector_factory
 
     # ------------------------------------------------------------------ #
     # Encryption helpers
@@ -185,9 +192,11 @@ class SourceService:
         try:
             source = await self.get_source(source_id)
             config = await self.get_source_config(source_id)
-            from src.connectors.registry import get_connector  # noqa: PLC0415
-
-            connector = get_connector(source.source_type, config)
+            connector = self._connector_factory.build(
+                source_type=source.source_type,
+                source_id=str(source_id),
+                decrypted_config=config,
+            )
             return bool(await connector.test_connection())
         except Exception:  # noqa: BLE001
             return False

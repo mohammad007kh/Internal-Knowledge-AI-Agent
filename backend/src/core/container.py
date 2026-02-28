@@ -1,5 +1,6 @@
 from dependency_injector import containers, providers
 
+from src.connectors.factory import ConnectorFactory
 from src.core.config import settings
 from src.core.database import AsyncSessionLocal
 from src.repositories.invitation_repository import InvitationRepository
@@ -49,6 +50,7 @@ class Container(containers.DeclarativeContainer):
         SourceService,
         source_repo=source_repo,
         settings=config,
+        connector_factory=providers.Singleton(ConnectorFactory),
     )
 
 
