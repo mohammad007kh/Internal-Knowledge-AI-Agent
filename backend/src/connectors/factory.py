@@ -43,7 +43,9 @@ class ConnectorFactory:
                 :data:`~src.connectors.registry.CONNECTOR_REGISTRY`.
         """
         logger.info(
-            "ConnectorFactory.build",
+            "ConnectorFactory.build source_id=%s source_type=%s",
+            source_id,
+            source_type.value,
             extra={"source_id": source_id, "source_type": source_type.value},
         )
         return get_connector(source_type, decrypted_config)

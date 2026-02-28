@@ -2,7 +2,6 @@ import asyncio
 import os
 import subprocess
 from pathlib import Path
-from typing import TYPE_CHECKING
 
 import pytest
 import pytest_asyncio
@@ -145,12 +144,15 @@ if _INTEGRATION:
           - invitations          (migration 0003)
           - password_reset_tokens (migration 0004)
           - users                (migration 0003)
+          - source_permissions   (migration 0005 / T-043)
+          - sources              (migration 0005 / T-043)
         """
         engine = create_async_engine(TEST_DATABASE_URL)
         async with engine.begin() as conn:
             await conn.execute(
                 text(
-                    "TRUNCATE users, user_refresh_tokens, invitations,"
+                    "TRUNCATE source_permissions, sources, users,"
+                    " user_refresh_tokens, invitations,"
                     " password_reset_tokens RESTART IDENTITY CASCADE"
                 )
             )
