@@ -12,6 +12,7 @@ from src.repositories.source_repository import SourceRepository
 from src.repositories.sync_job_repository import SyncJobRepository
 from src.repositories.user_repository import UserRepository
 from src.services.auth_service import AuthService
+from src.services.chunking_service import ChunkingService
 from src.services.email_service import EmailService
 from src.services.password_service import PasswordService
 from src.services.source_permission_service import SourcePermissionService
@@ -74,6 +75,9 @@ class Container(containers.DeclarativeContainer):
         SyncJobService,
         session_factory=db_session_factory,
         sync_job_repo=sync_job_repo,
+    )
+    chunking_service: providers.Singleton[ChunkingService] = providers.Singleton(
+        ChunkingService
     )
 
 

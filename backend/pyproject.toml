@@ -24,6 +24,7 @@ dependencies = [
     "langgraph>=0.2",
     "langfuse>=2.0",
     "langchain-openai>=0.2",
+    "langchain-text-splitters>=0.2.0",
     "minio>=7.2",
     "cryptography>=43.0",
     "dependency-injector>=4.41",
