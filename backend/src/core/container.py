@@ -7,11 +7,13 @@ from src.repositories.chunk_repository import ChunkRepository
 from src.repositories.document_repository import DocumentRepository
 from src.repositories.invitation_repository import InvitationRepository
 from src.repositories.refresh_token_repository import RefreshTokenRepository
+from src.repositories.source_permission_repository import SourcePermissionRepository
 from src.repositories.source_repository import SourceRepository
 from src.repositories.user_repository import UserRepository
 from src.services.auth_service import AuthService
 from src.services.email_service import EmailService
 from src.services.password_service import PasswordService
+from src.services.source_permission_service import SourcePermissionService
 from src.services.source_service import SourceService
 from src.services.user_service import UserService
 
@@ -31,6 +33,9 @@ class Container(containers.DeclarativeContainer):
     source_repo = providers.Factory(SourceRepository, session=db_session_factory)
     document_repo = providers.Factory(DocumentRepository, session=db_session_factory)
     chunk_repo = providers.Factory(ChunkRepository, session=db_session_factory)
+    source_permission_repo = providers.Factory(
+        SourcePermissionRepository, session=db_session_factory
+    )
 
     # ── Services ────────────────────────────────────────────────────
     password_service = providers.Factory(PasswordService)
@@ -55,6 +60,12 @@ class Container(containers.DeclarativeContainer):
         source_repo=source_repo,
         settings=config,
         connector_factory=providers.Singleton(ConnectorFactory),
+    )
+    source_permission_service = providers.Factory(
+        SourcePermissionService,
+        source_permission_repo=source_permission_repo,
+        source_repo=source_repo,
+        user_repo=user_repo,
     )
 
 
