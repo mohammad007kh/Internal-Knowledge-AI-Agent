@@ -9,7 +9,10 @@ from __future__ import annotations
 import uuid
 from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from src.schemas.raw_document import RawDocument
 
 from pydantic import BaseModel, Field
 
@@ -95,6 +98,19 @@ class BaseConnector(ABC):
         Return ``True`` on success, ``False`` on any failure.
         MUST NOT raise — all exceptions must be caught internally.
         """
+
+    async def fetch_documents(self) -> list[RawDocument]:
+        """
+        Return all documents from this source as a flat list of
+        :class:`~src.schemas.raw_document.RawDocument` objects.
+
+        The default implementation raises ``NotImplementedError``; concrete
+        connectors that back the Celery sync pipeline should override this
+        method instead of (or in addition to) ``extract_documents``.
+        """
+        raise NotImplementedError(
+            f"{type(self).__name__} does not implement fetch_documents()"
+        )
 
     # ---------------------------------------------------------------- #
     # Async context manager support
