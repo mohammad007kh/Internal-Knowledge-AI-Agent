@@ -85,7 +85,7 @@ class WebUrlConnector(BaseConnector):
             # Any non-200 → assume allowed
         except Exception:  # noqa: BLE001
             # Network errors while fetching robots.txt → assume allowed
-            pass
+            return True
         return rp.can_fetch(self._user_agent, self._url)
 
     # ------------------------------------------------------------------ #
