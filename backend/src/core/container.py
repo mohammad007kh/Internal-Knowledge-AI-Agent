@@ -3,6 +3,8 @@ from dependency_injector import containers, providers
 from src.connectors.factory import ConnectorFactory
 from src.core.config import settings
 from src.core.database import AsyncSessionLocal
+from src.repositories.chunk_repository import ChunkRepository
+from src.repositories.document_repository import DocumentRepository
 from src.repositories.invitation_repository import InvitationRepository
 from src.repositories.refresh_token_repository import RefreshTokenRepository
 from src.repositories.source_repository import SourceRepository
@@ -27,6 +29,8 @@ class Container(containers.DeclarativeContainer):
         RefreshTokenRepository, session=db_session_factory,
     )
     source_repo = providers.Factory(SourceRepository, session=db_session_factory)
+    document_repo = providers.Factory(DocumentRepository, session=db_session_factory)
+    chunk_repo = providers.Factory(ChunkRepository, session=db_session_factory)
 
     # ── Services ────────────────────────────────────────────────────
     password_service = providers.Factory(PasswordService)
