@@ -30,6 +30,8 @@ class Settings(BaseSettings):
     BOOTSTRAP_ADMIN_PASSWORD: str | None = None
     # Encryption
     ENCRYPTION_KEY: str
+    # OpenAI
+    OPENAI_API_KEY: str = ""
     # Email
     SMTP_HOST: str = "localhost"
     SMTP_PORT: int = 587

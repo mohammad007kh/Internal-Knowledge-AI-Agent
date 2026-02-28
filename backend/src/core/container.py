@@ -14,6 +14,7 @@ from src.repositories.user_repository import UserRepository
 from src.services.auth_service import AuthService
 from src.services.chunking_service import ChunkingService
 from src.services.email_service import EmailService
+from src.services.embedding_service import EmbeddingService
 from src.services.password_service import PasswordService
 from src.services.source_permission_service import SourcePermissionService
 from src.services.source_service import SourceService
@@ -78,6 +79,10 @@ class Container(containers.DeclarativeContainer):
     )
     chunking_service: providers.Singleton[ChunkingService] = providers.Singleton(
         ChunkingService
+    )
+    embedding_service: providers.Singleton[EmbeddingService] = providers.Singleton(
+        EmbeddingService,
+        openai_api_key=config.provided.OPENAI_API_KEY,
     )
 
 

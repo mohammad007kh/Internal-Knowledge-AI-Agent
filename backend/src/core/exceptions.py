@@ -77,3 +77,14 @@ class ServiceUnavailableError(AppError):
     status_code = 503
     error_type = "service_unavailable"
     title = "Service Unavailable"
+
+
+class EmbeddingDimensionError(ValueError):
+    """Raised when an embedding vector has an unexpected number of dimensions."""
+
+    def __init__(self, expected: int, actual: int) -> None:
+        super().__init__(
+            f"Expected embedding dimension {expected}, got {actual}"
+        )
+        self.expected = expected
+        self.actual = actual
