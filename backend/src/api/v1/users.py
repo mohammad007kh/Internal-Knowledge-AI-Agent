@@ -12,7 +12,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query, status
 
-from src.core.deps import require_role
+from src.core.deps import get_current_user, require_role
 from src.models.user import User, UserRole
 from src.schemas.user import (
     InvitationCreateRequest,
@@ -20,6 +20,7 @@ from src.schemas.user import (
     UserListResponse,
     UserResponse,
 )
+from src.services.source_permission_service import SourcePermissionService
 from src.services.user_service import UserService
 
 router = APIRouter()
@@ -30,6 +31,13 @@ router = APIRouter()
 # ---------------------------------------------------------------------------
 
 AdminOnly = require_role(UserRole.admin)
+
+
+def _get_permission_service() -> SourcePermissionService:
+    """Resolve :class:`SourcePermissionService` from the DI container."""
+    from src.core.container import Container  # noqa: PLC0415
+
+    return Container.source_permission_service()
 
 
 def _get_user_service() -> UserService:
@@ -96,3 +104,16 @@ async def deactivate_user(
 ) -> None:
     """Soft-deactivate a user and revoke their refresh tokens."""
     await user_svc.deactivate_user(admin, user_id)
+
+
+@router.get(
+    "/me/sources",
+    response_model=list[UUID],
+    summary="List source IDs accessible to the current user",
+)
+async def list_my_sources(
+    current_user: User = Depends(get_current_user),
+    svc: SourcePermissionService = Depends(_get_permission_service),
+) -> list[UUID]:
+    """Return the IDs of all sources the authenticated user may access."""
+    return await svc.list_for_user(current_user.id)
