@@ -158,3 +158,4 @@ No `SC-` (success criterion) tags were found in any task file; the table below c
 | T-043 | Source Pydantic Schemas (SourceCreate/Update/Response/ListItem/PaginatedSources/TestConnectionResponse) | Done | Y | 2026-02-28 |
 | T-044 | Sources FastAPI Router (CRUD + test-connection endpoints, ownership/admin guard) | Done | Y | 2026-02-28 |
 | T-045 | Connector Base + Registry (Document, BaseConnector ABC, CONNECTOR_REGISTRY, @register, get_connector; fix T-042 API mismatch) | Done | Y | 2026-02-28 |
+| T-046 | WebUrl Connector (WebUrlConnector, robots.txt respect, BeautifulSoup extraction, MinIO HTML archive; StorageService stub) | Done | Y | 2026-02-28 |

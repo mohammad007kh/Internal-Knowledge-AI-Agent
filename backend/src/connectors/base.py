@@ -75,7 +75,7 @@ class BaseConnector(ABC):
         """
 
     @abstractmethod
-    async def extract_documents(self) -> AsyncIterator[Document]:
+    def extract_documents(self) -> AsyncIterator[Document]:
         """
         Yield ``Document`` objects one at a time.
         Allows the pipeline to start processing before extraction completes.
