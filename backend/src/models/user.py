@@ -27,6 +27,7 @@ from src.models.base import Base, SoftDeleteMixin, TimestampMixin, UUIDMixin
 
 if TYPE_CHECKING:
     from src.models.refresh_token import UserRefreshToken
+    from src.models.source import Source
 
 # ---------------------------------------------------------------------------
 # Enum
@@ -76,6 +77,12 @@ class User(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
         "Invitation",
         back_populates="invited_by_user",
         foreign_keys="Invitation.invited_by",
+    )
+    sources: Mapped[list[Source]] = relationship(
+        "Source",
+        back_populates="owner",
+        cascade="all, delete-orphan",
+        lazy="selectin",
     )
 
 
