@@ -8,6 +8,7 @@ from src.schemas.source import (
     SourceUpdate,
     TestConnectionResponse,
 )
+from src.schemas.sync_job import SyncJobResponse
 
 __all__ = [
     "PaginatedSources",
@@ -15,5 +16,6 @@ __all__ = [
     "SourceListItem",
     "SourceResponse",
     "SourceUpdate",
+    "SyncJobResponse",
     "TestConnectionResponse",
 ]

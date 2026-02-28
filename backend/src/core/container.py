@@ -9,12 +9,14 @@ from src.repositories.invitation_repository import InvitationRepository
 from src.repositories.refresh_token_repository import RefreshTokenRepository
 from src.repositories.source_permission_repository import SourcePermissionRepository
 from src.repositories.source_repository import SourceRepository
+from src.repositories.sync_job_repository import SyncJobRepository
 from src.repositories.user_repository import UserRepository
 from src.services.auth_service import AuthService
 from src.services.email_service import EmailService
 from src.services.password_service import PasswordService
 from src.services.source_permission_service import SourcePermissionService
 from src.services.source_service import SourceService
+from src.services.sync_job_service import SyncJobService
 from src.services.user_service import UserService
 
 
@@ -36,6 +38,7 @@ class Container(containers.DeclarativeContainer):
     source_permission_repo = providers.Factory(
         SourcePermissionRepository, session=db_session_factory
     )
+    sync_job_repo = providers.Factory(SyncJobRepository, session=db_session_factory)
 
     # ── Services ────────────────────────────────────────────────────
     password_service = providers.Factory(PasswordService)
@@ -66,6 +69,11 @@ class Container(containers.DeclarativeContainer):
         source_permission_repo=source_permission_repo,
         source_repo=source_repo,
         user_repo=user_repo,
+    )
+    sync_job_service = providers.Factory(
+        SyncJobService,
+        session_factory=db_session_factory,
+        sync_job_repo=sync_job_repo,
     )
 
 
