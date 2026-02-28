@@ -28,6 +28,7 @@ from src.models.base import Base, SoftDeleteMixin, TimestampMixin, UUIDMixin
 if TYPE_CHECKING:
     from src.models.refresh_token import UserRefreshToken
     from src.models.source import Source
+    from src.models.source_permission import SourcePermission
 
 # ---------------------------------------------------------------------------
 # Enum
@@ -83,6 +84,12 @@ class User(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
         back_populates="owner",
         cascade="all, delete-orphan",
         lazy="selectin",
+    )
+    source_permissions: Mapped[list[SourcePermission]] = relationship(
+        "SourcePermission",
+        back_populates="user",
+        cascade="all, delete-orphan",
+        lazy="raise",
     )
 
 

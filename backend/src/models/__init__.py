@@ -12,6 +12,7 @@ from src.models.document import Document
 from src.models.enums import SourceType
 from src.models.refresh_token import UserRefreshToken
 from src.models.source import Source
+from src.models.source_permission import SourcePermission
 from src.models.user import Invitation, PasswordResetToken, User, UserRole
 
 __all__ = [
@@ -21,6 +22,7 @@ __all__ = [
     "Invitation",
     "PasswordResetToken",
     "Source",
+    "SourcePermission",
     "SourceType",
     "User",
     "UserRefreshToken",
