@@ -64,7 +64,9 @@ async def test_get_owned_session_returns_none_for_wrong_user(service):
     mock_session = MagicMock()
     mock_session.user_id = "other-user"
     mock_repo.get.return_value = mock_session
-    result = await svc.get_owned_session(AsyncMock(), session_id="00000000-0000-0000-0000-000000000001", user_id="user-1")
+    result = await svc.get_owned_session(
+        AsyncMock(), session_id="00000000-0000-0000-0000-000000000001", user_id="user-1"
+    )
     assert result is None
 
 
@@ -74,5 +76,7 @@ async def test_get_owned_session_returns_session_for_correct_user(service):
     mock_session = MagicMock()
     mock_session.user_id = "user-1"
     mock_repo.get.return_value = mock_session
-    result = await svc.get_owned_session(AsyncMock(), session_id="00000000-0000-0000-0000-000000000001", user_id="user-1")
+    result = await svc.get_owned_session(
+        AsyncMock(), session_id="00000000-0000-0000-0000-000000000001", user_id="user-1"
+    )
     assert result is mock_session

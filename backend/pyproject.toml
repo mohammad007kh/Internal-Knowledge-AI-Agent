@@ -79,4 +79,4 @@ testpaths = ["tests"]
 python_files = ["test_*.py", "*_test.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
-addopts = "-q --tb=short"
+addopts = "-q --tb=short --cov=src/agent --cov=src/api/v1/chat --cov-fail-under=80"

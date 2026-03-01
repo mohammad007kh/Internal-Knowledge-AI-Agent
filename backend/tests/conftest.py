@@ -146,12 +146,15 @@ if _INTEGRATION:
           - users                (migration 0003)
           - source_permissions   (migration 0005 / T-043)
           - sources              (migration 0005 / T-043)
+          - chat_messages        (T-078)
+          - chat_sessions        (T-078)
         """
         engine = create_async_engine(TEST_DATABASE_URL)
         async with engine.begin() as conn:
             await conn.execute(
                 text(
-                    "TRUNCATE source_permissions, sources, users,"
+                    "TRUNCATE chat_messages, chat_sessions,"
+                    " source_permissions, sources, users,"
                     " user_refresh_tokens, invitations,"
                     " password_reset_tokens RESTART IDENTITY CASCADE"
                 )
