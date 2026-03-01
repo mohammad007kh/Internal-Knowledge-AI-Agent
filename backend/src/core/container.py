@@ -1,4 +1,5 @@
 from dependency_injector import containers, providers
+from langfuse import Langfuse
 from openai import AsyncOpenAI
 
 from src.agent.pipeline import build_pipeline
@@ -18,6 +19,7 @@ from src.services.auth_service import AuthService
 from src.services.chunking_service import ChunkingService
 from src.services.email_service import EmailService
 from src.services.embedding_service import EmbeddingService
+from src.services.langfuse_tracing_service import LangfuseTracingService
 from src.services.password_service import PasswordService
 from src.services.source_permission_service import SourcePermissionService
 from src.services.source_service import SourceService
@@ -92,6 +94,11 @@ class Container(containers.DeclarativeContainer):
     openai_client: providers.Singleton[AsyncOpenAI] = providers.Singleton(
         AsyncOpenAI,
         api_key=config.provided.OPENAI_API_KEY,
+    )
+    langfuse: providers.Singleton[Langfuse] = providers.Singleton(Langfuse)
+    langfuse_tracing_service: providers.Singleton[LangfuseTracingService] = providers.Singleton(
+        LangfuseTracingService,
+        langfuse=langfuse,
     )
     pipeline = providers.Factory(
         build_pipeline,
