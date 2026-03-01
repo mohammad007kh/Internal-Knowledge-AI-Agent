@@ -3,6 +3,7 @@ from dependency_injector import containers, providers
 from src.connectors.factory import ConnectorFactory
 from src.core.config import settings
 from src.core.database import AsyncSessionLocal
+from src.repositories.chat_repository import ChatMessageRepository, ChatSessionRepository
 from src.repositories.chunk_repository import ChunkRepository
 from src.repositories.document_repository import DocumentRepository
 from src.repositories.invitation_repository import InvitationRepository
@@ -41,6 +42,8 @@ class Container(containers.DeclarativeContainer):
         SourcePermissionRepository, session=db_session_factory
     )
     sync_job_repo = providers.Factory(SyncJobRepository, session=db_session_factory)
+    chat_session_repo = providers.Factory(ChatSessionRepository, session=db_session_factory)
+    chat_message_repo = providers.Factory(ChatMessageRepository, session=db_session_factory)
 
     # ── Services ────────────────────────────────────────────────────
     password_service = providers.Factory(PasswordService)
