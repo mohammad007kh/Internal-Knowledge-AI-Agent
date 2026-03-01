@@ -7,11 +7,13 @@ from typing import TYPE_CHECKING
 
 from langgraph.graph import END, START, StateGraph
 
+from src.agent.nodes.generate import generate_response
 from src.agent.nodes.retrieve import retrieve_context
 from src.agent.state import AgentState
 
 if TYPE_CHECKING:
     from langfuse import Langfuse
+    from openai import AsyncOpenAI
     from sqlalchemy.ext.asyncio import AsyncSession
 
     from src.repositories.chunk_repository import ChunkRepository
@@ -46,10 +48,7 @@ async def handle_clarification(state: AgentState) -> dict:  # type: ignore[type-
 
 
 
-async def generate_response(state: AgentState) -> dict:  # type: ignore[type-arg]
-    """Generate a response using the LLM and retrieved context."""
-    logger.debug("generate_response")
-    return {}
+# generate_response is imported from src.agent.nodes.generate
 
 
 async def format_response(state: AgentState) -> dict:  # type: ignore[type-arg]
@@ -87,6 +86,7 @@ def build_pipeline(
     chunk_repository: ChunkRepository,
     db_session: AsyncSession,
     langfuse: Langfuse,
+    openai_client: AsyncOpenAI,
 ) -> StateGraph[AgentState]:
     """Wire up all nodes and edges and return the compiled graph."""
     workflow: StateGraph[AgentState] = StateGraph(AgentState)
@@ -98,12 +98,17 @@ def build_pipeline(
         db_session=db_session,
         langfuse=langfuse,
     )
+    bound_generate = partial(
+        generate_response,
+        openai_client=openai_client,
+        langfuse=langfuse,
+    )
 
     workflow.add_node("load_history", load_history)
     workflow.add_node("check_clarification", check_clarification)
     workflow.add_node("handle_clarification", handle_clarification)
     workflow.add_node("retrieve_context", bound_retrieve)
-    workflow.add_node("generate_response", generate_response)
+    workflow.add_node("generate_response", bound_generate)
     workflow.add_node("format_response", format_response)
     workflow.add_node("save_message", save_message)
 
@@ -134,6 +139,7 @@ def get_pipeline(
     chunk_repository: ChunkRepository,
     db_session: AsyncSession,
     langfuse: Langfuse,
+    openai_client: AsyncOpenAI,
 ) -> object:
     """Compile and return a LangGraph pipeline bound to the provided dependencies."""
     return build_pipeline(
@@ -141,4 +147,5 @@ def get_pipeline(
         chunk_repository=chunk_repository,
         db_session=db_session,
         langfuse=langfuse,
+        openai_client=openai_client,
     ).compile()
