@@ -26,6 +26,7 @@ class MessageRoleSchema(StrEnum):
 
 class ChatSessionCreate(BaseModel):
     title: str = Field(default="New Chat", max_length=255)
+    source_ids: list[str] | None = None
 
 
 class ChatSessionResponse(BaseModel):
@@ -34,6 +35,7 @@ class ChatSessionResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
     message_count: int = 0
+    source_ids: list[str] = Field(default_factory=list)
 
     model_config = {"from_attributes": True}
 
@@ -68,6 +70,7 @@ class ChatRequest(BaseModel):
     query: str = Field(..., min_length=1, max_length=4096)
     session_id: UUID | None = None
     stream: bool = False
+    source_ids: list[str] | None = None
 
     @field_validator("query")
     @classmethod

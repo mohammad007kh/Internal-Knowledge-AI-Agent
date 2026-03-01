@@ -6,6 +6,7 @@ from datetime import datetime
 from enum import StrEnum
 
 from sqlalchemy import Boolean, DateTime, Enum, ForeignKey, Text
+from sqlalchemy.dialects.postgresql import JSONB as _JSONB
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import expression, func
@@ -58,6 +59,12 @@ class ChatSession(Base):
         nullable=False,
         server_default=expression.false(),
         index=True,
+    )
+    source_ids: Mapped[list[str]] = mapped_column(
+        _JSONB,
+        nullable=False,
+        default=list,
+        server_default="'[]'::jsonb",
     )
 
     messages: Mapped[list[ChatMessage]] = relationship(

@@ -71,3 +71,31 @@ class SourcePermissionService:
             source_id=source_id, user_id=user_id
         )
         return perm is not None
+
+    async def get_permitted_source_ids(
+        self,
+        db: object,
+        *,
+        user_id: str,
+    ) -> list[str]:
+        """Return all source IDs the user has permission to access."""
+        import uuid as _uuid  # noqa: PLC0415
+
+        uid = _uuid.UUID(user_id) if isinstance(user_id, str) else user_id
+        raw = await self._perm_repo.list_source_ids_for_user(uid)
+        return [str(sid) for sid in raw]
+
+    async def filter_permitted(
+        self,
+        db: object,
+        *,
+        user_id: str,
+        candidate_ids: list[str],
+    ) -> list[str]:
+        """Return only the IDs from ``candidate_ids`` the user may access."""
+        if not candidate_ids:
+            return []
+        permitted_set = set(
+            await self.get_permitted_source_ids(db, user_id=user_id)
+        )
+        return [sid for sid in candidate_ids if sid in permitted_set]

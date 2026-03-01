@@ -27,6 +27,7 @@ from src.api.middleware.error_handler import register_exception_handlers  # noqa
 from src.api.v1.chat import (  # noqa: E402
     _get_chat_message_repo,
     _get_chat_session_repo,
+    _get_chat_session_service,
     _get_db_session_factory,
     _get_pipeline,
     _get_tracing,
@@ -147,6 +148,15 @@ def mock_tracing() -> MagicMock:
 
 
 @pytest.fixture()
+def mock_chat_session_service() -> AsyncMock:
+    svc = AsyncMock()
+    svc.create_session.return_value = _make_session()
+    svc.get_source_ids_for_session.return_value = []
+    svc.get_owned_session.return_value = _make_session()
+    return svc
+
+
+@pytest.fixture()
 def client(
     current_user: User,
     db: AsyncMock,
@@ -154,6 +164,7 @@ def client(
     mock_message_repo: AsyncMock,
     mock_pipeline: AsyncMock,
     mock_tracing: MagicMock,
+    mock_chat_session_service: AsyncMock,
 ) -> Generator[TestClient, None, None]:
     app = FastAPI()
     register_exception_handlers(app)
@@ -167,6 +178,7 @@ def client(
     app.dependency_overrides[_get_chat_message_repo] = lambda: mock_message_repo
     app.dependency_overrides[_get_pipeline] = lambda: mock_pipeline
     app.dependency_overrides[_get_tracing] = lambda: mock_tracing
+    app.dependency_overrides[_get_chat_session_service] = lambda: mock_chat_session_service
 
     with TestClient(app, raise_server_exceptions=False) as tc:
         yield tc
@@ -183,28 +195,22 @@ class TestCreateSession:
     def test_create_session_201(
         self,
         client: TestClient,
-        mock_session_repo: AsyncMock,
+        mock_chat_session_service: AsyncMock,
     ) -> None:
-        session_obj = _make_session()
-        mock_session_repo.create.return_value = session_obj
-
         resp = client.post("/chat/sessions", json={"title": "Test session"})
 
         assert resp.status_code == 201
-        mock_session_repo.create.assert_awaited_once()
+        mock_chat_session_service.create_session.assert_awaited_once()
 
     def test_create_session_calls_repo_with_user_id(
         self,
         client: TestClient,
-        mock_session_repo: AsyncMock,
+        mock_chat_session_service: AsyncMock,
     ) -> None:
-        session_obj = _make_session()
-        mock_session_repo.create.return_value = session_obj
-
         client.post("/chat/sessions", json={"title": "My chat"})
 
-        call_kwargs = mock_session_repo.create.call_args
-        assert call_kwargs.kwargs.get("user_id") == USER_ID
+        call_kwargs = mock_chat_session_service.create_session.call_args
+        assert call_kwargs.kwargs.get("user_id") == str(USER_ID)
         assert call_kwargs.kwargs.get("title") == "My chat"
 
 

@@ -65,6 +65,12 @@ def _get_tracing() -> LangfuseTracingService:
     return Container.langfuse_tracing_service()
 
 
+def _get_chat_session_service() -> Any:
+    from src.core.container import Container  # noqa: PLC0415
+
+    return Container.chat_session_service()
+
+
 # ---------------------------------------------------------------------------
 # Ownership guard
 # ---------------------------------------------------------------------------
@@ -90,13 +96,15 @@ async def create_session(
     current_user: User = Depends(get_current_user),
     db_session_factory: Any = Depends(_get_db_session_factory),
     chat_session_repo: ChatSessionRepository = Depends(_get_chat_session_repo),
+    chat_session_service: Any = Depends(_get_chat_session_service),
 ) -> ChatSessionResponse:
     """Create a new chat session for the authenticated user."""
     async with db_session_factory() as db:
-        session_obj = await chat_session_repo.create(
+        session_obj = await chat_session_service.create_session(
             db,
-            user_id=current_user.id,
+            user_id=str(current_user.id),
             title=body.title,
+            source_ids=body.source_ids,
         )
         return ChatSessionResponse.model_validate(session_obj)
 
@@ -163,13 +171,20 @@ async def send_message(
     chat_message_repo: ChatMessageRepository = Depends(_get_chat_message_repo),
     pipeline: Any = Depends(_get_pipeline),
     langfuse_tracing: LangfuseTracingService = Depends(_get_tracing),
+    chat_session_service: Any = Depends(_get_chat_session_service),
 ) -> StreamingResponse:
     """Stream an AI response for a user query within a chat session."""
 
-    # Verify ownership
+    # Verify ownership and resolve source_ids
     async with db_session_factory() as db:
         session_obj = await chat_session_repo.get(db, session_id)
         _assert_session_owner(session_obj, current_user)
+        source_ids = await chat_session_service.get_source_ids_for_session(
+            db,
+            session=session_obj,
+            user_id=str(current_user.id),
+            override_ids=body.source_ids,
+        )
 
         # Persist the user message
         await chat_message_repo.create(
@@ -206,6 +221,7 @@ async def send_message(
             "query": body.query,
             "final_answer": None,
             "error": None,
+            "source_ids": source_ids,
         }
 
         final_answer = ""
