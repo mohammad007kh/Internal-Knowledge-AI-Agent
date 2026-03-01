@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 
 from langgraph.graph import END, START, StateGraph
 
+from src.agent.nodes.clarify import check_clarification, handle_clarification
 from src.agent.nodes.generate import generate_response
 from src.agent.nodes.retrieve import retrieve_context
 from src.agent.state import AgentState
@@ -33,21 +34,7 @@ async def load_history(state: AgentState) -> dict:  # type: ignore[type-arg]
     return {}
 
 
-async def check_clarification(state: AgentState) -> dict:  # type: ignore[type-arg]
-    """Determine whether the query needs clarification before retrieval."""
-    logger.debug("check_clarification: query=%s", state.get("query"))
-    return {"requires_clarification": False, "clarification_question": None}
-
-
-async def handle_clarification(state: AgentState) -> dict:  # type: ignore[type-arg]
-    """Return a clarification question to the user and stop the pipeline."""
-    logger.debug(
-        "handle_clarification: question=%s", state.get("clarification_question")
-    )
-    return {}
-
-
-
+# check_clarification and handle_clarification are imported from src.agent.nodes.clarify
 # generate_response is imported from src.agent.nodes.generate
 
 
