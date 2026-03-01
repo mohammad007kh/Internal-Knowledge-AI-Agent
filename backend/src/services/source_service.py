@@ -165,7 +165,7 @@ class SourceService:
         limit: int = 50,
     ) -> tuple[list[Source], int]:
         """Return paginated sources for *owner_id* with a total count."""
-        sources = await self._repo.list_by_owner(owner_id, skip=skip, limit=limit)
+        sources = await self._repo.list_by_owner_with_jobs(owner_id, skip=skip, limit=limit)
         total = await self._repo.count_by_owner(owner_id)
         return sources, total
 
@@ -175,7 +175,7 @@ class SourceService:
         limit: int = 100,
     ) -> tuple[list[Source], int]:
         """Return all active sources (admin view) with a total count."""
-        sources = await self._repo.list_active(skip=skip, limit=limit)
+        sources = await self._repo.list_active_with_jobs(skip=skip, limit=limit)
         total = await self._repo.count_active()
         return sources, total
 

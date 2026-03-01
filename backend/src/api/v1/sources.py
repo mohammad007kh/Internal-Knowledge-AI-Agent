@@ -24,6 +24,7 @@ from src.schemas.source import (
     SourceUpdate,
     TestConnectionResponse,
 )
+from src.schemas.sync_job import SyncJobResponse
 from src.services.source_service import SourceService
 
 router = APIRouter()
@@ -62,6 +63,19 @@ def _assert_ownership_or_admin(owner_id: uuid.UUID, user: User) -> None:
                 "detail": "You are not authorised to access this source.",
             },
         )
+
+
+def _make_list_item(source: object) -> SourceListItem:
+    """Build a slim SourceListItem, attaching the latest sync job when available."""
+    latest_raw = max(
+        getattr(source, "sync_jobs", []),
+        key=lambda j: j.created_at,
+        default=None,
+    )
+    item = SourceListItem.model_validate(source)
+    if latest_raw is not None:
+        item.latest_job = SyncJobResponse.model_validate(latest_raw)
+    return item
 
 
 # ---------------------------------------------------------------------------
@@ -116,7 +130,7 @@ async def list_sources(
             owner_id=current_user.id, skip=offset, limit=limit
         )
     return PaginatedSources(
-        items=[SourceListItem.model_validate(s) for s in items],
+        items=[_make_list_item(s) for s in items],
         total=total,
         limit=limit,
         offset=offset,

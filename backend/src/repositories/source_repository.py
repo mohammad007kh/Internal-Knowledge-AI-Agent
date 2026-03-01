@@ -56,6 +56,47 @@ class SourceRepository(BaseRepository[Source]):
         result = await self._session.execute(stmt)
         return list(result.scalars().all())
 
+    async def list_by_owner_with_jobs(
+        self,
+        owner_id: uuid.UUID,
+        *,
+        skip: int = 0,
+        limit: int = 50,
+    ) -> list[Source]:
+        """Return sources for *owner_id* with sync_jobs eagerly loaded."""
+        from sqlalchemy.orm import selectinload  # noqa: PLC0415
+
+        stmt = (
+            select(Source)
+            .options(selectinload(Source.sync_jobs))
+            .where(Source.owner_id == owner_id)
+            .order_by(Source.created_at.desc())
+            .offset(skip)
+            .limit(limit)
+        )
+        result = await self._session.execute(stmt)
+        return list(result.scalars().all())
+
+    async def list_active_with_jobs(
+        self,
+        *,
+        skip: int = 0,
+        limit: int = 100,
+    ) -> list[Source]:
+        """Return all active sources with sync_jobs eagerly loaded."""
+        from sqlalchemy.orm import selectinload  # noqa: PLC0415
+
+        stmt = (
+            select(Source)
+            .options(selectinload(Source.sync_jobs))
+            .where(Source.is_active.is_(True))
+            .order_by(Source.created_at.desc())
+            .offset(skip)
+            .limit(limit)
+        )
+        result = await self._session.execute(stmt)
+        return list(result.scalars().all())
+
     async def count_by_owner(self, owner_id: uuid.UUID) -> int:
         """Count sources owned by a user (for pagination totals)."""
         stmt = (

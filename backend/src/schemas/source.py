@@ -14,6 +14,7 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from src.models.enums import SourceType
+from src.schemas.sync_job import SyncJobResponse
 
 # ---------------------------------------------------------------------------
 # Input schemas
@@ -101,6 +102,7 @@ class SourceListItem(BaseModel):
     source_type: SourceType
     is_active: bool
     created_at: datetime
+    latest_job: SyncJobResponse | None = None
 
 
 class PaginatedSources(BaseModel):
