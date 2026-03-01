@@ -22,3 +22,12 @@ class SyncJobResponse(BaseModel):
     chunks_created: int
     created_at: datetime
     updated_at: datetime
+
+
+class SyncJobListResponse(BaseModel):
+    """Paginated list of sync-job responses."""
+
+    items: list[SyncJobResponse]
+    total: int
+    limit: int
+    offset: int
