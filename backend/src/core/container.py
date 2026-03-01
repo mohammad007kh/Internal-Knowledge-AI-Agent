@@ -1,5 +1,7 @@
 from dependency_injector import containers, providers
+from openai import AsyncOpenAI
 
+from src.agent.pipeline import build_pipeline
 from src.connectors.factory import ConnectorFactory
 from src.core.config import settings
 from src.core.database import AsyncSessionLocal
@@ -86,6 +88,18 @@ class Container(containers.DeclarativeContainer):
     embedding_service: providers.Singleton[EmbeddingService] = providers.Singleton(
         EmbeddingService,
         openai_api_key=config.provided.OPENAI_API_KEY,
+    )
+    openai_client: providers.Singleton[AsyncOpenAI] = providers.Singleton(
+        AsyncOpenAI,
+        api_key=config.provided.OPENAI_API_KEY,
+    )
+    pipeline = providers.Factory(
+        build_pipeline,
+        embedding_service=embedding_service,
+        chunk_repository=chunk_repo,
+        chat_session_repository=chat_session_repo,
+        chat_message_repository=chat_message_repo,
+        openai_client=openai_client,
     )
 
 

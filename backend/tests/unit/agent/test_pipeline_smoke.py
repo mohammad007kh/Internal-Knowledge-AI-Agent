@@ -1,0 +1,77 @@
+"""Smoke test: full pipeline with all external deps mocked."""
+from __future__ import annotations
+
+from unittest.mock import AsyncMock, MagicMock
+
+import pytest
+
+from src.agent.pipeline import build_pipeline, run_pipeline
+
+
+@pytest.fixture()
+def mocked_pipeline():
+    mock_db = AsyncMock()
+
+    mock_embedding = AsyncMock()
+    mock_embedding.embed_texts.return_value = [[0.1] * 1536]
+
+    mock_chunk_repo = AsyncMock()
+    mock_chunk_repo.similarity_search.return_value = []
+
+    mock_chat_session_repo = AsyncMock()
+    mock_session = MagicMock()
+    mock_session.user_id = "user-1"
+    mock_chat_session_repo.get.return_value = mock_session
+
+    mock_chat_msg_repo = AsyncMock()
+    mock_chat_msg_repo.list_for_session.return_value = []
+    mock_chat_msg_repo.create.return_value = MagicMock()
+
+    mock_openai = AsyncMock()
+    completion = MagicMock()
+    completion.choices = [MagicMock()]
+    completion.choices[0].message.content = "Here is the answer."
+    completion.usage.prompt_tokens = 50
+    completion.usage.completion_tokens = 10
+    mock_openai.chat.completions.create.return_value = completion
+
+    mock_langfuse = MagicMock()
+    mock_span = MagicMock()
+    mock_langfuse.span.return_value = mock_span
+
+    return build_pipeline(
+        db_session=mock_db,
+        embedding_service=mock_embedding,
+        chunk_repository=mock_chunk_repo,
+        chat_session_repository=mock_chat_session_repo,
+        chat_message_repository=mock_chat_msg_repo,
+        openai_client=mock_openai,
+        langfuse=mock_langfuse,
+    )
+
+
+@pytest.mark.asyncio
+async def test_pipeline_returns_final_answer(mocked_pipeline):
+    result = await run_pipeline(
+        compiled_graph=mocked_pipeline,
+        session_id="00000000-0000-0000-0000-000000000001",
+        user_id="user-1",
+        query="What is the return policy?",
+        source_ids=["src-1"],
+        trace_id="trace-1",
+    )
+    assert result["final_answer"] == "Here is the answer."
+    assert result.get("error") is None
+
+
+@pytest.mark.asyncio
+async def test_pipeline_short_query_triggers_clarification(mocked_pipeline):
+    result = await run_pipeline(
+        compiled_graph=mocked_pipeline,
+        session_id="00000000-0000-0000-0000-000000000002",
+        user_id="user-1",
+        query="hi",
+        source_ids=["src-1"],
+        trace_id="trace-2",
+    )
+    assert result.get("requires_clarification") is True
