@@ -31,3 +31,16 @@ result_expires = 86_400  # 24 h  — backend keeps result for 1 day
 
 # ── Routing ───────────────────────────────────────────────────────────────────
 task_default_queue = "default"
+
+# ── Beat schedule (T-065) ────────────────────────────────────────────────────
+from celery.schedules import crontab  # noqa: E402  (module-level after constants)
+
+beat_schedule = {
+    "sync-all-sources": {
+        "task": "tasks.trigger_all_syncs",
+        "schedule": crontab(minute="*/30"),  # every 30 minutes
+        "options": {"queue": "default"},
+    },
+}
+
+beat_max_loop_interval = 30  # seconds — wake Beat up every 30 s max

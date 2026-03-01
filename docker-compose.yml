@@ -37,27 +37,51 @@ services:
 
   worker:
     build: ./backend
-    command: celery -A src.core.celery:celery_app worker --loglevel=info --concurrency=4
+    command: >
+      celery -A src.tasks:celery_app worker
+      --loglevel=info
+      --concurrency=${CELERY_WORKER_CONCURRENCY:-4}
+      --queues=default
+    environment:
+      CELERY_WORKER_CONCURRENCY: ${CELERY_WORKER_CONCURRENCY:-4}
     depends_on:
-      backend:
+      db:
+        condition: service_healthy
+      redis:
         condition: service_healthy
     env_file: .env
     volumes:
       - ./app_config.yaml:/app/app_config.yaml:ro
-    restart: on-failure
+    healthcheck:
+      test: ["CMD-SHELL", "celery -A src.tasks:celery_app inspect ping -d celery@$$HOSTNAME | grep -q pong"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    restart: unless-stopped
 
   beat:
     build: ./backend
-    command: celery -A src.core.celery:celery_app beat --loglevel=info --scheduler celery.beat:PersistentScheduler
+    command: >
+      celery -A src.tasks:celery_app beat
+      --loglevel=info
+      --scheduler=celery.beat:PersistentScheduler
+      --schedule=/tmp/celerybeat-schedule
     depends_on:
-      - worker
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      worker:
+        condition: service_started
     env_file: .env
     volumes:
       - ./app_config.yaml:/app/app_config.yaml:ro
-    # NOTE: NEVER scale beat beyond 1 replica — duplicate schedule hazard
+    # FR-033 — MUST be exactly 1 replica; duplicate beat = double-scheduling hazard
     deploy:
+      mode: replicated
       replicas: 1
-    restart: on-failure
+    restart: unless-stopped
 
   db:
     image: pgvector/pgvector:pg16
