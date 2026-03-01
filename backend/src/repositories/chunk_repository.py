@@ -4,11 +4,10 @@ from __future__ import annotations
 import uuid
 from collections.abc import Sequence
 
-from pgvector.sqlalchemy import Vector  # type: ignore[import-not-found]
 from sqlalchemy import delete, func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.models.chunk import EMBEDDING_DIM, Chunk
+from src.models.chunk import Chunk
 
 
 class ChunkRepository:
@@ -53,52 +52,68 @@ class ChunkRepository:
 
     async def similarity_search(
         self,
-        query_embedding: list[float],
+        session: AsyncSession,
         *,
-        source_ids: list[uuid.UUID] | None = None,
-        top_k: int = 5,
-        ef_search: int = 64,
+        query_embedding: list[float],
+        source_ids: list[str],
+        limit: int = 10,
     ) -> list[tuple[Chunk, float]]:
         """
-        HNSW cosine similarity search.
+        HNSW cosine similarity search filtered by source_ids (FR-019).
 
         Args:
+            session:         Async SQLAlchemy session (injected per-call).
             query_embedding: Embedded query vector (must be EMBEDDING_DIM floats).
-            source_ids:      Optional list of source UUIDs to restrict search.
-                             If None or empty, searches all chunks.
-            top_k:           Number of results to return.
-            ef_search:       HNSW ef_search parameter (higher = more accurate,
-                             slower). Sent per-session via SET LOCAL.
+            source_ids:      Allowlist of source ID strings.  Empty list causes
+                             an immediate empty-list return (no DB query).
+            limit:           Maximum number of results to return (default 10).
 
         Returns:
             List of (Chunk, cosine_distance) tuples ordered by distance asc.
         """
-        if len(query_embedding) != EMBEDDING_DIM:
-            raise ValueError(
-                f"query_embedding must have {EMBEDDING_DIM} dimensions, "
-                f"got {len(query_embedding)}"
-            )
+        if not source_ids:
+            return []
 
-        # Set ef_search for this query; uses SET LOCAL so it doesn't bleed
-        # across transactions.
-        await self._session.execute(
-            text(f"SET LOCAL hnsw.ef_search = {int(ef_search)}")
+        vector_literal = f"'[{','.join(str(v) for v in query_embedding)}]'::vector"
+
+        stmt = text(
+            f"""
+            SELECT
+                c.id        AS chunk_id,
+                c.source_id,
+                c.text,
+                c.embedding <-> {vector_literal}  AS score
+            FROM chunks c
+            WHERE c.source_id = ANY(:source_ids)
+              AND c.is_deleted IS NOT TRUE
+            ORDER BY score ASC
+            LIMIT :limit
+            """
+        ).bindparams(
+            source_ids=source_ids,
+            limit=limit,
         )
 
-        # Build base query using pgvector's <=> cosine distance operator.
-        embedding_col = Chunk.embedding
-        distance_expr = embedding_col.op("<=>")(  # type: ignore[union-attr]
-            Vector(query_embedding)
-        ).label("distance")
+        result = await session.execute(stmt)
+        rows = result.mappings().all()
 
-        stmt = select(Chunk, distance_expr).order_by(distance_expr).limit(top_k)
+        chunk_ids = [str(r["chunk_id"]) for r in rows]
+        score_map = {str(r["chunk_id"]): float(r["score"]) for r in rows}
 
-        if source_ids:
-            stmt = stmt.where(Chunk.source_id.in_(source_ids))
+        if not chunk_ids:
+            return []
 
-        result = await self._session.execute(stmt)
-        rows = result.all()
-        return [(row[0], float(row[1])) for row in rows]
+        hydrated = await session.execute(
+            select(Chunk).where(Chunk.id.in_(chunk_ids))
+        )
+        chunks_by_id = {str(c.id): c for c in hydrated.scalars().all()}
+
+        # Preserve similarity ordering
+        return [
+            (chunks_by_id[cid], score_map[cid])
+            for cid in chunk_ids
+            if cid in chunks_by_id
+        ]
 
     # ------------------------------------------------------------------
     # Writes

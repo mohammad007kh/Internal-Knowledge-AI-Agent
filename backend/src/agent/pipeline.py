@@ -2,10 +2,20 @@
 from __future__ import annotations
 
 import logging
+from functools import partial
+from typing import TYPE_CHECKING
 
 from langgraph.graph import END, START, StateGraph
 
+from src.agent.nodes.retrieve import retrieve_context
 from src.agent.state import AgentState
+
+if TYPE_CHECKING:
+    from langfuse import Langfuse
+    from sqlalchemy.ext.asyncio import AsyncSession
+
+    from src.repositories.chunk_repository import ChunkRepository
+    from src.services.embedding_service import EmbeddingService
 
 logger = logging.getLogger(__name__)
 
@@ -34,13 +44,6 @@ async def handle_clarification(state: AgentState) -> dict:  # type: ignore[type-
     )
     return {}
 
-
-async def retrieve_context(state: AgentState) -> dict:  # type: ignore[type-arg]
-    """Retrieve relevant chunks from the vector store."""
-    logger.debug(
-        "retrieve_context: source_ids=%s", state.get("source_ids")
-    )
-    return {"retrieved_chunks": []}
 
 
 async def generate_response(state: AgentState) -> dict:  # type: ignore[type-arg]
@@ -78,14 +81,28 @@ def _route_after_clarification_check(state: AgentState) -> str:
 # ---------------------------------------------------------------------------
 
 
-def build_pipeline() -> StateGraph[AgentState]:
+def build_pipeline(
+    *,
+    embedding_service: EmbeddingService,
+    chunk_repository: ChunkRepository,
+    db_session: AsyncSession,
+    langfuse: Langfuse,
+) -> StateGraph[AgentState]:
     """Wire up all nodes and edges and return the compiled graph."""
     workflow: StateGraph[AgentState] = StateGraph(AgentState)
+
+    bound_retrieve = partial(
+        retrieve_context,
+        embedding_service=embedding_service,
+        chunk_repository=chunk_repository,
+        db_session=db_session,
+        langfuse=langfuse,
+    )
 
     workflow.add_node("load_history", load_history)
     workflow.add_node("check_clarification", check_clarification)
     workflow.add_node("handle_clarification", handle_clarification)
-    workflow.add_node("retrieve_context", retrieve_context)
+    workflow.add_node("retrieve_context", bound_retrieve)
     workflow.add_node("generate_response", generate_response)
     workflow.add_node("format_response", format_response)
     workflow.add_node("save_message", save_message)
@@ -111,10 +128,17 @@ def build_pipeline() -> StateGraph[AgentState]:
     return workflow
 
 
-# Module-level compiled graph — import and call get_pipeline() in consumers.
-_graph = build_pipeline().compile()
-
-
-def get_pipeline() -> object:
-    """Return the module-level compiled LangGraph pipeline."""
-    return _graph
+def get_pipeline(
+    *,
+    embedding_service: EmbeddingService,
+    chunk_repository: ChunkRepository,
+    db_session: AsyncSession,
+    langfuse: Langfuse,
+) -> object:
+    """Compile and return a LangGraph pipeline bound to the provided dependencies."""
+    return build_pipeline(
+        embedding_service=embedding_service,
+        chunk_repository=chunk_repository,
+        db_session=db_session,
+        langfuse=langfuse,
+    ).compile()
