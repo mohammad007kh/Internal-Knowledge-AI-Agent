@@ -121,7 +121,15 @@ function PasswordResetConfirmForm() {
 
 export default function PasswordResetConfirmPage() {
   return (
-    <Suspense fallback={<Card><CardHeader><CardTitle>Loading…</CardTitle></CardHeader></Card>}>
+    <Suspense
+      fallback={
+        <Card>
+          <CardHeader>
+            <CardTitle>Loading…</CardTitle>
+          </CardHeader>
+        </Card>
+      }
+    >
       <PasswordResetConfirmForm />
     </Suspense>
   )

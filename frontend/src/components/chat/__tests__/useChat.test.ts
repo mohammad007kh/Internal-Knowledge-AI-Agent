@@ -37,7 +37,7 @@ describe('useChat', () => {
       vi.fn().mockResolvedValue({
         ok: true,
         body: makeStream([sseBody]),
-      }),
+      })
     )
 
     const { result } = renderHook(() => useChat({ sessionId: 'session-1' }), {

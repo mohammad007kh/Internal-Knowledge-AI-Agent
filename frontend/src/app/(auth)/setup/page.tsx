@@ -117,7 +117,15 @@ function SetupForm() {
 
 export default function SetupPage() {
   return (
-    <Suspense fallback={<Card><CardHeader><CardTitle>Loading…</CardTitle></CardHeader></Card>}>
+    <Suspense
+      fallback={
+        <Card>
+          <CardHeader>
+            <CardTitle>Loading…</CardTitle>
+          </CardHeader>
+        </Card>
+      }
+    >
       <SetupForm />
     </Suspense>
   )

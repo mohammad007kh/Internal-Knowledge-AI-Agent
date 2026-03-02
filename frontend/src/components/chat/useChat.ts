@@ -60,8 +60,7 @@ export function useChat({ sessionId }: { sessionId: string | null }): UseChatRet
       setIsStreaming(false)
       setStreamingToken('')
 
-      const apiBase =
-        process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000/api/v1'
+      const apiBase = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000/api/v1'
       const url = `${apiBase}/chat/sessions/${sessionId}/stream`
 
       fetch(url, {
@@ -122,9 +121,7 @@ export function useChat({ sessionId }: { sessionId: string | null }): UseChatRet
                 setStreamingToken((prev) => prev + (payload.token ?? ''))
               } else if (eventType === 'done') {
                 // Clear optimistic message and streaming state, then invalidate queries
-                setOptimisticMessages((prev) =>
-                  prev.filter((m) => m.id !== optimisticId)
-                )
+                setOptimisticMessages((prev) => prev.filter((m) => m.id !== optimisticId))
                 setStreamingToken('')
                 setIsStreaming(false)
                 setIsPending(false)
@@ -138,9 +135,7 @@ export function useChat({ sessionId }: { sessionId: string | null }): UseChatRet
                   messageId: payload.message_id ?? '',
                 })
                 // Remove optimistic message, stop streaming indicator
-                setOptimisticMessages((prev) =>
-                  prev.filter((m) => m.id !== optimisticId)
-                )
+                setOptimisticMessages((prev) => prev.filter((m) => m.id !== optimisticId))
                 setStreamingToken('')
                 setIsStreaming(false)
                 setIsPending(false)
@@ -154,9 +149,7 @@ export function useChat({ sessionId }: { sessionId: string | null }): UseChatRet
           if (err instanceof Error && err.name === 'AbortError') return
 
           // Remove optimistic message and clear streaming state
-          setOptimisticMessages((prev) =>
-            prev.filter((m) => m.id !== optimisticId)
-          )
+          setOptimisticMessages((prev) => prev.filter((m) => m.id !== optimisticId))
           setStreamingToken('')
           setIsStreaming(false)
           setIsPending(false)

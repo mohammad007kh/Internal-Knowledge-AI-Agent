@@ -1,24 +1,24 @@
-"use client";
+'use client'
 
-import { SyncStatusBadge } from "@/components/sync/SyncStatusBadge";
-import { TriggerSyncButton } from "@/components/sync/TriggerSyncButton";
+import { SyncStatusBadge } from '@/components/sync/SyncStatusBadge'
+import { TriggerSyncButton } from '@/components/sync/TriggerSyncButton'
 
-type SyncStatus = "pending" | "running" | "success" | "failed";
+type SyncStatus = 'pending' | 'running' | 'success' | 'failed'
 
 interface LatestJob {
-  id: string;
-  status: SyncStatus;
+  id: string
+  status: SyncStatus
 }
 
 interface SourceRowProps {
   source: {
-    id: string;
-    name: string;
-    source_type: string;
-    is_active: boolean;
-    created_at: string;
-    latest_job?: LatestJob | null;
-  };
+    id: string
+    name: string
+    source_type: string
+    is_active: boolean
+    created_at: string
+    latest_job?: LatestJob | null
+  }
 }
 
 export function SourceRow({ source }: SourceRowProps) {
@@ -26,9 +26,7 @@ export function SourceRow({ source }: SourceRowProps) {
     <tr className="border-b last:border-0 hover:bg-muted/50 transition-colors">
       <td className="px-4 py-3 font-medium">{source.name}</td>
       <td className="px-4 py-3">
-        <span className="rounded bg-muted px-2 py-0.5 text-xs font-mono">
-          {source.source_type}
-        </span>
+        <span className="rounded bg-muted px-2 py-0.5 text-xs font-mono">{source.source_type}</span>
       </td>
       <td className="px-4 py-3">
         {source.latest_job ? (
@@ -38,11 +36,8 @@ export function SourceRow({ source }: SourceRowProps) {
         )}
       </td>
       <td className="px-4 py-3 text-right">
-        <TriggerSyncButton
-          sourceId={source.id}
-          currentJobId={source.latest_job?.id ?? null}
-        />
+        <TriggerSyncButton sourceId={source.id} currentJobId={source.latest_job?.id ?? null} />
       </td>
     </tr>
-  );
+  )
 }

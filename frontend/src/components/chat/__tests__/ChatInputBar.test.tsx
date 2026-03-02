@@ -1,14 +1,20 @@
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import { ChatInputBar } from '../ChatInputBar'
+
+function wrapper({ children }: { children: React.ReactNode }) {
+  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  return <QueryClientProvider client={qc}>{children}</QueryClientProvider>
+}
 
 describe('ChatInputBar', () => {
   it('calls onSend with trimmed text when Enter is pressed', async () => {
     const user = userEvent.setup()
     const onSend = vi.fn()
 
-    render(<ChatInputBar onSend={onSend} sessionId="session-1" />)
+    render(<ChatInputBar onSend={onSend} sessionId="session-1" />, { wrapper })
 
     const textarea = screen.getByRole('textbox', { name: 'Chat message input' })
     await user.click(textarea)
@@ -23,7 +29,7 @@ describe('ChatInputBar', () => {
     const user = userEvent.setup()
     const onSend = vi.fn()
 
-    render(<ChatInputBar onSend={onSend} sessionId="session-1" />)
+    render(<ChatInputBar onSend={onSend} sessionId="session-1" />, { wrapper })
 
     const textarea = screen.getByRole('textbox', { name: 'Chat message input' })
     await user.click(textarea)
@@ -36,7 +42,7 @@ describe('ChatInputBar', () => {
   it('disables textarea and send button when sessionId is null', () => {
     const onSend = vi.fn()
 
-    render(<ChatInputBar onSend={onSend} sessionId={null} />)
+    render(<ChatInputBar onSend={onSend} sessionId={null} />, { wrapper })
 
     const textarea = screen.getByRole('textbox', { name: 'Chat message input' })
     const button = screen.getByRole('button', { name: 'Send message' })

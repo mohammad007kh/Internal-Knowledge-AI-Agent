@@ -1,6 +1,6 @@
-import Link from 'next/link'
-import { MessageCircleIcon } from 'lucide-react'
 import { ThemeToggle } from '@/components/theme-toggle'
+import { MessageCircleIcon } from 'lucide-react'
+import Link from 'next/link'
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   return (
@@ -11,7 +11,10 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           <span className="font-semibold text-card-foreground">Knowledge AI</span>
         </div>
         <nav className="flex-1 p-4">
-          <Link href="/chat" className="flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium hover:bg-accent hover:text-accent-foreground">
+          <Link
+            href="/chat"
+            className="flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium hover:bg-accent hover:text-accent-foreground"
+          >
             <MessageCircleIcon className="h-4 w-4" />
             Chat
           </Link>
