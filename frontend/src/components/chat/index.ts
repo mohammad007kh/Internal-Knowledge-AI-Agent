@@ -1,3 +1,4 @@
+export { FeedbackButtons } from './FeedbackButtons'
 export { MessageThread } from './MessageThread'
 export { CitationPanel } from './CitationPanel'
 export { SessionList } from './SessionList'

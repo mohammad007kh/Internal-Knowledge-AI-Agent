@@ -9,12 +9,19 @@ export interface Citation {
   url?: string | null
 }
 
+export interface MessageFeedback {
+  id: string
+  rating: 1 | -1
+  comment: string | null
+}
+
 export interface Message {
   id: string
   role: 'user' | 'assistant' | 'system'
   content: string
   created_at: string
   citations?: Citation[]
+  feedback?: MessageFeedback | null
 }
 
 export interface SessionMessagesResponse {

@@ -10,25 +10,61 @@ vi.mock('@/lib/api-client', () => ({
     get: vi.fn().mockResolvedValue({
       data: {
         items: [
-          { id: 's1', title: 'Project alpha', created_at: '2024-01-01T00:00:00Z', updated_at: '2024-01-01T00:00:00Z', message_count: 3 },
-          { id: 's2', title: 'Security review', created_at: '2024-01-02T00:00:00Z', updated_at: '2024-01-02T00:00:00Z', message_count: 0 },
+          {
+            id: 's1',
+            title: 'Project alpha',
+            created_at: '2024-01-01T00:00:00Z',
+            updated_at: '2024-01-01T00:00:00Z',
+            message_count: 3,
+          },
+          {
+            id: 's2',
+            title: 'Security review',
+            created_at: '2024-01-02T00:00:00Z',
+            updated_at: '2024-01-02T00:00:00Z',
+            message_count: 0,
+          },
         ],
         total: 2,
       },
     }),
     post: vi.fn().mockResolvedValue({
-      data: { id: 's3', title: 'New chat', message_count: 0, created_at: '2024-01-03T00:00:00Z', updated_at: '2024-01-03T00:00:00Z' },
+      data: {
+        id: 's3',
+        title: 'New chat',
+        message_count: 0,
+        created_at: '2024-01-03T00:00:00Z',
+        updated_at: '2024-01-03T00:00:00Z',
+      },
     }),
     patch: vi.fn().mockResolvedValue({
-      data: { id: 's1', title: 'Renamed', message_count: 3, created_at: '2024-01-01T00:00:00Z', updated_at: '2024-01-01T00:00:00Z' },
+      data: {
+        id: 's1',
+        title: 'Renamed',
+        message_count: 3,
+        created_at: '2024-01-01T00:00:00Z',
+        updated_at: '2024-01-01T00:00:00Z',
+      },
     }),
     delete: vi.fn().mockResolvedValue({ data: {} }),
   },
 }))
 
-const mockSessions = [
-  { id: 's1', title: 'Project alpha', created_at: '2024-01-01T00:00:00Z', updated_at: '2024-01-01T00:00:00Z', message_count: 3 },
-  { id: 's2', title: 'Security review', created_at: '2024-01-02T00:00:00Z', updated_at: '2024-01-02T00:00:00Z', message_count: 0 },
+const _mockSessions = [
+  {
+    id: 's1',
+    title: 'Project alpha',
+    created_at: '2024-01-01T00:00:00Z',
+    updated_at: '2024-01-01T00:00:00Z',
+    message_count: 3,
+  },
+  {
+    id: 's2',
+    title: 'Security review',
+    created_at: '2024-01-02T00:00:00Z',
+    updated_at: '2024-01-02T00:00:00Z',
+    message_count: 0,
+  },
 ]
 
 function wrapper({ children }: { children: React.ReactNode }) {

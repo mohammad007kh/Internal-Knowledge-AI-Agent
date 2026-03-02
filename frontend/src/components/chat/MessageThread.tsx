@@ -6,6 +6,7 @@ import { useQuery } from '@tanstack/react-query'
 import { BotIcon, UserIcon } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { CitationPanel } from './CitationPanel'
+import { FeedbackButtons } from './FeedbackButtons'
 import type { Citation, Message, SessionMessagesResponse } from './types'
 
 interface MessageThreadProps {
@@ -69,7 +70,12 @@ export function MessageThread({
         )}
 
         {allMessages.map((msg) => (
-          <MessageBubble key={msg.id} message={msg} onCitationClick={setOpenCitation} />
+          <MessageBubble
+            key={msg.id}
+            message={msg}
+            sessionId={sessionId ?? ''}
+            onCitationClick={setOpenCitation}
+          />
         ))}
 
         {isStreaming && (
@@ -99,10 +105,11 @@ export function MessageThread({
 
 interface MessageBubbleProps {
   message: Message
+  sessionId: string
   onCitationClick: (c: Citation) => void
 }
 
-function MessageBubble({ message, onCitationClick }: MessageBubbleProps) {
+function MessageBubble({ message, sessionId, onCitationClick }: MessageBubbleProps) {
   const isUser = message.role === 'user'
 
   return (
@@ -147,6 +154,14 @@ function MessageBubble({ message, onCitationClick }: MessageBubbleProps) {
               </button>
             ))}
           </div>
+        )}
+
+        {!isUser && (
+          <FeedbackButtons
+            sessionId={sessionId}
+            messageId={message.id}
+            initialRating={message.feedback?.rating ?? null}
+          />
         )}
 
         <time
