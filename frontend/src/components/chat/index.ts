@@ -1,3 +1,5 @@
 export { MessageThread } from './MessageThread'
 export { CitationPanel } from './CitationPanel'
+export { SessionList } from './SessionList'
+export { SelectedSessionProvider, useSelectedSession } from './SelectedSessionContext'
 export type { Citation, Message, SessionMessagesResponse } from './types'

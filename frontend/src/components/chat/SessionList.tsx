@@ -8,179 +8,336 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
-  AlertDialogTrigger,
 } from '@/components/ui/alert-dialog'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { apiClient } from '@/lib/api-client'
 import { cn } from '@/lib/utils'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { PlusIcon, Trash2Icon } from 'lucide-react'
-import { useCallback } from 'react'
+import {
+  CheckIcon,
+  MessageSquareIcon,
+  PencilIcon,
+  PlusIcon,
+  SearchIcon,
+  Trash2Icon,
+  XIcon,
+} from 'lucide-react'
+import { useCallback, useState } from 'react'
 import { toast } from 'sonner'
 import { useSelectedSession } from './SelectedSessionContext'
 
 interface ChatSession {
   id: string
   title: string
+  created_at: string
   updated_at: string
   message_count: number
 }
 
-interface ChatSessionListResponse {
+interface SessionsResponse {
   items: ChatSession[]
   total: number
-  limit: number
-  offset: number
 }
 
-const SESSIONS_QUERY_KEY = ['chat-sessions']
-
-async function fetchSessions(): Promise<ChatSessionListResponse> {
-  const res = await apiClient.get('/chat/sessions?limit=50&offset=0')
-  return res.data
+const sessionsApi = {
+  list: async (): Promise<SessionsResponse> => {
+    const res = await apiClient.get<SessionsResponse>('/chat/sessions?limit=100')
+    return res.data
+  },
+  create: async (title: string): Promise<ChatSession> => {
+    const res = await apiClient.post<ChatSession>('/chat/sessions', { title })
+    return res.data
+  },
+  rename: async (id: string, title: string): Promise<ChatSession> => {
+    const res = await apiClient.patch<ChatSession>(`/chat/sessions/${id}`, { title })
+    return res.data
+  },
+  delete: async (id: string): Promise<void> => {
+    await apiClient.delete(`/chat/sessions/${id}`)
+  },
 }
 
-async function createSession(): Promise<ChatSession> {
-  const res = await apiClient.post('/chat/sessions', {
-    title: 'New Chat',
-    source_ids: [],
-  })
-  return res.data
+interface SessionItemProps {
+  session: ChatSession
+  isActive: boolean
+  isEditing: boolean
+  editTitle: string
+  onSelect: () => void
+  onStartEdit: () => void
+  onEditChange: (v: string) => void
+  onCommitEdit: () => void
+  onCancelEdit: () => void
+  onDelete: () => void
 }
 
-async function deleteSession(sessionId: string): Promise<void> {
-  await apiClient.delete(`/chat/sessions/${sessionId}`)
+function SessionItem({
+  session,
+  isActive,
+  isEditing,
+  editTitle,
+  onSelect,
+  onStartEdit,
+  onEditChange,
+  onCommitEdit,
+  onCancelEdit,
+  onDelete,
+}: SessionItemProps) {
+  return (
+    <li>
+      <div
+        className={cn(
+          'group flex items-center gap-1.5 rounded-md px-2 py-1.5 text-sm',
+          'cursor-pointer select-none',
+          isActive ? 'bg-accent text-accent-foreground' : 'hover:bg-muted text-foreground'
+        )}
+        onClick={() => {
+          if (!isEditing) onSelect()
+        }}
+        aria-current={isActive ? 'page' : undefined}
+        role="button"
+        tabIndex={0}
+        aria-label={`Chat session: ${session.title}`}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' && !isEditing) onSelect()
+        }}
+      >
+        <MessageSquareIcon
+          className="h-3.5 w-3.5 shrink-0 text-muted-foreground"
+          aria-hidden="true"
+        />
+        {isEditing ? (
+          <div
+            className="flex flex-1 items-center gap-1"
+            onClick={(e) => e.stopPropagation()}
+            onKeyDown={(e) => e.stopPropagation()}
+          >
+            <Input
+              value={editTitle}
+              onChange={(e) => onEditChange(e.target.value)}
+              className="h-6 flex-1 px-1.5 text-xs"
+              autoFocus
+              maxLength={100}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') onCommitEdit()
+                if (e.key === 'Escape') onCancelEdit()
+              }}
+              aria-label="Rename session"
+            />
+            <Button
+              size="icon"
+              variant="ghost"
+              className="h-5 w-5 shrink-0"
+              onClick={onCommitEdit}
+              aria-label="Confirm rename"
+            >
+              <CheckIcon className="h-3 w-3" />
+            </Button>
+            <Button
+              size="icon"
+              variant="ghost"
+              className="h-5 w-5 shrink-0"
+              onClick={onCancelEdit}
+              aria-label="Cancel rename"
+            >
+              <XIcon className="h-3 w-3" />
+            </Button>
+          </div>
+        ) : (
+          <>
+            <span className="flex-1 truncate text-xs">{session.title}</span>
+            {session.message_count > 0 && (
+              <span
+                className="ml-auto shrink-0 rounded-full bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground"
+                aria-label={`${session.message_count} messages`}
+              >
+                {session.message_count}
+              </span>
+            )}
+            <div
+              className="ml-1 hidden shrink-0 items-center gap-0.5 group-hover:flex"
+              onClick={(e) => e.stopPropagation()}
+              onKeyDown={(e) => e.stopPropagation()}
+            >
+              <Button
+                size="icon"
+                variant="ghost"
+                className="h-5 w-5"
+                onClick={onStartEdit}
+                aria-label={`Rename: ${session.title}`}
+              >
+                <PencilIcon className="h-3 w-3" />
+              </Button>
+              <Button
+                size="icon"
+                variant="ghost"
+                className="h-5 w-5 text-destructive hover:bg-destructive/10"
+                onClick={onDelete}
+                aria-label={`Delete: ${session.title}`}
+              >
+                <Trash2Icon className="h-3 w-3" />
+              </Button>
+            </div>
+          </>
+        )}
+      </div>
+    </li>
+  )
 }
 
 export function SessionList() {
   const { sessionId, setSessionId } = useSelectedSession()
   const queryClient = useQueryClient()
 
+  const [search, setSearch] = useState('')
+  const [editingId, setEditingId] = useState<string | null>(null)
+  const [editTitle, setEditTitle] = useState('')
+  const [deletingId, setDeletingId] = useState<string | null>(null)
+
   const { data, isLoading } = useQuery({
-    queryKey: SESSIONS_QUERY_KEY,
-    queryFn: fetchSessions,
-    staleTime: 30_000,
+    queryKey: ['chat-sessions'],
+    queryFn: sessionsApi.list,
+    staleTime: 15_000,
+    refetchOnWindowFocus: true,
   })
 
   const createMutation = useMutation({
-    mutationFn: createSession,
-    onSuccess: (newSession) => {
-      queryClient.invalidateQueries({ queryKey: SESSIONS_QUERY_KEY })
-      setSessionId(newSession.id)
+    mutationFn: () => sessionsApi.create('New chat'),
+    onSuccess: (session) => {
+      queryClient.invalidateQueries({ queryKey: ['chat-sessions'] })
+      setSessionId(session.id)
+      setEditingId(session.id)
+      setEditTitle(session.title)
     },
     onError: () => toast.error('Failed to create session.'),
   })
 
+  const renameMutation = useMutation({
+    mutationFn: ({ id, title }: { id: string; title: string }) => sessionsApi.rename(id, title),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['chat-sessions'] })
+      setEditingId(null)
+    },
+    onError: () => toast.error('Failed to rename session.'),
+  })
+
   const deleteMutation = useMutation({
-    mutationFn: deleteSession,
-    onSuccess: (_data, deletedId) => {
-      queryClient.invalidateQueries({ queryKey: SESSIONS_QUERY_KEY })
+    mutationFn: (id: string) => sessionsApi.delete(id),
+    onSuccess: (_, deletedId) => {
+      queryClient.invalidateQueries({ queryKey: ['chat-sessions'] })
       if (sessionId === deletedId) setSessionId(null)
+      setDeletingId(null)
+      toast.success('Session deleted.')
     },
     onError: () => toast.error('Failed to delete session.'),
   })
 
-  const handleNewChat = useCallback(() => {
-    createMutation.mutate()
-  }, [createMutation])
+  const startEdit = useCallback((session: ChatSession) => {
+    setEditingId(session.id)
+    setEditTitle(session.title)
+  }, [])
+
+  const commitEdit = useCallback(
+    (id: string) => {
+      const trimmed = editTitle.trim()
+      if (!trimmed) {
+        setEditingId(null)
+        return
+      }
+      renameMutation.mutate({ id, title: trimmed })
+    },
+    [editTitle, renameMutation]
+  )
+
+  const cancelEdit = useCallback(() => setEditingId(null), [])
 
   const sessions: ChatSession[] = data?.items ?? []
+  const filtered = search.trim()
+    ? sessions.filter((s) => s.title.toLowerCase().includes(search.toLowerCase()))
+    : sessions
 
   return (
     <div className="flex h-full flex-col">
-      <div className="flex items-center justify-between border-b border-border px-4 py-3">
-        <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">
+      <div className="flex items-center justify-between border-b border-border px-3 py-2">
+        <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
           Sessions
         </h2>
         <Button
-          size="sm"
+          size="icon"
           variant="ghost"
-          aria-label="New chat"
-          onClick={handleNewChat}
+          className="h-6 w-6"
+          aria-label="New chat session"
           disabled={createMutation.isPending}
+          onClick={() => createMutation.mutate()}
         >
-          <PlusIcon className="h-4 w-4" />
+          <PlusIcon className="h-3.5 w-3.5" />
         </Button>
+      </div>
+      <div className="relative px-2 py-1.5">
+        <SearchIcon
+          className="absolute left-4 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground"
+          aria-hidden="true"
+        />
+        <Input
+          aria-label="Search sessions"
+          placeholder="Search sessions…"
+          className="h-8 pl-8 text-xs"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+        />
       </div>
       <ScrollArea className="flex-1">
         {isLoading ? (
-          <div className="p-4 text-sm text-muted-foreground">Loading…</div>
-        ) : sessions.length === 0 ? (
-          <div className="p-4 text-sm text-muted-foreground">
-            No sessions yet. Click + to start.
+          ['sk-0', 'sk-1', 'sk-2', 'sk-3', 'sk-4'].map((skKey) => (
+            <div
+              key={skKey}
+              className="h-9 w-full animate-pulse rounded-md bg-muted"
+              aria-hidden="true"
+            />
+          ))
+        ) : filtered.length === 0 ? (
+          <div className="flex flex-col items-center gap-2 px-4 py-8 text-center text-xs text-muted-foreground">
+            <MessageSquareIcon className="h-6 w-6 opacity-40" aria-hidden="true" />
+            <span>
+              {search.trim()
+                ? 'No sessions match your search.'
+                : 'No sessions yet. Start a new chat.'}
+            </span>
           </div>
         ) : (
-          <ul className="py-1">
-            {sessions.map((s) => (
+          <ul>
+            {filtered.map((session) => (
               <SessionItem
-                key={s.id}
-                session={s}
-                isActive={s.id === sessionId}
-                onSelect={() => setSessionId(s.id)}
-                onDelete={() => deleteMutation.mutate(s.id)}
-                isDeleting={deleteMutation.isPending && deleteMutation.variables === s.id}
+                key={session.id}
+                session={session}
+                isActive={session.id === sessionId}
+                isEditing={editingId === session.id}
+                editTitle={editTitle}
+                onSelect={() => setSessionId(session.id)}
+                onStartEdit={() => startEdit(session)}
+                onEditChange={setEditTitle}
+                onCommitEdit={() => commitEdit(session.id)}
+                onCancelEdit={cancelEdit}
+                onDelete={() => setDeletingId(session.id)}
               />
             ))}
           </ul>
         )}
       </ScrollArea>
-    </div>
-  )
-}
-
-interface SessionItemProps {
-  session: ChatSession
-  isActive: boolean
-  onSelect: () => void
-  onDelete: () => void
-  isDeleting: boolean
-}
-
-function SessionItem({ session, isActive, onSelect, onDelete, isDeleting }: SessionItemProps) {
-  return (
-    <li
-      className={cn(
-        'group flex items-center mx-1 rounded-sm hover:bg-accent',
-        isActive && 'bg-accent'
-      )}
-    >
-      <button
-        type="button"
-        className="flex flex-1 min-w-0 items-center gap-2 px-3 py-2 cursor-pointer"
-        onClick={onSelect}
-        aria-current={isActive ? 'page' : undefined}
-      >
-        <span className="flex-1 truncate text-sm text-left">{session.title}</span>
-        <span className="text-xs text-muted-foreground shrink-0">{session.message_count}</span>
-      </button>
-      <AlertDialog>
-        <AlertDialogTrigger asChild>
-          <Button
-            size="icon"
-            variant="ghost"
-            className="h-6 w-6 shrink-0 opacity-0 group-hover:opacity-100 focus:opacity-100 mr-1"
-            aria-label={`Delete session: ${session.title}`}
-            disabled={isDeleting}
-          >
-            <Trash2Icon className="h-3.5 w-3.5" />
-          </Button>
-        </AlertDialogTrigger>
+      <AlertDialog open={!!deletingId} onOpenChange={(o) => !o && setDeletingId(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Delete session?</AlertDialogTitle>
             <AlertDialogDescription>
-              This will permanently delete &ldquo;{session.title}&rdquo; and all its messages. This
-              action cannot be undone.
+              All messages in this session will be permanently deleted. This action cannot be
+              undone.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel onClick={(e) => e.stopPropagation()}>Cancel</AlertDialogCancel>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
             <AlertDialogAction
-              onClick={(e) => {
-                e.stopPropagation()
-                onDelete()
-              }}
+              onClick={() => deletingId && deleteMutation.mutate(deletingId)}
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
             >
               Delete
@@ -188,6 +345,6 @@ function SessionItem({ session, isActive, onSelect, onDelete, isDeleting }: Sess
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-    </li>
+    </div>
   )
 }
