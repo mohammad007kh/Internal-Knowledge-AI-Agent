@@ -1,20 +1,12 @@
 'use client'
+
 import { apiClient } from '@/lib/api-client'
 import { cn } from '@/lib/utils'
 import { useQuery } from '@tanstack/react-query'
-import { useEffect, useRef } from 'react'
-
-export interface Message {
-  id: string
-  role: 'user' | 'assistant'
-  content: string
-  created_at: string
-}
-
-interface SessionWithMessages {
-  session: { id: string; title: string }
-  messages: Message[]
-}
+import { BotIcon, UserIcon } from 'lucide-react'
+import { useEffect, useRef, useState } from 'react'
+import { CitationPanel } from './CitationPanel'
+import type { Citation, Message, SessionMessagesResponse } from './types'
 
 interface MessageThreadProps {
   sessionId: string | null
@@ -23,8 +15,8 @@ interface MessageThreadProps {
   extraMessages?: Message[]
 }
 
-async function fetchSession(id: string): Promise<SessionWithMessages> {
-  const res = await apiClient.get(`/chat/sessions/${id}`)
+async function fetchMessages(id: string): Promise<SessionMessagesResponse> {
+  const res = await apiClient.get<SessionMessagesResponse>(`/chat/sessions/${id}`)
   return res.data
 }
 
@@ -35,78 +27,141 @@ export function MessageThread({
   extraMessages = [],
 }: MessageThreadProps) {
   const bottomRef = useRef<HTMLDivElement>(null)
+  const [openCitation, setOpenCitation] = useState<Citation | null>(null)
 
   const { data } = useQuery({
     queryKey: ['chat-session-messages', sessionId],
-    queryFn: () => fetchSession(sessionId as string),
+    queryFn: () => fetchMessages(sessionId as string),
     enabled: !!sessionId,
     staleTime: 5_000,
   })
 
-  const persistedMessages: Message[] = data?.messages ?? []
-  const allMessages = [...persistedMessages, ...extraMessages]
+  const persisted: Message[] = data?.messages ?? []
+  const allMessages: Message[] = [...persisted, ...extraMessages]
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: intentionally scroll on count+token only
+  // biome-ignore lint/correctness/useExhaustiveDependencies: scroll on message count or token change
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'instant' })
+    bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [allMessages.length, streamingToken])
 
   if (!sessionId) {
     return (
-      <div className="flex flex-1 items-center justify-center text-muted-foreground text-sm">
-        Select a session or start a new chat.
+      <div className="flex flex-1 items-center justify-center">
+        <p className="text-sm text-muted-foreground">
+          Select or create a session to start chatting.
+        </p>
       </div>
     )
   }
 
   return (
-    <div
-      className="flex flex-1 flex-col overflow-y-auto px-4 py-4 space-y-4"
-      aria-live="polite"
-      aria-label="Chat messages"
-    >
-      {allMessages.length === 0 && !isStreaming ? (
-        <div className="flex flex-1 items-center justify-center text-muted-foreground text-sm">
-          Start a conversation.
-        </div>
-      ) : (
-        allMessages.map((msg) => <MessageBubble key={msg.id} message={msg} />)
-      )}
-      {isStreaming && (
-        <div className="flex justify-start">
-          <div
-            className={cn(
-              'max-w-[75%] rounded-2xl px-4 py-2.5 text-sm',
-              'bg-muted text-muted-foreground'
-            )}
-            aria-live="polite"
-            aria-label="Assistant is typing"
-          >
-            {streamingToken || (
-              <span className="inline-block h-4 w-4 animate-pulse rounded-full bg-current opacity-50" />
-            )}
-            {streamingToken && (
-              <span className="ml-0.5 inline-block h-3.5 w-0.5 bg-current opacity-75" />
-            )}
+    <>
+      <div
+        className="flex flex-1 flex-col gap-4 overflow-y-auto px-4 py-4"
+        role="log"
+        aria-live="polite"
+        aria-label="Conversation"
+      >
+        {allMessages.length === 0 && !isStreaming && (
+          <p className="mt-8 text-center text-sm text-muted-foreground">
+            No messages yet. Ask a question below.
+          </p>
+        )}
+
+        {allMessages.map((msg) => (
+          <MessageBubble key={msg.id} message={msg} onCitationClick={setOpenCitation} />
+        ))}
+
+        {isStreaming && (
+          <div className="flex items-start gap-3">
+            <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-muted">
+              <BotIcon className="h-4 w-4 text-muted-foreground" />
+            </div>
+            <div className="max-w-[75%] rounded-2xl rounded-tl-sm bg-muted px-4 py-2.5">
+              <p className="whitespace-pre-wrap break-words text-sm">
+                {streamingToken}
+                <span
+                  className="ml-0.5 inline-block h-3.5 w-0.5 bg-foreground align-middle"
+                  aria-hidden="true"
+                />
+              </p>
+            </div>
           </div>
-        </div>
-      )}
-      <div ref={bottomRef} />
-    </div>
+        )}
+
+        <div ref={bottomRef} aria-hidden="true" />
+      </div>
+
+      <CitationPanel citation={openCitation} onClose={() => setOpenCitation(null)} />
+    </>
   )
 }
 
-function MessageBubble({ message }: { message: Message }) {
+interface MessageBubbleProps {
+  message: Message
+  onCitationClick: (c: Citation) => void
+}
+
+function MessageBubble({ message, onCitationClick }: MessageBubbleProps) {
   const isUser = message.role === 'user'
+
   return (
-    <div className={cn('flex', isUser ? 'justify-end' : 'justify-start')}>
+    <div className={cn('flex items-start gap-3', isUser && 'flex-row-reverse')}>
       <div
         className={cn(
-          'max-w-[75%] rounded-2xl px-4 py-2.5 text-sm whitespace-pre-wrap break-words',
-          isUser ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground'
+          'flex h-7 w-7 shrink-0 items-center justify-center rounded-full',
+          isUser ? 'bg-primary' : 'bg-muted'
+        )}
+        aria-hidden="true"
+      >
+        {isUser ? (
+          <UserIcon className="h-4 w-4 text-primary-foreground" />
+        ) : (
+          <BotIcon className="h-4 w-4 text-muted-foreground" />
+        )}
+      </div>
+
+      <div
+        className={cn(
+          'max-w-[75%] rounded-2xl px-4 py-2.5',
+          isUser ? 'rounded-tr-sm bg-primary text-primary-foreground' : 'rounded-tl-sm bg-muted'
         )}
       >
-        {message.content}
+        <p className="whitespace-pre-wrap break-words text-sm">{message.content}</p>
+
+        {!isUser && message.citations && message.citations.length > 0 && (
+          <div className="mt-2 flex flex-wrap gap-1.5" role="list" aria-label="Citations">
+            {message.citations.map((c, idx) => (
+              <button
+                key={c.id}
+                className={cn(
+                  'inline-flex h-5 w-5 items-center justify-center rounded-full',
+                  'bg-background/60 text-[10px] font-medium text-foreground',
+                  'hover:bg-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring'
+                )}
+                onClick={() => onCitationClick(c)}
+                aria-label={`View citation ${idx + 1}: ${c.document_title}`}
+                type="button"
+              >
+                {idx + 1}
+              </button>
+            ))}
+          </div>
+        )}
+
+        <time
+          className={cn(
+            'mt-1 block text-[10px]',
+            isUser ? 'text-primary-foreground/70' : 'text-muted-foreground'
+          )}
+          dateTime={message.created_at}
+          aria-label={new Date(message.created_at).toLocaleString()}
+        >
+          {new Date(message.created_at).toLocaleTimeString([], {
+            hour: '2-digit',
+            minute: '2-digit',
+          })}
+        </time>
       </div>
     </div>
   )
