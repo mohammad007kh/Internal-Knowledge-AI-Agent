@@ -97,6 +97,7 @@ backend/alembic/versions/__pycache__/
 # =============================================================
 playwright-report/
 test-results/
+frontend/e2e/.auth/
 
 # =============================================================
 # SpecKit (internal AI agent scaffolding - not part of project source)

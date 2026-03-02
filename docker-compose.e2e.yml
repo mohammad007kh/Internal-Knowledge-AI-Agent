@@ -1,0 +1,5 @@
+services:
+  backend:
+    environment:
+      E2E_MODE: "true"
+      CELERY_TASK_ALWAYS_EAGER: "true"
