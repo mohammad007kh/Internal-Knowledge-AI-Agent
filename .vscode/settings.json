@@ -75,6 +75,7 @@
     "&": true,
     "docker compose": true,
     ".\\.venv\\Scripts\\python.exe": true,
-    "npm run build": true
+    "npm run build": true,
+    "pnpm": true
   }
 }
