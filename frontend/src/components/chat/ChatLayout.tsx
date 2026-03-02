@@ -1,13 +1,45 @@
 'use client'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { useMediaQuery } from '@/hooks/useMediaQuery'
+import { ChatInputBar } from './ChatInputBar'
+import { ClarificationCard } from './ClarificationCard'
 import { MessageThread } from './MessageThread'
 import { useSelectedSession } from './SelectedSessionContext'
 import { SessionList } from './SessionList'
+import { useChat } from './useChat'
 
 export function ChatLayout() {
   const { sessionId } = useSelectedSession()
   const isDesktop = useMediaQuery('(min-width: 768px)')
+  const {
+    send,
+    isPending,
+    streamingToken,
+    isStreaming,
+    optimisticMessages,
+    clarification,
+    dismissClarification,
+  } = useChat({ sessionId })
+
+  const chatPane = (
+    <div className="flex flex-1 flex-col overflow-hidden">
+      <MessageThread
+        sessionId={sessionId}
+        streamingToken={streamingToken}
+        isStreaming={isStreaming}
+        extraMessages={optimisticMessages}
+      />
+      {clarification && (
+        <ClarificationCard
+          question={clarification.question}
+          onDismiss={dismissClarification}
+          onReply={(answer) => send(answer)}
+          disabled={isPending}
+        />
+      )}
+      <ChatInputBar onSend={send} disabled={isPending} sessionId={sessionId} />
+    </div>
+  )
 
   if (isDesktop) {
     return (
@@ -15,9 +47,7 @@ export function ChatLayout() {
         <aside className="flex flex-col overflow-hidden">
           <SessionList />
         </aside>
-        <main className="flex flex-col overflow-hidden">
-          <MessageThread sessionId={sessionId} />
-        </main>
+        <main className="flex flex-col overflow-hidden">{chatPane}</main>
       </div>
     )
   }
@@ -43,7 +73,7 @@ export function ChatLayout() {
           value="chat"
           className="flex flex-1 flex-col overflow-hidden data-[state=inactive]:hidden"
         >
-          <MessageThread sessionId={sessionId} />
+          {chatPane}
         </TabsContent>
       </Tabs>
     </div>
