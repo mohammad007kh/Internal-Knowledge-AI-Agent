@@ -54,7 +54,7 @@ Format 1 tasks (T-001–T-005, T-007–T-010, T-012–T-024) and Format 3 tasks 
 | T-088 | Admin — User Management UI | T-050, T-080 | T-090 |
 | T-089 | Admin — System Health & Analytics Dashboard | T-055, T-059, T-080 | T-090 | Done ✓ |
 | T-090 | Unit Tests — Services & Connectors | T-086, T-087, T-088, T-089 (all production code complete) | T-099 | Done ✓ |
-| T-091 | Integration Tests — API Flows | T-035, T-090 | T-099 |
+| T-091 | Integration Tests — API Flows | T-035, T-090 | T-099 | Done ✓ |
 | T-092 | Integration Tests — LangGraph Pipeline Nodes | T-070, T-071, T-072, T-090 | T-099 |
 | T-093 | Playwright E2E Tests | T-080, T-081, T-082, T-083, T-084, T-085, T-086, T-087, T-088, T-089, T-091 | T-099 |
 | T-094 | Accessibility Audit — WCAG-AA Compliance | T-080, T-081, T-082, T-083, T-084, T-085, T-086, T-087, T-088, T-089, T-093 | T-099 |
