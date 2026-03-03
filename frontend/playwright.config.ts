@@ -29,5 +29,11 @@ export default defineConfig({
       use: { ...devices['Desktop Firefox'] },
       dependencies: ['setup'],
     },
+    // No-auth project for tests that only need the public UI (visual regression, polish)
+    {
+      name: 'no-auth',
+      testMatch: /e2e\/(visual|polish)\/.+\.spec\.ts/,
+      use: { ...devices['Desktop Chrome'], storageState: undefined },
+    },
   ],
 })
