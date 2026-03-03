@@ -3,7 +3,7 @@
 # ==============================================================================
 
 .DEFAULT_GOAL := help
-.PHONY: help dev dev-d down down-v build test test-cov test-e2e lint format \
+.PHONY: help dev dev-d down down-v build test test-cov test-e2e test-e2e-headed test-e2e-report lint format \
         migrate migrate-gen migrate-down migrate-history shell-backend logs
 
 # Colours
@@ -61,8 +61,14 @@ test-cov: ## Run pytest with coverage gate ≥ 80 %
 	        --cov-report=term-missing \
 	        --cov-fail-under=80
 
-test-e2e: ## Run Playwright end-to-end tests
-	cd frontend && npx playwright test
+test-e2e: ## Run Playwright end-to-end tests (headless)
+	cd frontend && pnpm test:e2e
+
+test-e2e-headed: ## Run Playwright E2E tests in headed mode (visible browser)
+	cd frontend && pnpm test:e2e:headed
+
+test-e2e-report: ## Open the last Playwright HTML report
+	cd frontend && pnpm test:e2e:report
 
 ##@ Linting & Formatting
 
