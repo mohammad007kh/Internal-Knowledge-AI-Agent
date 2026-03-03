@@ -228,6 +228,15 @@ if _INTEGRATION:
         await db_session.flush()
         return user
 
+    @pytest.fixture
+    async def async_client(client: AsyncClient) -> AsyncClient:  # type: ignore[misc]
+        """Alias for the ``client`` fixture — used by security integration tests."""
+        return client
+
+    @pytest_asyncio.fixture()
+    async def user_token(client: AsyncClient, regular_user: User) -> str:  # type: ignore[misc]
+        """Return a JWT access token for a regular (non-admin) user."""
+        return await get_access_token(client, regular_user.email, "User@12345")
     @pytest_asyncio.fixture()
     async def regular_user(db_session: AsyncSession) -> User:  # type: ignore[misc]
         """An active regular user seeded in the test DB."""

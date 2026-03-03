@@ -38,6 +38,8 @@ SECURITY_HEADERS = {
         "font-src 'self'; "
         "connect-src 'self'"
     ),
+    "Permissions-Policy": "camera=(), microphone=(), geolocation=()",
+    "Strict-Transport-Security": "max-age=31536000; includeSubDomains",
 }
 
 
@@ -94,9 +96,11 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         for header, value in SECURITY_HEADERS.items():
             response.headers[header] = value
 
-        if self._is_https:
-            response.headers["Strict-Transport-Security"] = (
-                "max-age=31536000; includeSubDomains"
-            )
+        # Suppress server fingerprinting
+        response.headers["server"] = "webserver"
+
+        # Echo or generate a request correlation ID
+        request_id = request.headers.get("X-Request-ID", secrets.token_hex(16))
+        response.headers["X-Request-ID"] = request_id
 
         return response
