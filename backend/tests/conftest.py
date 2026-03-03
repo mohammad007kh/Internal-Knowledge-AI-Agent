@@ -66,7 +66,39 @@ if _INTEGRATION:
         Uses subprocess so alembic's env.py can call asyncio.run() inside its own
         clean process — no event loop conflict. The full +asyncpg URL is passed so
         SQLAlchemy inside alembic uses the asyncpg driver (the only driver installed).
+
+        Before running migrations, ensures that the test_knowledge_agent database
+        exists, creating it if necessary (connects to the postgres maintenance DB).
         """
+        import asyncpg  # asyncpg is the installed async driver
+
+        async def _ensure_test_db() -> None:
+            # Connect to the postgres maintenance DB on the same host/port.
+            # Always DROP + RECREATE so migrations run against a clean slate,
+            # preventing "already exists" errors from half-migrated test runs.
+            conn = await asyncpg.connect(
+                host="localhost",
+                port=5434,
+                user="postgres",
+                password="postgres",
+                database="postgres",
+            )
+            try:
+                # Terminate any open connections to the test DB before dropping
+                await conn.execute(
+                    "SELECT pg_terminate_backend(pid) FROM pg_stat_activity"
+                    " WHERE datname = 'test_knowledge_agent'"
+                )
+                # DROP DATABASE cannot run inside a transaction
+                await conn.execute(
+                    "DROP DATABASE IF EXISTS test_knowledge_agent"
+                )
+                await conn.execute("CREATE DATABASE test_knowledge_agent")
+            finally:
+                await conn.close()
+
+        asyncio.run(_ensure_test_db())
+
         venv_python = str(_backend_dir.parent / ".venv" / "Scripts" / "python.exe")
         env = {**os.environ, "DATABASE_URL": TEST_DATABASE_URL}
         result = subprocess.run(
@@ -148,6 +180,7 @@ if _INTEGRATION:
           - sources              (migration 0005 / T-043)
           - chat_messages        (T-078)
           - chat_sessions        (T-078)
+          - system_health_events (T-095 / FR-033)
         """
         engine = create_async_engine(TEST_DATABASE_URL)
         async with engine.begin() as conn:
@@ -156,7 +189,8 @@ if _INTEGRATION:
                     "TRUNCATE chat_messages, chat_sessions,"
                     " source_permissions, sources, users,"
                     " user_refresh_tokens, invitations,"
-                    " password_reset_tokens RESTART IDENTITY CASCADE"
+                    " password_reset_tokens, system_health_events"
+                    " RESTART IDENTITY CASCADE"
                 )
             )
         await engine.dispose()

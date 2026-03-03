@@ -1,12 +1,15 @@
 """Add chat_sessions and chat_messages tables.
 
+# NOTE: op.create_table() with sa.Enum fires _on_table_create via Base.metadata
+# when env.py loads chat models that register messagerole.  We bypass SQLAlchemy's
+# type-event system entirely by using raw SQL DDL throughout.
+
 Revision ID: 0010
 Revises:     0009
 Create Date: 2025-01-01 00:00:00.000000
 """
 from __future__ import annotations
 
-import sqlalchemy as sa
 from alembic import op
 
 revision = "0010"
@@ -16,82 +19,62 @@ depends_on = None
 
 
 def upgrade() -> None:
-    op.execute("CREATE TYPE messagerole AS ENUM ('user', 'assistant', 'system')")
-
-    op.create_table(
-        "chat_sessions",
-        sa.Column(
-            "id",
-            sa.UUID(),
-            server_default=sa.text("gen_random_uuid()"),
-            nullable=False,
-        ),
-        sa.Column("user_id", sa.UUID(), nullable=False),
-        sa.Column(
-            "title",
-            sa.Text(),
-            server_default=sa.text("'New conversation'"),
-            nullable=False,
-        ),
-        sa.Column(
-            "created_at",
-            sa.TIMESTAMP(timezone=True),
-            server_default=sa.text("now()"),
-            nullable=False,
-        ),
-        sa.Column(
-            "updated_at",
-            sa.TIMESTAMP(timezone=True),
-            server_default=sa.text("now()"),
-            nullable=False,
-        ),
-        sa.Column(
-            "is_deleted",
-            sa.Boolean(),
-            server_default=sa.text("false"),
-            nullable=False,
-        ),
-        sa.ForeignKeyConstraint(["user_id"], ["users.id"], ondelete="CASCADE"),
-        sa.PrimaryKeyConstraint("id"),
+    # 1. Create the native PostgreSQL ENUM type (raw DDL — bypasses _on_table_create).
+    op.execute(
+        "CREATE TYPE messagerole AS ENUM ('user', 'assistant', 'system')"
     )
-    op.create_index("ix_chat_sessions_user_id", "chat_sessions", ["user_id"])
-    op.create_index("ix_chat_sessions_is_deleted", "chat_sessions", ["is_deleted"])
 
-    op.create_table(
-        "chat_messages",
-        sa.Column(
-            "id",
-            sa.UUID(),
-            server_default=sa.text("gen_random_uuid()"),
-            nullable=False,
-        ),
-        sa.Column("session_id", sa.UUID(), nullable=False),
-        sa.Column(
-            "role",
-            sa.Enum("user", "assistant", "system", name="messagerole"),
-            nullable=False,
-        ),
-        sa.Column("content", sa.Text(), nullable=False),
-        sa.Column(
-            "created_at",
-            sa.TIMESTAMP(timezone=True),
-            server_default=sa.text("now()"),
-            nullable=False,
-        ),
-        sa.ForeignKeyConstraint(
-            ["session_id"], ["chat_sessions.id"], ondelete="CASCADE"
-        ),
-        sa.PrimaryKeyConstraint("id"),
+    # 2. Create chat_sessions table via raw DDL.
+    op.execute(
+        """
+        CREATE TABLE chat_sessions (
+            id          UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+            user_id     UUID        NOT NULL
+                            REFERENCES users(id) ON DELETE CASCADE,
+            title       TEXT        NOT NULL DEFAULT 'New conversation',
+            created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+            updated_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+            is_deleted  BOOLEAN     NOT NULL DEFAULT false
+        )
+        """
     )
-    op.create_index("ix_chat_messages_session_id", "chat_messages", ["session_id"])
-    op.create_index("ix_chat_messages_created_at", "chat_messages", ["created_at"])
+
+    # 3. Create indexes on chat_sessions.
+    op.execute(
+        "CREATE INDEX ix_chat_sessions_user_id    ON chat_sessions (user_id)"
+    )
+    op.execute(
+        "CREATE INDEX ix_chat_sessions_is_deleted ON chat_sessions (is_deleted)"
+    )
+
+    # 4. Create chat_messages table via raw DDL (role column uses the messagerole type).
+    op.execute(
+        """
+        CREATE TABLE chat_messages (
+            id          UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+            session_id  UUID        NOT NULL
+                            REFERENCES chat_sessions(id) ON DELETE CASCADE,
+            role        messagerole NOT NULL,
+            content     TEXT        NOT NULL,
+            created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+        )
+        """
+    )
+
+    # 5. Create indexes on chat_messages.
+    op.execute(
+        "CREATE INDEX ix_chat_messages_session_id ON chat_messages (session_id)"
+    )
+    op.execute(
+        "CREATE INDEX ix_chat_messages_created_at ON chat_messages (created_at)"
+    )
 
 
 def downgrade() -> None:
-    op.drop_index("ix_chat_messages_created_at", table_name="chat_messages")
-    op.drop_index("ix_chat_messages_session_id", table_name="chat_messages")
+    op.execute("DROP INDEX IF EXISTS ix_chat_messages_created_at")
+    op.execute("DROP INDEX IF EXISTS ix_chat_messages_session_id")
     op.drop_table("chat_messages")
-    op.drop_index("ix_chat_sessions_is_deleted", table_name="chat_sessions")
-    op.drop_index("ix_chat_sessions_user_id", table_name="chat_sessions")
+    op.execute("DROP INDEX IF EXISTS ix_chat_sessions_is_deleted")
+    op.execute("DROP INDEX IF EXISTS ix_chat_sessions_user_id")
     op.drop_table("chat_sessions")
-    op.execute("DROP TYPE messagerole")
+    op.execute("DROP TYPE IF EXISTS messagerole")

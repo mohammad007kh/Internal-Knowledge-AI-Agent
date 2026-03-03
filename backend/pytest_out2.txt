@@ -1,0 +1,164 @@
+﻿python : C:\Users\moham\AppData\Roaming\Python\Python314\site-packages\langsmit
+h\schemas.py:22: UserWarning: Core Pydantic V1 functionality isn't compatible 
+with Python 3.14 or greater.
+At line:1 char:89
++ ... t\backend"; python -m pytest tests/unit/ --continue-on-collection-err ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (C:\Users\moham\....14 or greater. 
+   :String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+  from pydantic.v1 import (
+........................................................................ [ 14%]
+............................F..FFF...........................FFFFFFFFFFF [ 28%]
+FFFFF....................F..................F........................... [ 42%]
+......................................................EEE............... [ 57%]
+........................................................................ [ 71%]
+.....F.......................FFFF....................................... [ 85%]
+C:\Users\moham\AppData\Roaming\Python\Python314\site-packages\coverage\inorout.
+py:497: CoverageWarning: Module src/api/v1/chat was never imported. 
+(module-not-imported); see https://coverage.readthedocs.io/en/7.13.1/messages.h
+tml#warning-module-not-imported
+  self.warn(f"Module {pkg} was never imported.", slug="module-not-imported")
+......................................................................F
+ERROR: Coverage failure: total of 49 is less than fail-under=80
+                                                                         [100%]
+============================== warnings summary ===============================
+C:\Users\moham\AppData\Roaming\Python\Python314\site-packages\pydantic\v1\typing.py:77
+C:\Users\moham\AppData\Roaming\Python\Python314\site-packages\pydantic\v1\typing.py:77
+C:\Users\moham\AppData\Roaming\Python\Python314\site-packages\pydantic\v1\typing.py:77
+C:\Users\moham\AppData\Roaming\Python\Python314\site-packages\pydantic\v1\typing.py:77
+C:\Users\moham\AppData\Roaming\Python\Python314\site-packages\pydantic\v1\typing.py:77
+C:\Users\moham\AppData\Roaming\Python\Python314\site-packages\pydantic\v1\typing.py:77
+C:\Users\moham\AppData\Roaming\Python\Python314\site-packages\pydantic\v1\typing.py:77
+  C:\Users\moham\AppData\Roaming\Python\Python314\site-packages\pydantic\v1\typing.py:77: DeprecationWarning: ForwardRef._evaluate is a private API and is retained for compatibility, but will be removed in Python 3.16. Use ForwardRef.evaluate() or typing.evaluate_forward_ref() instead.
+    return cast(Any, type_)._evaluate(globalns, localns, type_params=(), recursive_guard=set())
+
+tests\unit\test_rate_limit.py:278
+  D:\Projects\Internal Knowledge AI Agent\backend\tests\unit\test_rate_limit.py:278: PytestUnknownMarkWarning: Unknown pytest.mark.integration - is this a typo?  You can register custom marks to avoid this warning - for details, see https://docs.pytest.org/en/stable/how-to/mark.html
+    @pytest.mark.integration
+
+tests/unit/agent/test_generate_node.py::test_sets_final_answer
+  D:\Projects\Internal Knowledge AI Agent\backend\tests\conftest.py:57: DeprecationWarning: 'asyncio.DefaultEventLoopPolicy' is deprecated and slated for removal in Python 3.16
+    return asyncio.DefaultEventLoopPolicy()
+
+tests/unit/test_auth_router.py::TestRefresh::test_refresh_success
+tests/unit/test_auth_router.py::TestRefresh::test_refresh_invalid_token
+tests/unit/test_auth_router.py::TestLogout::test_logout_with_cookie
+  C:\Users\moham\AppData\Roaming\Python\Python314\site-packages\starlette\testclient.py:445: DeprecationWarning: Setting per-request cookies=<...> is being deprecated, because the expected behaviour on cookie persistence is ambiguous. Set cookies directly on the client instance instead.
+    return super().request(
+
+tests/unit/test_bootstrap.py::test_bootstrap_creates_admin_when_no_users
+  D:\Projects\Internal Knowledge AI Agent\backend\src\core\bootstrap.py:75: RuntimeWarning: coroutine 'AsyncMockMixin._execute_mock_call' was never awaited
+    session.add(admin)
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+tests/unit/test_rate_limit.py::test_under_limit_passes
+tests/unit/test_rate_limit.py::test_at_limit_passes
+tests/unit/test_rate_limit.py::test_over_limit_returns_429
+tests/unit/test_rate_limit.py::test_auth_route_stricter_limit
+tests/unit/test_rate_limit.py::test_redis_error_allows_request
+  D:\Projects\Internal Knowledge AI Agent\backend\src\middleware\rate_limit.py:69: RuntimeWarning: coroutine 'AsyncMockMixin._execute_mock_call' was never awaited
+    pipe.zremrangebyscore(key, 0, window_start)
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+tests/unit/test_rate_limit.py::test_under_limit_passes
+tests/unit/test_rate_limit.py::test_at_limit_passes
+tests/unit/test_rate_limit.py::test_over_limit_returns_429
+tests/unit/test_rate_limit.py::test_auth_route_stricter_limit
+tests/unit/test_rate_limit.py::test_redis_error_allows_request
+  D:\Projects\Internal Knowledge AI Agent\backend\src\middleware\rate_limit.py:70: RuntimeWarning: coroutine 'AsyncMockMixin._execute_mock_call' was never awaited
+    pipe.zadd(key, {str(now): now})
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+tests/unit/test_rate_limit.py::test_under_limit_passes
+tests/unit/test_rate_limit.py::test_at_limit_passes
+tests/unit/test_rate_limit.py::test_over_limit_returns_429
+tests/unit/test_rate_limit.py::test_auth_route_stricter_limit
+tests/unit/test_rate_limit.py::test_redis_error_allows_request
+  D:\Projects\Internal Knowledge AI Agent\backend\src\middleware\rate_limit.py:71: RuntimeWarning: coroutine 'AsyncMockMixin._execute_mock_call' was never awaited
+    pipe.zcard(key)
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+tests/unit/test_rate_limit.py::test_under_limit_passes
+tests/unit/test_rate_limit.py::test_at_limit_passes
+tests/unit/test_rate_limit.py::test_over_limit_returns_429
+tests/unit/test_rate_limit.py::test_auth_route_stricter_limit
+tests/unit/test_rate_limit.py::test_redis_error_allows_request
+  D:\Projects\Internal Knowledge AI Agent\backend\src\middleware\rate_limit.py:72: RuntimeWarning: coroutine 'AsyncMockMixin._execute_mock_call' was never awaited
+    pipe.expire(key, window)
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+tests/unit/test_rate_limit.py::test_no_redis_allows_request
+  D:\Projects\Internal Knowledge AI Agent\backend\src\middleware\rate_limit.py:68: RuntimeWarning: coroutine 'AsyncMockMixin._execute_mock_call' was never awaited
+    async with redis.pipeline(transaction=True) as pipe:
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+tests/unit/test_security_headers.py::test_csrf_passes_with_matching_token
+tests/unit/test_security_headers.py::test_csrf_fails_with_mismatched_token
+  C:\Users\moham\AppData\Roaming\Python\Python314\site-packages\httpx\_client.py:1859: DeprecationWarning: Setting per-request cookies=<...> is being deprecated, because the expected behaviour on cookie persistence is ambiguous. Set cookies directly on the client instance instead.
+    return await self.request(
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=============================== tests coverage ================================
+_______________ coverage: platform win32, python 3.14.0-final-0 _______________
+
+Name                          Stmts   Miss  Cover
+-------------------------------------------------
+src\agent\__init__.py             0      0   100%
+src\agent\nodes\__init__.py       6      1    83%
+src\agent\nodes\clarify.py       31     19    39%
+src\agent\nodes\generate.py      43      4    91%
+src\agent\nodes\history.py       24     14    42%
+src\agent\nodes\persist.py       25     16    36%
+src\agent\nodes\retrieve.py      29     25    14%
+src\agent\pipeline.py            51     45    12%
+src\agent\prompts.py             16      0   100%
+src\agent\state.py               17      0   100%
+-------------------------------------------------
+TOTAL                           242    124    49%
+FAIL Required test coverage of 80% not reached. Total coverage: 48.76%
+=========================== short test summary info ===========================
+FAILED tests/unit/services/test_auth_service.py::TestLogin::test_valid_credentials_returns_token_tuple
+FAILED tests/unit/services/test_auth_service.py::TestLogin::test_inactive_user_raises_forbidden
+FAILED tests/unit/services/test_auth_service.py::TestRefresh::test_valid_token_returns_new_pair
+FAILED tests/unit/services/test_auth_service.py::TestRefresh::test_expired_or_invalid_token_raises_unauthorized
+FAILED tests/unit/services/test_source_service.py::TestListSources::test_owner_sees_own_sources
+FAILED tests/unit/services/test_source_service.py::TestListSources::test_admin_can_list_all_active
+FAILED tests/unit/services/test_source_service.py::TestListSources::test_empty_list_returns_empty
+FAILED tests/unit/services/test_source_service.py::TestGetSource::test_valid_id_returns_source
+FAILED tests/unit/services/test_source_service.py::TestGetSource::test_unknown_id_raises_not_found
+FAILED tests/unit/services/test_source_service.py::TestSoftDelete::test_delete_source_calls_repo_deactivate
+FAILED tests/unit/services/test_source_service.py::TestSoftDelete::test_delete_nonexistent_source_raises_not_found
+FAILED tests/unit/services/test_user_service.py::TestInviteUser::test_new_email_returns_invitation_and_token
+FAILED tests/unit/services/test_user_service.py::TestInviteUser::test_duplicate_email_raises_conflict
+FAILED tests/unit/services/test_user_service.py::TestInviteUser::test_non_admin_raises_forbidden
+FAILED tests/unit/services/test_user_service.py::TestAcceptInvitation::test_valid_token_creates_user
+FAILED tests/unit/services/test_user_service.py::TestAcceptInvitation::test_expired_token_raises_validation_error
+FAILED tests/unit/services/test_user_service.py::TestAcceptInvitation::test_already_used_token_raises_conflict
+FAILED tests/unit/services/test_user_service.py::TestDeactivateUser::test_deactivate_sets_is_active_false
+FAILED tests/unit/services/test_user_service.py::TestDeactivateUser::test_unknown_user_raises_not_found
+FAILED tests/unit/services/test_user_service.py::TestDeactivateUser::test_self_deactivation_raises_forbidden
+FAILED tests/unit/test_auth_service.py::TestLogin::test_disabled_account - sr...
+FAILED tests/unit/test_auth_service.py::TestChangePassword::test_wrong_current_password
+FAILED tests/unit/test_security.py::TestCookieHelpers::test_set_refresh_cookie_sets_correct_attributes
+FAILED tests/unit/test_trigger_all_syncs.py::TestTriggerAllSyncs::test_dispatches_one_task_per_active_source
+FAILED tests/unit/test_trigger_all_syncs.py::TestTriggerAllSyncs::test_returns_zero_when_no_active_sources
+FAILED tests/unit/test_trigger_all_syncs.py::TestTriggerAllSyncs::test_passes_source_id_as_string
+FAILED tests/unit/test_trigger_all_syncs.py::TestTriggerAllSyncs::test_dispatched_count_matches_source_count
+FAILED tests/unit/test_users_router.py::TestRouterRegistration::test_users_router_registered_in_v1
+ERROR tests/unit/agent/test_clarify_node.py - pydantic.v1.errors.ConfigError:...
+ERROR tests/unit/agent/test_pipeline_smoke.py - pydantic.v1.errors.ConfigErro...
+ERROR tests/unit/agent/test_retrieve_node.py - pydantic.v1.errors.ConfigError...
+ERROR tests/unit/services/test_langfuse_tracing_service.py - pydantic.v1.erro...
+ERROR tests/unit/test_chat_router.py - pydantic.v1.errors.ConfigError: unable...
+ERROR tests/unit/test_sync_source_task.py - pydantic.v1.errors.ConfigError: u...
+ERROR tests/unit/test_error_handler.py::test_unknown_route_returns_404_problem_json
+ERROR tests/unit/test_error_handler.py::test_app_error_returns_problem_json
+ERROR tests/unit/test_error_handler.py::test_validation_error_returns_422_problem_json

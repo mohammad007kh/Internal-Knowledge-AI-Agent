@@ -9,9 +9,11 @@ progress and history without hitting the queue/worker directly.
 
 from __future__ import annotations
 
+import uuid
 from typing import TYPE_CHECKING
 
 import sqlalchemy as sa
+from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from src.models.base import Base, TimestampMixin, UUIDMixin
@@ -37,7 +39,8 @@ class SyncJob(UUIDMixin, TimestampMixin, Base):
 
     __tablename__ = "sync_jobs"
 
-    source_id: Mapped[str] = mapped_column(
+    source_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
         sa.ForeignKey("sources.id", ondelete="CASCADE"),
         nullable=False,
         index=True,
