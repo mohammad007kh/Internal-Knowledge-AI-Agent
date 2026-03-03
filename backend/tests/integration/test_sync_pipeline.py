@@ -1,4 +1,9 @@
-"""Integration tests: full sync pipeline — T-068."""
+"""Integration tests: full sync pipeline — T-068.
+
+Spec coverage: FR-032
+  FR-032 - when source sync is in-progress and user queries that source,
+           system displays a clear in-progress warning
+"""
 from __future__ import annotations
 
 from unittest.mock import AsyncMock, MagicMock, patch

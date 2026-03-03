@@ -79,4 +79,30 @@ testpaths = ["tests"]
 python_files = ["test_*.py", "*_test.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
-addopts = "-q --tb=short --cov=src/agent --cov=src/api/v1/chat --cov-fail-under=80"
+addopts = [
+    "-q",
+    "--tb=short",
+    "--strict-markers",
+    "--cov=src",
+    "--cov-report=term-missing",
+    "--cov-report=xml:coverage.xml",
+    "--cov-fail-under=80",
+]
+markers = [
+    "slow: mark test as slow-running",
+    "langfuse: mark test as requiring Langfuse connectivity",
+]
+
+[tool.coverage.run]
+branch = true
+source = ["src"]
+omit = [
+    "src/alembic/*",
+    "src/tests/*",
+    "src/__main__.py",
+]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = false
+fail_under = 80

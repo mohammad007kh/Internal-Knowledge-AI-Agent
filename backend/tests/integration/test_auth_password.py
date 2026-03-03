@@ -1,4 +1,9 @@
-"""Integration tests for password-reset and change-password endpoints."""
+"""Integration tests for password-reset and change-password endpoints.
+
+Spec coverage: FR-023, FR-034
+  FR-023 - users reset password via time-limited reset link
+  FR-034 - passwords meet complexity policy (length, uppercase, digit, special char)
+"""
 import secrets
 from datetime import UTC, datetime, timedelta
 

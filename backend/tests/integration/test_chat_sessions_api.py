@@ -1,4 +1,9 @@
-"""Integration tests for chat session CRUD endpoints."""
+"""Integration tests for chat session CRUD endpoints.
+
+Spec coverage: FR-006, FR-010
+  FR-006 - full conversation history per user, persistent across sessions
+  FR-010 - users toggle citation display on/off for their own view
+"""
 from __future__ import annotations
 
 import os

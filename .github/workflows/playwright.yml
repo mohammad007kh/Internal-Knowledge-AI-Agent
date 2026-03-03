@@ -1,0 +1,55 @@
+name: E2E Tests
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  e2e:
+    name: Playwright E2E
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Install Playwright browsers
+        working-directory: frontend
+        run: npx playwright install --with-deps chromium firefox
+
+      - name: Start backend services
+        run: docker compose up -d db redis minio backend worker
+
+      - name: Seed E2E users
+        run: docker compose exec -T backend python -m app.scripts.seed_e2e_users
+
+      - name: Start frontend dev server
+        working-directory: frontend
+        run: npm run dev &
+
+      - name: Wait for frontend
+        run: npx wait-on http://localhost:3000
+
+      - name: Run Playwright tests
+        working-directory: frontend
+        run: npx playwright test --project=chromium --reporter=html
+
+      - name: Upload Playwright report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: playwright-report
+          path: frontend/playwright-report/
+
+      - name: Teardown
+        if: always()
+        run: docker compose down -v

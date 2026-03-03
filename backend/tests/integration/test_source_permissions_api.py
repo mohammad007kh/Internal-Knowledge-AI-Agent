@@ -1,5 +1,9 @@
 """Integration tests for source permissions API (T-059).
 
+Spec coverage: FR-018, FR-019
+  FR-018 - admins grant and revoke individual users' access to specific sources
+  FR-019 - users only receive answers derived from sources explicitly granted to them
+
 Covers:
   POST   /api/v1/sources/{source_id}/permissions
   DELETE /api/v1/sources/{source_id}/permissions/{user_id}

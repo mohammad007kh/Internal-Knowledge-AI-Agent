@@ -1,5 +1,9 @@
 """Integration tests for the sync jobs router (T-066).
 
+Spec coverage: FR-016, FR-017
+  FR-016 - admins configure sync modes: manual, scheduled, auto-detect per source
+  FR-017 - sync status (last synced time, in-progress state, error details) visible to admins
+
 Covers all three endpoints:
   POST /api/v1/sources/{source_id}/sync       – trigger sync  (admin only)
   GET  /api/v1/sync-jobs/{job_id}             – get job       (authenticated)

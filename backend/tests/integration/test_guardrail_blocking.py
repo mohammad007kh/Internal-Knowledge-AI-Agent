@@ -1,3 +1,9 @@
+# Spec coverage: FR-025, FR-026, FR-027, FR-028, FR-029
+# FR-025 - admins define plain-language company policy guardrail rules
+# FR-026 - system evaluates every user message against guardrail rules before processing
+# FR-027 - system evaluates every generated answer against guardrail rules before delivery
+# FR-028 - baseline jailbreak and prompt-injection protection applied regardless of admin rules
+# FR-029 - all guardrail activation events logged with original text, triggered rule, action taken
 from __future__ import annotations
 
 import json

@@ -1,5 +1,13 @@
 """Integration tests for SourceService.
 
+Spec coverage: FR-009, FR-011, FR-013, FR-015, FR-030, FR-031
+  FR-009 - admins enable/disable citation display per source
+  FR-011 - admins register database sources (PostgreSQL, MS SQL, MySQL, MongoDB)
+  FR-013 - automatic schema inspection on database source registration
+  FR-015 - sources tagged as live/snapshot with freshness status
+  FR-030 - admins configure AI model per processing stage
+  FR-031 - per-source AI model overrides for retrieval and QA stages
+
 Tests Exercise:
 - T-058: Source service layer integration tests
 

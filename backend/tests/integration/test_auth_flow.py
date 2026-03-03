@@ -1,3 +1,6 @@
+# Spec coverage: FR-021, FR-022
+# FR-021 - user accounts created exclusively via admin-generated invitations (no self-registration)
+# FR-022 - admins invite users by email, assigning role of user or admin
 from __future__ import annotations
 
 import os

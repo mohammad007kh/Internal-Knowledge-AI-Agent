@@ -1,3 +1,5 @@
+# Spec coverage: FR-035
+# FR-035 - file uploads exceeding configured maximum file size are rejected immediately
 from __future__ import annotations
 
 import os

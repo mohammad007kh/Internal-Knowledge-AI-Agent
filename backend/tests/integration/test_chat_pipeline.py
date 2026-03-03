@@ -1,4 +1,12 @@
-"""Integration tests for chat pipeline SSE streaming endpoint."""
+"""Integration tests for chat pipeline SSE streaming endpoint.
+
+Spec coverage: FR-001, FR-002, FR-003, FR-004, FR-005
+  FR-001 - natural language questions receive grounded answers via the pipeline
+  FR-002 - query routing to relevant sources based on content
+  FR-003 - semantic search over indexed content for database sources
+  FR-004 - ambiguous query triggers clarifying question (check_clarification node)
+  FR-005 - streaming token-by-token responses via SSE
+"""
 from __future__ import annotations
 
 import json

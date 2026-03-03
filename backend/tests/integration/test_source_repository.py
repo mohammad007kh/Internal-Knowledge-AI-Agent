@@ -1,5 +1,9 @@
 """Integration tests for SourceRepository — T-058 File 1.
 
+Spec coverage: FR-012, FR-014
+  FR-012 - admins register document sources by uploading files (PDF, Word, Excel)
+  FR-014 - admins trigger re-inspection of source schema/content at any time
+
 Guard: these tests require a live PostgreSQL instance and are skipped
 unless the RUN_INTEGRATION_TESTS=1 environment variable is set.
 """

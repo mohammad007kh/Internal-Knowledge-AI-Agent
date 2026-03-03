@@ -1,3 +1,6 @@
+# Spec coverage: FR-007, FR-008
+# FR-007 - system MUST NOT fabricate information not present in accessible sources
+# FR-008 - inline citation markers included when citations are enabled for a source
 from __future__ import annotations
 
 import os
