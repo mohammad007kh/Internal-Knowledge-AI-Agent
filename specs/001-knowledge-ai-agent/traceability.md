@@ -61,7 +61,7 @@ Format 1 tasks (T-001–T-005, T-007–T-010, T-012–T-024) and Format 3 tasks 
 | T-095 | Integration Tests – Worker Crash & Retry (FR-033) | T-092 | T-099 | Done ✓ |
 | T-096 | Security Hardening — Headers, Rate Limiting & RBAC Smoke Tests | T-091 | T-099 | Done ✓ |
 | T-097 | Dark Mode, Responsive Layout & Polish | T-093, T-094 | T-099 | Done ✓ |
-| T-098 | Structured Logging, X-Request-ID Correlation & Langfuse Trace Verification | T-091 | T-099 |
+| T-098 | Structured Logging, X-Request-ID Correlation & Langfuse Trace Verification | T-091 | T-099 | Done ✓ |
 | T-099 | Coverage Gate, CI Pipeline & Final Spec Verification | T-091, T-092, T-093, T-094, T-095, T-096, T-097, T-098 | — |
 
 ---
