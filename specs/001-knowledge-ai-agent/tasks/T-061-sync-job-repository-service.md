@@ -1,11 +1,13 @@
-# T-061 — SyncJob Repository, Service & Schemas
+﻿# T-061 â€” SyncJob Repository, Service & Schemas
+
+**Status:** Done
 
 ## Context
 ```
-Python 3.12 | FastAPI · SQLAlchemy 2.x · Pydantic v2 · dependency-injector
-PostgreSQL 16 · UUID PKs
-RFC 7807 Problem Details — all non-2xx API responses
-snake_case vars/files/tables · PascalCase classes · SCREAMING_SNAKE_CASE constants
+Python 3.12 | FastAPI Â· SQLAlchemy 2.x Â· Pydantic v2 Â· dependency-injector
+PostgreSQL 16 Â· UUID PKs
+RFC 7807 Problem Details â€” all non-2xx API responses
+snake_case vars/files/tables Â· PascalCase classes Â· SCREAMING_SNAKE_CASE constants
 ```
 
 ## Goal
@@ -25,7 +27,7 @@ Wire all three into the DI container.
 
 ---
 
-## 1  Repository — `app/repositories/sync_job_repository.py`
+## 1  Repository â€” `app/repositories/sync_job_repository.py`
 
 ```python
 # app/repositories/sync_job_repository.py
@@ -87,7 +89,7 @@ class SyncJobRepository(BaseRepository[SyncJob]):
         documents_synced: int | None = None,
         chunks_created: int | None = None,
     ) -> SyncJob | None:
-        """Partial update — only provided kwargs are applied."""
+        """Partial update â€” only provided kwargs are applied."""
         values: dict = {"status": status}
         if started_at is not None:
             values["started_at"] = started_at
@@ -151,7 +153,7 @@ class SyncJobRepository(BaseRepository[SyncJob]):
 
 ---
 
-## 2  Service — `app/services/sync_job_service.py`
+## 2  Service â€” `app/services/sync_job_service.py`
 
 ```python
 # app/services/sync_job_service.py
@@ -279,7 +281,7 @@ class SyncJobService:
 
 ---
 
-## 3  Pydantic Schemas — `app/schemas/sync_job.py`
+## 3  Pydantic Schemas â€” `app/schemas/sync_job.py`
 
 ```python
 # app/schemas/sync_job.py
@@ -316,12 +318,12 @@ class SyncJobResponse(BaseModel):
 
 ---
 
-## 4  DI Container — `app/containers.py` patch
+## 4  DI Container â€” `app/containers.py` patch
 
 ```python
-# Inside ApplicationContainer — add after SourcePermissionService providers:
+# Inside ApplicationContainer â€” add after SourcePermissionService providers:
 
-    # ── SyncJob ─────────────────────────────────────────────────────────────
+    # â”€â”€ SyncJob â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     sync_job_repository: providers.Factory[SyncJobRepository] = providers.Factory(
         SyncJobRepository
     )
@@ -353,7 +355,7 @@ assert SyncStatus.RUNNING.value == 'running'
 print('schema OK')
 "
 
-# Integration — run with pytest
+# Integration â€” run with pytest
 pytest tests/integration/test_sync_job_service.py -v
 ```
 
@@ -363,6 +365,6 @@ pytest tests/integration/test_sync_job_service.py -v
 
 | Requirement | Satisfied by |
 |---|---|
-| FR-033 — job lifecycle | `mark_running`, `mark_success`, `mark_failed` |
-| FR-033 — error capture | `error_message` stored, truncated to 2000 chars |
-| FR-033 — latest job query | `get_latest_for_source` |
+| FR-033 â€” job lifecycle | `mark_running`, `mark_success`, `mark_failed` |
+| FR-033 â€” error capture | `error_message` stored, truncated to 2000 chars |
+| FR-033 â€” latest job query | `get_latest_for_source` |

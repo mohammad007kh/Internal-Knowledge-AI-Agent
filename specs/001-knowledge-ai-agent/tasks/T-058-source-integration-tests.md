@@ -1,8 +1,10 @@
-# T-058 — Source Service & Repository Integration Tests
+﻿# T-058 â€” Source Service & Repository Integration Tests
+
+**Status:** Done
 
 ## Context
 ```
-Python 3.12 · pytest · pytest-asyncio · asyncio_mode=auto
+Python 3.12 Â· pytest Â· pytest-asyncio Â· asyncio_mode=auto
 SQLAlchemy 2.x async test session (in-process SQLite for non-vector tests,
 real PostgreSQL via Docker for vector-index tests)
 pytest fixtures from conftest: `db_session`, `async_client` (HTTPX)
@@ -16,7 +18,7 @@ Postgres from `docker-compose.test.yml`) to verify real DB writes.
 
 ---
 
-## File 1 — `tests/integration/test_source_repository.py`
+## File 1 â€” `tests/integration/test_source_repository.py`
 
 ```python
 """Integration tests for SourceRepository (SQLAlchemy async session)."""
@@ -127,7 +129,7 @@ class TestPagination:
 
 ---
 
-## File 2 — `tests/integration/test_source_service.py`
+## File 2 â€” `tests/integration/test_source_service.py`
 
 ```python
 """Integration tests for SourceService using real DB session."""
@@ -341,7 +343,7 @@ class TestTestConnection:
 
 ---
 
-## File 3 — `tests/integration/test_source_permission_service.py`
+## File 3 â€” `tests/integration/test_source_permission_service.py`
 
 ```python
 """Integration tests for SourcePermissionService."""

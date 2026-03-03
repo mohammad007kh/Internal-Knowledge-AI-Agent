@@ -1,18 +1,19 @@
-# T-026 — Auth FastAPI Router (7 endpoints)
+﻿# T-026 â€” Auth FastAPI Router (7 endpoints)
 
 ## Metadata
 | Field | Value |
 |---|---|
+| **Status** | Done |
 | **ID** | T-026 |
-| **Title** | Auth FastAPI Router — login, refresh, logout, setup, password-reset, change-password |
-| **Phase** | 1 — Authentication & User Management |
+| **Title** | Auth FastAPI Router â€” login, refresh, logout, setup, password-reset, change-password |
+| **Phase** | 1 â€” Authentication & User Management |
 | **Domain** | Backend / API |
 | **Depends on** | T-015, T-016, T-017, T-024, T-025, T-027 |
 | **Blocks** | T-030, T-036, T-037 |
 | **Est. complexity** | M |
 
 ### Project Standards
-_(see T-025 header — same project standards apply to all tasks)_
+_(see T-025 header â€” same project standards apply to all tasks)_
 
 ---
 
@@ -25,7 +26,7 @@ Build the 7-endpoint auth router at `POST /api/v1/auth/*`. Every response is RFC
 
 | Method | Path | Auth | Description |
 |---|---|---|---|
-| `POST` | `/auth/login` | Public | Credentials → access token + refresh cookie |
+| `POST` | `/auth/login` | Public | Credentials â†’ access token + refresh cookie |
 | `POST` | `/auth/refresh` | httpOnly cookie | Rotate tokens |
 | `POST` | `/auth/logout` | Bearer | Revoke refresh token + clear cookie |
 | `POST` | `/auth/setup` | Public (invite token) | Accept invitation, set password |
@@ -58,9 +59,9 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 _bearer = HTTPBearer(auto_error=False)
 
 
-# ──────────────────────────────────────────────────────────────────────────
+# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 # POST /auth/login
-# ──────────────────────────────────────────────────────────────────────────
+# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 @router.post("/login", response_model=TokenResponse)
 async def login(
     body: LoginRequest,
@@ -78,9 +79,9 @@ async def login(
     )
 
 
-# ──────────────────────────────────────────────────────────────────────────
+# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 # POST /auth/refresh
-# ──────────────────────────────────────────────────────────────────────────
+# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 @router.post("/refresh", response_model=TokenResponse)
 async def refresh(
     response: Response,
@@ -98,9 +99,9 @@ async def refresh(
     )
 
 
-# ──────────────────────────────────────────────────────────────────────────
+# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 # POST /auth/logout
-# ──────────────────────────────────────────────────────────────────────────
+# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 @router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
 async def logout(
     response: Response,
@@ -112,9 +113,9 @@ async def logout(
     clear_refresh_cookie(response)
 
 
-# ──────────────────────────────────────────────────────────────────────────
+# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 # POST /auth/setup  (accept invitation)
-# ──────────────────────────────────────────────────────────────────────────
+# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 @router.post("/setup", response_model=TokenResponse, status_code=status.HTTP_200_OK)
 async def setup_account(
     body: InvitationSetupRequest,
@@ -134,13 +135,13 @@ async def setup_account(
     )
 
 
-# ──────────────────────────────────────────────────────────────────────────
+# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 # POST /auth/password-reset
-# ──────────────────────────────────────────────────────────────────────────
+# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 @router.post(
     "/password-reset",
     status_code=status.HTTP_202_ACCEPTED,
-    # Always returns 202 — never reveals whether email exists
+    # Always returns 202 â€” never reveals whether email exists
 )
 async def request_password_reset(
     body: PasswordResetRequest,
@@ -154,9 +155,9 @@ async def request_password_reset(
     return {"detail": "If your email is registered, you will receive a reset link."}
 
 
-# ──────────────────────────────────────────────────────────────────────────
+# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 # POST /auth/password-reset/confirm
-# ──────────────────────────────────────────────────────────────────────────
+# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 @router.post("/password-reset/confirm", status_code=status.HTTP_204_NO_CONTENT)
 async def confirm_password_reset(
     body: PasswordResetConfirmRequest,
@@ -165,9 +166,9 @@ async def confirm_password_reset(
     await auth_svc.confirm_password_reset(body.token, body.new_password)
 
 
-# ──────────────────────────────────────────────────────────────────────────
+# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 # POST /auth/change-password
-# ──────────────────────────────────────────────────────────────────────────
+# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 @router.post("/change-password", status_code=status.HTTP_204_NO_CONTENT)
 async def change_password(
     body: ChangePasswordRequest,
@@ -181,9 +182,9 @@ async def change_password(
     )
 
 
-# ──────────────────────────────────────────────────────────────────────────
+# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 # Internal dependency helpers
-# ──────────────────────────────────────────────────────────────────────────
+# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 from fastapi import Cookie, HTTPException
 
 async def _cookie_token(refresh_token: str | None = Cookie(default=None)) -> str:
@@ -203,19 +204,19 @@ api_v1_router.include_router(auth_router)   # prefix="/auth" is set on the route
 ---
 
 ## Acceptance Criteria
-- [ ] `POST /auth/login` with valid creds → `200 TokenResponse` + `Set-Cookie: refresh_token` + CSRF cookie
-- [ ] `POST /auth/login` with invalid creds → `401 application/problem+json`
-- [ ] `POST /auth/login` for inactive user → `403 application/problem+json`
-- [ ] `POST /auth/refresh` with valid cookie → `200 TokenResponse` + rotated cookie
-- [ ] `POST /auth/refresh` without cookie → `401`
-- [ ] `POST /auth/logout` with valid token → `204` + cleared cookie
-- [ ] `POST /auth/setup` with valid invite token + compliant password → `200 TokenResponse`
-- [ ] `POST /auth/setup` with expired token → `410` (handled by `AuthService.accept_invitation`)
+- [ ] `POST /auth/login` with valid creds â†’ `200 TokenResponse` + `Set-Cookie: refresh_token` + CSRF cookie
+- [ ] `POST /auth/login` with invalid creds â†’ `401 application/problem+json`
+- [ ] `POST /auth/login` for inactive user â†’ `403 application/problem+json`
+- [ ] `POST /auth/refresh` with valid cookie â†’ `200 TokenResponse` + rotated cookie
+- [ ] `POST /auth/refresh` without cookie â†’ `401`
+- [ ] `POST /auth/logout` with valid token â†’ `204` + cleared cookie
+- [ ] `POST /auth/setup` with valid invite token + compliant password â†’ `200 TokenResponse`
+- [ ] `POST /auth/setup` with expired token â†’ `410` (handled by `AuthService.accept_invitation`)
 - [ ] `POST /auth/password-reset` always returns `202` regardless of whether email exists
-- [ ] `POST /auth/password-reset/confirm` with valid token → `204`
-- [ ] `POST /auth/password-reset/confirm` with expired token → `401`
-- [ ] `POST /auth/change-password` with correct current password → `204`
-- [ ] `POST /auth/change-password` with wrong current password → `401`
+- [ ] `POST /auth/password-reset/confirm` with valid token â†’ `204`
+- [ ] `POST /auth/password-reset/confirm` with expired token â†’ `401`
+- [ ] `POST /auth/change-password` with correct current password â†’ `204`
+- [ ] `POST /auth/change-password` with wrong current password â†’ `401`
 - [ ] All error responses use `application/problem+json` content-type
 - [ ] Router registered in `api_v1_router`; accessible at `/api/v1/auth/*`
 

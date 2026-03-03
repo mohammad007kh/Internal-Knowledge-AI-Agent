@@ -1,6 +1,8 @@
-# T-085 · Feedback & Rating UI
+﻿# T-085 Â· Feedback & Rating UI
 
-**Phase:** 5 — Chat Frontend  
+**Status:** Done
+
+**Phase:** 5 â€” Chat Frontend  
 **Depends on:** T-083 (message thread), T-076 (chat API)  
 **Blocks:** T-086
 
@@ -9,23 +11,23 @@
 ## Context
 
 ```
-Python 3.12 | FastAPI · SQLAlchemy 2.x · Pydantic v2 · dependency-injector
-Next.js 15 App Router · shadcn/ui · Tailwind CSS v4
-React Context · TanStack Query v5 · react-hook-form · Zod
-PostgreSQL 16 + pgvector · HNSW m=16 ef_construction=64 · UUID PKs · soft-delete + audit columns
+Python 3.12 | FastAPI Â· SQLAlchemy 2.x Â· Pydantic v2 Â· dependency-injector
+Next.js 15 App Router Â· shadcn/ui Â· Tailwind CSS v4
+React Context Â· TanStack Query v5 Â· react-hook-form Â· Zod
+PostgreSQL 16 + pgvector Â· HNSW m=16 ef_construction=64 Â· UUID PKs Â· soft-delete + audit columns
 Alembic versioned migrations
-Celery + Redis · Beat replicas=1 STRICT
-MinIO · presigned PUT pattern
-JWT 15-min access + 7-day rotating httpOnly refresh cookie · bcrypt · RBAC (admin/user)
+Celery + Redis Â· Beat replicas=1 STRICT
+MinIO Â· presigned PUT pattern
+JWT 15-min access + 7-day rotating httpOnly refresh cookie Â· bcrypt Â· RBAC (admin/user)
 Fernet (connection configs at rest)
-LangGraph 8-node · interrupt() for clarification · SSE streaming
-Langfuse self-hosted · every pipeline run must emit a trace
-RFC 7807 Problem Details — all non-2xx API responses
-Structured logging · INFO level · X-Request-ID correlation
-CORS strict · CSRF SameSite=Strict httpOnly · CSP moderate · rate-limit IP
-Dark mode · responsive · WCAG-AA · no animations · Lucide icons · Sonner toasts
-snake_case vars/files/tables · PascalCase classes · SCREAMING_SNAKE_CASE constants
-pytest + httpx + Playwright · ≥80% coverage
+LangGraph 8-node Â· interrupt() for clarification Â· SSE streaming
+Langfuse self-hosted Â· every pipeline run must emit a trace
+RFC 7807 Problem Details â€” all non-2xx API responses
+Structured logging Â· INFO level Â· X-Request-ID correlation
+CORS strict Â· CSRF SameSite=Strict httpOnly Â· CSP moderate Â· rate-limit IP
+Dark mode Â· responsive Â· WCAG-AA Â· no animations Â· Lucide icons Â· Sonner toasts
+snake_case vars/files/tables Â· PascalCase classes Â· SCREAMING_SNAKE_CASE constants
+pytest + httpx + Playwright Â· â‰¥80% coverage
 Docker Compose 9 services: frontend, backend, worker, beat, db, redis, minio, langfuse, langfuse-db
 ```
 
@@ -33,7 +35,7 @@ Docker Compose 9 services: frontend, backend, worker, beat, db, redis, minio, la
 
 ## Objective
 
-Allow users to rate any **assistant** message as helpful (👍) or unhelpful (👎) and optionally add a short comment. The rating is stored via `POST /chat/sessions/{session_id}/messages/{message_id}/feedback`.
+Allow users to rate any **assistant** message as helpful (ðŸ‘) or unhelpful (ðŸ‘Ž) and optionally add a short comment. The rating is stored via `POST /chat/sessions/{session_id}/messages/{message_id}/feedback`.
 
 The rating also flows to Langfuse as a score on the pipeline trace linked to that message.
 
@@ -45,10 +47,10 @@ The rating also flows to Langfuse as a score on the pipeline trace linked to tha
 POST /chat/sessions/{session_id}/messages/{message_id}/feedback
 Body: { "rating": 1 | -1, "comment": string | null }
 Response 201: { "id": string, "rating": 1 | -1, "comment": string | null }
-Response 409: Already rated (allow updating — PATCH, or 409 + toast)
+Response 409: Already rated (allow updating â€” PATCH, or 409 + toast)
 ```
 
-The frontend uses an **optimistic** toggle: clicking 👍 on an already-👍-rated message removes the rating (sets to null).
+The frontend uses an **optimistic** toggle: clicking ðŸ‘ on an already-ðŸ‘-rated message removes the rating (sets to null).
 
 ---
 
@@ -73,7 +75,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import { apiClient } from "@/lib/api-client";
 
-// ─── Types ───────────────────────────────────────────────────────────────────
+// â”€â”€â”€ Types â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 type Rating = 1 | -1 | null;
 
@@ -88,7 +90,7 @@ interface FeedbackResponse {
   comment: string | null;
 }
 
-// ─── API ──────────────────────────────────────────────────────────────────────
+// â”€â”€â”€ API â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 async function submitFeedback(
   sessionId: string,
@@ -102,7 +104,7 @@ async function submitFeedback(
   return res.data;
 }
 
-// ─── Component ───────────────────────────────────────────────────────────────
+// â”€â”€â”€ Component â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 interface FeedbackButtonsProps {
   sessionId: string;
@@ -137,7 +139,7 @@ export function FeedbackButtons({
   const handleThumbsUp = useCallback(() => {
     if (mutation.isPending) return;
     if (rating === 1) {
-      // Toggle OFF: not supported by simple POST API — show as already submitted
+      // Toggle OFF: not supported by simple POST API â€” show as already submitted
       // We keep the optimistic state; API doesn't deactivate ratings.
       return;
     }
@@ -206,7 +208,7 @@ export function FeedbackButtons({
           <Textarea
             value={comment}
             onChange={(e) => setComment(e.target.value)}
-            placeholder="e.g. Missing information, incorrect answer…"
+            placeholder="e.g. Missing information, incorrect answerâ€¦"
             className="mb-2 h-20 resize-none text-xs"
             maxLength={MAX_COMMENT}
             aria-label="Feedback comment"
@@ -424,15 +426,15 @@ test("shows initial rating state when pre-existing rating provided", () => {
 
 ## Acceptance Criteria
 
-- [ ] 👍 and 👎 buttons render below every assistant message (not user messages)
-- [ ] Clicking 👍 immediately disables both buttons (single-use) and submits `{ rating: 1, comment: null }`
-- [ ] Clicking 👎 opens a popover with an optional comment textarea
-- [ ] Submitting 👎 popover sends `{ rating: -1, comment }` and closes popover
-- [ ] Cancel button in 👎 popover closes without submitting
-- [ ] After submitting, rated button turns green (👍) or red (👎)
+- [ ] ðŸ‘ and ðŸ‘Ž buttons render below every assistant message (not user messages)
+- [ ] Clicking ðŸ‘ immediately disables both buttons (single-use) and submits `{ rating: 1, comment: null }`
+- [ ] Clicking ðŸ‘Ž opens a popover with an optional comment textarea
+- [ ] Submitting ðŸ‘Ž popover sends `{ rating: -1, comment }` and closes popover
+- [ ] Cancel button in ðŸ‘Ž popover closes without submitting
+- [ ] After submitting, rated button turns green (ðŸ‘) or red (ðŸ‘Ž)
 - [ ] Both buttons are disabled once any rating is submitted
 - [ ] API error shows Sonner toast
 - [ ] `initialRating` prop reflects previously persisted rating on component mount
 - [ ] `aria-pressed` attribute reflects current rating state
-- [ ] Buttons visible but small, not intrusive — appear below citation row
+- [ ] Buttons visible but small, not intrusive â€” appear below citation row
 - [ ] Unit tests pass: `pnpm test`

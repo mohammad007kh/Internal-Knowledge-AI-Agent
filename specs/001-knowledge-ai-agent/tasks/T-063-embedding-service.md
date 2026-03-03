@@ -1,11 +1,13 @@
-# T-063 — Embedding Service
+﻿# T-063 â€” Embedding Service
+
+**Status:** Done
 
 ## Context
 ```
-Python 3.12 | FastAPI · dependency-injector
-openai>=1.0 · tenacity
+Python 3.12 | FastAPI Â· dependency-injector
+openai>=1.0 Â· tenacity
 EMBEDDING_DIM = 1536 (text-embedding-3-small)
-snake_case vars/files/tables · PascalCase classes · SCREAMING_SNAKE_CASE constants
+snake_case vars/files/tables Â· PascalCase classes Â· SCREAMING_SNAKE_CASE constants
 ```
 
 ## Goal
@@ -19,12 +21,12 @@ batches large inputs, retries transient failures, and validates output dimension
 - [ ] Uses `text-embedding-3-small`; output dim = 1536
 - [ ] Batches `embed_texts` calls at 100 texts per API request
 - [ ] `tenacity` retry: max 3 attempts, `wait_exponential(multiplier=1, min=1, max=10)`
-- [ ] Raises `EmbeddingDimensionError(ValueError)` when a returned embedding ≠ 1536 floats
+- [ ] Raises `EmbeddingDimensionError(ValueError)` when a returned embedding â‰  1536 floats
 - [ ] Registered as **Singleton** in DI container (shares one `AsyncOpenAI` client)
 
 ---
 
-## 1  Error Types — `app/core/exceptions.py` patch
+## 1  Error Types â€” `app/core/exceptions.py` patch
 
 ```python
 # -- append to existing exceptions.py --
@@ -42,7 +44,7 @@ class EmbeddingDimensionError(ValueError):
 
 ---
 
-## 2  Service — `app/services/embedding_service.py`
+## 2  Service â€” `app/services/embedding_service.py`
 
 ```python
 # app/services/embedding_service.py
@@ -85,7 +87,7 @@ class EmbeddingService:
             raise EmbeddingDimensionError(EMBEDDING_DIM, len(embedding))
 
     async def _embed_batch(self, batch: list[str]) -> list[list[float]]:
-        """Embed a single batch of ≤ BATCH_SIZE texts with retry."""
+        """Embed a single batch of â‰¤ BATCH_SIZE texts with retry."""
         async for attempt in AsyncRetrying(
             retry=retry_if_exception_type(_RETRYABLE),
             stop=stop_after_attempt(3),
@@ -150,12 +152,12 @@ class EmbeddingService:
 
 ---
 
-## 3  DI Container — `app/containers.py` patch
+## 3  DI Container â€” `app/containers.py` patch
 
 ```python
 # -- inside ApplicationContainer -- add after chunking_service:
 
-    # ── Embeddings ────────────────────────────────────────────────────────────
+    # â”€â”€ Embeddings â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     embedding_service: providers.Singleton[EmbeddingService] = providers.Singleton(
         EmbeddingService,
         openai_api_key=config.provided.openai.api_key,
@@ -170,28 +172,28 @@ from app.services.embedding_service import EmbeddingService
 
 ---
 
-## 4  Settings — `app/core/config.py` patch
+## 4  Settings â€” `app/core/config.py` patch
 
 Add `openai` section to `AppConfig` / `pydantic_settings` model:
 
 ```python
 class OpenAISettings(BaseModel):
     api_key: str = Field(..., validation_alias="OPENAI_API_KEY")
-    # model and dim are constants — not in settings
+    # model and dim are constants â€” not in settings
 
 class AppConfig(BaseSettings):
     # ... existing fields ...
     openai: OpenAISettings = Field(default_factory=OpenAISettings)
 ```
 
-`docker-compose.yml` — backend service `environment`:
+`docker-compose.yml` â€” backend service `environment`:
 ```yaml
 - OPENAI_API_KEY=${OPENAI_API_KEY}
 ```
 
 ---
 
-## 5  Dependencies — `requirements.txt` additions
+## 5  Dependencies â€” `requirements.txt` additions
 
 ```
 openai>=1.35.0
@@ -200,7 +202,7 @@ tenacity>=8.3.0
 
 ---
 
-## 6  Unit Tests — `tests/unit/test_embedding_service.py`
+## 6  Unit Tests â€” `tests/unit/test_embedding_service.py`
 
 ```python
 # tests/unit/test_embedding_service.py
@@ -248,7 +250,7 @@ class TestEmbedTexts:
 
     @pytest.mark.asyncio
     async def test_batching(self, svc):
-        """250 texts → 3 API calls (100 + 100 + 50)."""
+        """250 texts â†’ 3 API calls (100 + 100 + 50)."""
         texts = ["t"] * 250
         calls: list[int] = []
 
@@ -314,6 +316,6 @@ print('embedding_service OK')
 
 | Requirement | Satisfied by |
 |---|---|
-| FR-031 — vector embeddings | `embed_texts()` → 1536-dim vectors |
-| FR-031 — batch efficiency | `BATCH_SIZE=100`, concurrent `asyncio.gather` |
-| FR-031 — resilience | tenacity 3-attempt exponential backoff |
+| FR-031 â€” vector embeddings | `embed_texts()` â†’ 1536-dim vectors |
+| FR-031 â€” batch efficiency | `BATCH_SIZE=100`, concurrent `asyncio.gather` |
+| FR-031 â€” resilience | tenacity 3-attempt exponential backoff |

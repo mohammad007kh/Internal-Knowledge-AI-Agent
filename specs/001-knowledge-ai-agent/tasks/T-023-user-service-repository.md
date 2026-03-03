@@ -1,9 +1,9 @@
----
+﻿---
 id: T-023
 title: User Repository + User Service (Business Logic Layer)
-status: Not Started
+status: Done
 created: 2026-02-25
-phase: Phase 1 — Auth & User Management
+phase: Phase 1 â€” Auth & User Management
 user_story: US3, US4, US5
 requirements: [FR-AUTH-1, FR-AUTH-2, FR-USER-1, FR-USER-2]
 priority: P1
@@ -21,24 +21,24 @@ Implement `UserRepository` (data layer) and `UserService` (business logic layer)
 ## Acceptance Criteria
 
 **UserRepository**
-- [ ] `get_by_email(email)` — case-insensitive lookup, excludes soft-deleted
-- [ ] `get_by_id(id)` — inherited from `BaseRepository`
-- [ ] `list_active(limit, offset)` — only `is_active=True` and non-deleted
-- [ ] `create(email, hashed_password, full_name, role)` → `User`
-- [ ] `soft_delete(id)` — inherited
-- [ ] `set_active(id, is_active)` → updates `is_active`
+- [ ] `get_by_email(email)` â€” case-insensitive lookup, excludes soft-deleted
+- [ ] `get_by_id(id)` â€” inherited from `BaseRepository`
+- [ ] `list_active(limit, offset)` â€” only `is_active=True` and non-deleted
+- [ ] `create(email, hashed_password, full_name, role)` â†’ `User`
+- [ ] `soft_delete(id)` â€” inherited
+- [ ] `set_active(id, is_active)` â†’ updates `is_active`
 
 **InvitationRepository**
-- [ ] `get_by_token(token)` → `Invitation | None`
-- [ ] `create(email, role, invited_by, expires_at)` → `Invitation`
-- [ ] `mark_accepted(token)` → sets `accepted_at = now()`
+- [ ] `get_by_token(token)` â†’ `Invitation | None`
+- [ ] `create(email, role, invited_by, expires_at)` â†’ `Invitation`
+- [ ] `mark_accepted(token)` â†’ sets `accepted_at = now()`
 
 **UserService**
-- [ ] `register(email, password, full_name) -> User` — raises `ConflictError` if email exists; hashes password; creates user
-- [ ] `invite(admin_user, email, role) -> Invitation` — raises `ConflictError` if active user/invitation exists; creates invitation; **sends email** via `EmailService.send_invitation` (stub in this task, real in T-035)
-- [ ] `accept_invitation(token, full_name, password) -> User` — validates token not expired/accepted; creates user; marks invitation accepted
-- [ ] `deactivate_user(admin, target_id)` — admin only; raises `ForbiddenError` if not admin
-- [ ] `list_users(admin, limit, offset)` — admin only
+- [ ] `register(email, password, full_name) -> User` â€” raises `ConflictError` if email exists; hashes password; creates user
+- [ ] `invite(admin_user, email, role) -> Invitation` â€” raises `ConflictError` if active user/invitation exists; creates invitation; **sends email** via `EmailService.send_invitation` (stub in this task, real in T-035)
+- [ ] `accept_invitation(token, full_name, password) -> User` â€” validates token not expired/accepted; creates user; marks invitation accepted
+- [ ] `deactivate_user(admin, target_id)` â€” admin only; raises `ForbiddenError` if not admin
+- [ ] `list_users(admin, limit, offset)` â€” admin only
 
 ---
 
@@ -130,10 +130,10 @@ class UserService:
 
 ---
 
-## 📝 Completion Log
+## ðŸ“ Completion Log
 
 - [ ] Code implemented
 - [ ] Unit tests pass with mocked repositories
-- [ ] `register` → happy path, duplicate email, weak password — all tested
-- [ ] `accept_invitation` → valid, expired, already-used — all tested
+- [ ] `register` â†’ happy path, duplicate email, weak password â€” all tested
+- [ ] `accept_invitation` â†’ valid, expired, already-used â€” all tested
 - [ ] Linter passed

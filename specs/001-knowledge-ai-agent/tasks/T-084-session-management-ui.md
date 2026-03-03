@@ -1,6 +1,8 @@
-# T-084 · Session Management UI
+﻿# T-084 Â· Session Management UI
 
-**Phase:** 5 — Chat Frontend  
+**Status:** Done
+
+**Phase:** 5 â€” Chat Frontend  
 **Depends on:** T-080 (layout), T-076 (chat API)  
 **Blocks:** T-086
 
@@ -9,23 +11,23 @@
 ## Context
 
 ```
-Python 3.12 | FastAPI · SQLAlchemy 2.x · Pydantic v2 · dependency-injector
-Next.js 15 App Router · shadcn/ui · Tailwind CSS v4
-React Context · TanStack Query v5 · react-hook-form · Zod
-PostgreSQL 16 + pgvector · HNSW m=16 ef_construction=64 · UUID PKs · soft-delete + audit columns
+Python 3.12 | FastAPI Â· SQLAlchemy 2.x Â· Pydantic v2 Â· dependency-injector
+Next.js 15 App Router Â· shadcn/ui Â· Tailwind CSS v4
+React Context Â· TanStack Query v5 Â· react-hook-form Â· Zod
+PostgreSQL 16 + pgvector Â· HNSW m=16 ef_construction=64 Â· UUID PKs Â· soft-delete + audit columns
 Alembic versioned migrations
-Celery + Redis · Beat replicas=1 STRICT
-MinIO · presigned PUT pattern
-JWT 15-min access + 7-day rotating httpOnly refresh cookie · bcrypt · RBAC (admin/user)
+Celery + Redis Â· Beat replicas=1 STRICT
+MinIO Â· presigned PUT pattern
+JWT 15-min access + 7-day rotating httpOnly refresh cookie Â· bcrypt Â· RBAC (admin/user)
 Fernet (connection configs at rest)
-LangGraph 8-node · interrupt() for clarification · SSE streaming
-Langfuse self-hosted · every pipeline run must emit a trace
-RFC 7807 Problem Details — all non-2xx API responses
-Structured logging · INFO level · X-Request-ID correlation
-CORS strict · CSRF SameSite=Strict httpOnly · CSP moderate · rate-limit IP
-Dark mode · responsive · WCAG-AA · no animations · Lucide icons · Sonner toasts
-snake_case vars/files/tables · PascalCase classes · SCREAMING_SNAKE_CASE constants
-pytest + httpx + Playwright · ≥80% coverage
+LangGraph 8-node Â· interrupt() for clarification Â· SSE streaming
+Langfuse self-hosted Â· every pipeline run must emit a trace
+RFC 7807 Problem Details â€” all non-2xx API responses
+Structured logging Â· INFO level Â· X-Request-ID correlation
+CORS strict Â· CSRF SameSite=Strict httpOnly Â· CSP moderate Â· rate-limit IP
+Dark mode Â· responsive Â· WCAG-AA Â· no animations Â· Lucide icons Â· Sonner toasts
+snake_case vars/files/tables Â· PascalCase classes Â· SCREAMING_SNAKE_CASE constants
+pytest + httpx + Playwright Â· â‰¥80% coverage
 Docker Compose 9 services: frontend, backend, worker, beat, db, redis, minio, langfuse, langfuse-db
 ```
 
@@ -79,7 +81,7 @@ import { cn } from "@/lib/utils";
 import { apiClient } from "@/lib/api-client";
 import { useSelectedSession } from "./SelectedSessionContext";
 
-// ─── Types ──────────────────────────────────────────────────────────────────
+// â”€â”€â”€ Types â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 interface ChatSession {
   id: string;
@@ -94,7 +96,7 @@ interface SessionsResponse {
   total: number;
 }
 
-// ─── API helpers ─────────────────────────────────────────────────────────────
+// â”€â”€â”€ API helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 const sessionsApi = {
   list: async (): Promise<SessionsResponse> => {
@@ -116,7 +118,7 @@ const sessionsApi = {
   },
 };
 
-// ─── Component ───────────────────────────────────────────────────────────────
+// â”€â”€â”€ Component â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 export function SessionList() {
   const { sessionId, setSessionId } = useSelectedSession();
@@ -127,7 +129,7 @@ export function SessionList() {
   const [editTitle, setEditTitle] = useState("");
   const [deletingId, setDeletingId] = useState<string | null>(null);
 
-  // ── Queries ──────────────────────────────────────────────────────────────
+  // â”€â”€ Queries â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   const { data, isLoading } = useQuery({
     queryKey: ["chat-sessions"],
@@ -141,7 +143,7 @@ export function SessionList() {
     s.title.toLowerCase().includes(search.toLowerCase()),
   );
 
-  // ── Mutations ─────────────────────────────────────────────────────────────
+  // â”€â”€ Mutations â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   const createMutation = useMutation({
     mutationFn: () => sessionsApi.create("New chat"),
@@ -176,7 +178,7 @@ export function SessionList() {
     onError: () => toast.error("Failed to delete session."),
   });
 
-  // ── Handlers ─────────────────────────────────────────────────────────────
+  // â”€â”€ Handlers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   const startEdit = useCallback((session: ChatSession) => {
     setEditingId(session.id);
@@ -197,7 +199,7 @@ export function SessionList() {
 
   const cancelEdit = useCallback(() => setEditingId(null), []);
 
-  // ── Render ────────────────────────────────────────────────────────────────
+  // â”€â”€ Render â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   return (
     <div className="flex h-full flex-col bg-background">
@@ -223,7 +225,7 @@ export function SessionList() {
           <Input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search sessions…"
+            placeholder="Search sessionsâ€¦"
             className="h-8 pl-8 text-xs"
             aria-label="Search sessions"
           />
@@ -300,7 +302,7 @@ export function SessionList() {
   );
 }
 
-// ─── Session Item ─────────────────────────────────────────────────────────────
+// â”€â”€â”€ Session Item â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 interface SessionItemProps {
   session: ChatSession;
@@ -603,7 +605,7 @@ test("Escape closes rename mode", async () => {
 - [ ] Sessions filtered in real time as user types in search input
 - [ ] "+" New button creates a session via `POST /chat/sessions` and auto-selects it
 - [ ] New session immediately enters rename mode (inline input)
-- [ ] Rename committed on Enter or ✓ button; cancelled on Escape or ✗ button
+- [ ] Rename committed on Enter or âœ“ button; cancelled on Escape or âœ— button
 - [ ] Rename calls `PATCH /chat/sessions/{id}` with new title
 - [ ] Hover/focus on item reveals Rename (pencil) and Delete (trash) icon buttons
 - [ ] Delete shows `AlertDialog` confirmation before `DELETE /chat/sessions/{id}`

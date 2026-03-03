@@ -1,11 +1,12 @@
-# T-036 — Playwright E2E: Auth Flows
+﻿# T-036 â€” Playwright E2E: Auth Flows
 
 ## Metadata
 | Field | Value |
 |---|---|
+| **Status** | Done |
 | **ID** | T-036 |
-| **Title** | Playwright E2E — login, setup, password-reset, change-password user journeys |
-| **Phase** | 1 — Authentication & User Management |
+| **Title** | Playwright E2E â€” login, setup, password-reset, change-password user journeys |
+| **Phase** | 1 â€” Authentication & User Management |
 | **Domain** | Testing / E2E |
 | **Depends on** | T-009, T-030, T-031, T-032, T-034, T-035 |
 | **Blocks** | T-039 |
@@ -15,10 +16,10 @@
 | Standard | Value |
 |---|---|
 | Python | 3.12 |
-| Backend | FastAPI · SQLAlchemy 2.x · Pydantic v2 · dependency-injector |
-| Frontend | Next.js 15 App Router · shadcn/ui · Tailwind CSS v4 |
-| Auth | JWT 15-min access + 7-day rotating httpOnly refresh cookie · bcrypt · RBAC |
-| Testing | Playwright · ≥80% coverage |
+| Backend | FastAPI Â· SQLAlchemy 2.x Â· Pydantic v2 Â· dependency-injector |
+| Frontend | Next.js 15 App Router Â· shadcn/ui Â· Tailwind CSS v4 |
+| Auth | JWT 15-min access + 7-day rotating httpOnly refresh cookie Â· bcrypt Â· RBAC |
+| Testing | Playwright Â· â‰¥80% coverage |
 | Infrastructure | Docker Compose 9 services |
 
 ### Domain Rules
@@ -36,7 +37,7 @@ API calls in `beforeAll`/`beforeEach` so tests are self-contained and can be run
 
 ## Deliverables
 
-### 1. `frontend/e2e/helpers/api.ts` — E2E API helper
+### 1. `frontend/e2e/helpers/api.ts` â€” E2E API helper
 ```typescript
 /**
  * Direct API helpers for E2E test setup/teardown.
@@ -251,5 +252,5 @@ export default defineConfig({
 - Login test verifies redirect to `/chat` after successful authentication
 - Invalid email shows inline Zod error without server round-trip
 - Invitation setup test completes the full flow including redirect to `/login`
-- Password reset "always success" test passes — no email enumeration
+- Password reset "always success" test passes â€” no email enumeration
 - All tests pass with `--reporter=github` in CI environment

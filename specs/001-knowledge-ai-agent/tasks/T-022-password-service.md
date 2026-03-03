@@ -1,9 +1,9 @@
----
+﻿---
 id: T-022
 title: bcrypt Password Hashing Service + Validation Policy
-status: Not Started
+status: Done
 created: 2026-02-25
-phase: Phase 1 — Auth & User Management
+phase: Phase 1 â€” Auth & User Management
 user_story: US3
 requirements: [FR-AUTH-1, FR-AUTH-3]
 priority: P1
@@ -14,7 +14,7 @@ estimated_effort: 1h
 
 ## Goal
 
-Implement the `PasswordService` that wraps bcrypt hashing and exposes `validate_password_policy()`. This is the **only** place in the entire codebase where passwords are hashed or validated — no other code should call `bcrypt` directly.
+Implement the `PasswordService` that wraps bcrypt hashing and exposes `validate_password_policy()`. This is the **only** place in the entire codebase where passwords are hashed or validated â€” no other code should call `bcrypt` directly.
 
 ---
 
@@ -101,9 +101,9 @@ class RegisterRequest(BaseModel):
 
 ---
 
-## 📝 Completion Log
+## ðŸ“ Completion Log
 
 - [ ] Code implemented
-- [ ] Unit tests pass (≥100% on password_service.py)
+- [ ] Unit tests pass (â‰¥100% on password_service.py)
 - [ ] Linter passed
 - [ ] No direct `bcrypt` / `passlib` imports anywhere outside this file

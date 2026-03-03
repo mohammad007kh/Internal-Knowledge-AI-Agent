@@ -1,11 +1,11 @@
-# T-017 — CORS + CSRF + Security Headers Middleware
+﻿# T-017 â€” CORS + CSRF + Security Headers Middleware
 
 ---
 id: T-017
 title: CORS, CSRF Protection, and Security Response Headers
-status: Not Started
+status: Done
 created: 2026-02-26
-phase: Phase 0 — Foundation
+phase: Phase 0 â€” Foundation
 user_story: cross
 requirements: []
 priority: P1
@@ -25,7 +25,7 @@ Configure the three security layers that must be active before any authenticated
 - [ ] `CORSMiddleware` only allows origins matching `settings.FRONTEND_URL` (no wildcard in production)
 - [ ] Allowed methods: `GET, POST, PUT, PATCH, DELETE, OPTIONS`
 - [ ] Allowed headers: `Content-Type, Authorization, X-Request-ID, X-CSRF-Token`
-- [ ] `allow_credentials=True` — required for the httpOnly refresh cookie
+- [ ] `allow_credentials=True` â€” required for the httpOnly refresh cookie
 - [ ] Every response includes:
   - `X-Content-Type-Options: nosniff`
   - `X-Frame-Options: DENY`
@@ -43,8 +43,8 @@ Configure the three security layers that must be active before any authenticated
 
 | Path | Action |
 |------|---------|
-| `backend/src/middleware/security_headers.py` | Create — security headers + CSRF |
-| `backend/src/main.py` | Update — register CORS + security headers middleware |
+| `backend/src/middleware/security_headers.py` | Create â€” security headers + CSRF |
+| `backend/src/main.py` | Update â€” register CORS + security headers middleware |
 | `backend/tests/unit/test_security_headers.py` | Create |
 
 ---
@@ -56,8 +56,8 @@ Configure the three security layers that must be active before any authenticated
 This project uses a **double-submit header check** (lightweight CSRF protection compatible with JWT/cookie hybrid auth):
 
 1. On login, backend sets **two** cookies:
-   - `refresh_token` — httpOnly, SameSite=Strict (not readable by JS)
-   - `csrf_token` — httpOnly=False, SameSite=Strict (readable by JS)
+   - `refresh_token` â€” httpOnly, SameSite=Strict (not readable by JS)
+   - `csrf_token` â€” httpOnly=False, SameSite=Strict (readable by JS)
 2. Browser JS reads `csrf_token` cookie and sends it as `X-CSRF-Token` header
 3. Backend verifies `X-CSRF-Token` header == `csrf_token` cookie value
 4. API-key / Bearer token clients bypass CSRF (they don't use cookie auth)
@@ -251,12 +251,12 @@ async def test_csrf_check_bypassed_for_bearer():
 | Standard | Value |
 |---|---|
 | Python | 3.12 |
-| Backend | FastAPI · SQLAlchemy 2.x · Pydantic v2 · dependency-injector |
-| Security | CORS strict · CSRF SameSite=Strict httpOnly · CSP moderate · rate-limit IP |
-| Error Format | RFC 7807 Problem Details — all non-2xx API responses |
-| Auth | JWT 15-min access + 7-day rotating httpOnly refresh cookie · bcrypt · RBAC (admin/user) |
+| Backend | FastAPI Â· SQLAlchemy 2.x Â· Pydantic v2 Â· dependency-injector |
+| Security | CORS strict Â· CSRF SameSite=Strict httpOnly Â· CSP moderate Â· rate-limit IP |
+| Error Format | RFC 7807 Problem Details â€” all non-2xx API responses |
+| Auth | JWT 15-min access + 7-day rotating httpOnly refresh cookie Â· bcrypt Â· RBAC (admin/user) |
 
 ### Domain Rules
-- `allow_origins` MUST be `[settings.FRONTEND_URL]` — never `["*"]` in any environment
-- CSRF exemption for Bearer-token clients is intentional — never remove it (breaks API integrations)
-- `allow_credentials=True` is required for the httpOnly refresh cookie — do not remove
+- `allow_origins` MUST be `[settings.FRONTEND_URL]` â€” never `["*"]` in any environment
+- CSRF exemption for Bearer-token clients is intentional â€” never remove it (breaks API integrations)
+- `allow_credentials=True` is required for the httpOnly refresh cookie â€” do not remove

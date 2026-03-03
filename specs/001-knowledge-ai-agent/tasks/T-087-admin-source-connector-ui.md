@@ -1,7 +1,9 @@
-# T-087 · Admin — Source & Connector Management UI
+﻿# T-087 Â· Admin â€” Source & Connector Management UI
 
-**Phase:** 5 — Admin Frontend  
-**Depends on:** T-080 (layout), T-060–T-070 (source/connector APIs)  
+**Status:** Done
+
+**Phase:** 5 â€” Admin Frontend  
+**Depends on:** T-080 (layout), T-060â€“T-070 (source/connector APIs)  
 **Blocks:** T-090
 
 ---
@@ -9,23 +11,23 @@
 ## Context
 
 ```
-Python 3.12 | FastAPI · SQLAlchemy 2.x · Pydantic v2 · dependency-injector
-Next.js 15 App Router · shadcn/ui · Tailwind CSS v4
-React Context · TanStack Query v5 · react-hook-form · Zod
-PostgreSQL 16 + pgvector · HNSW m=16 ef_construction=64 · UUID PKs · soft-delete + audit columns
+Python 3.12 | FastAPI Â· SQLAlchemy 2.x Â· Pydantic v2 Â· dependency-injector
+Next.js 15 App Router Â· shadcn/ui Â· Tailwind CSS v4
+React Context Â· TanStack Query v5 Â· react-hook-form Â· Zod
+PostgreSQL 16 + pgvector Â· HNSW m=16 ef_construction=64 Â· UUID PKs Â· soft-delete + audit columns
 Alembic versioned migrations
-Celery + Redis · Beat replicas=1 STRICT
-MinIO · presigned PUT pattern
-JWT 15-min access + 7-day rotating httpOnly refresh cookie · bcrypt · RBAC (admin/user)
+Celery + Redis Â· Beat replicas=1 STRICT
+MinIO Â· presigned PUT pattern
+JWT 15-min access + 7-day rotating httpOnly refresh cookie Â· bcrypt Â· RBAC (admin/user)
 Fernet (connection configs at rest)
-LangGraph 8-node · interrupt() for clarification · SSE streaming
-Langfuse self-hosted · every pipeline run must emit a trace
-RFC 7807 Problem Details — all non-2xx API responses
-Structured logging · INFO level · X-Request-ID correlation
-CORS strict · CSRF SameSite=Strict httpOnly · CSP moderate · rate-limit IP
-Dark mode · responsive · WCAG-AA · no animations · Lucide icons · Sonner toasts
-snake_case vars/files/tables · PascalCase classes · SCREAMING_SNAKE_CASE constants
-pytest + httpx + Playwright · ≥80% coverage
+LangGraph 8-node Â· interrupt() for clarification Â· SSE streaming
+Langfuse self-hosted Â· every pipeline run must emit a trace
+RFC 7807 Problem Details â€” all non-2xx API responses
+Structured logging Â· INFO level Â· X-Request-ID correlation
+CORS strict Â· CSRF SameSite=Strict httpOnly Â· CSP moderate Â· rate-limit IP
+Dark mode Â· responsive Â· WCAG-AA Â· no animations Â· Lucide icons Â· Sonner toasts
+snake_case vars/files/tables Â· PascalCase classes Â· SCREAMING_SNAKE_CASE constants
+pytest + httpx + Playwright Â· â‰¥80% coverage
 Docker Compose 9 services: frontend, backend, worker, beat, db, redis, minio, langfuse, langfuse-db
 ```
 
@@ -80,7 +82,7 @@ import { Button } from "@/components/ui/button";
 import Link from "next/link";
 import { PlusIcon } from "lucide-react";
 
-export const metadata = { title: "Knowledge Sources — Admin" };
+export const metadata = { title: "Knowledge Sources â€” Admin" };
 
 export default function SourcesPage() {
   return (
@@ -142,7 +144,7 @@ import {
 import { apiClient } from "@/lib/api-client";
 import { cn } from "@/lib/utils";
 
-// ─── Types ───────────────────────────────────────────────────────────────────
+// â”€â”€â”€ Types â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 export type SourceStatus =
   | "pending"
@@ -168,7 +170,7 @@ interface SourcesResponse {
   page_size: number;
 }
 
-// ─── Status badge ─────────────────────────────────────────────────────────────
+// â”€â”€â”€ Status badge â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 const STATUS_VARIANT: Record<SourceStatus, string> = {
   pending: "secondary",
@@ -189,7 +191,7 @@ function StatusBadge({ status }: { status: SourceStatus }) {
   );
 }
 
-// ─── API ──────────────────────────────────────────────────────────────────────
+// â”€â”€â”€ API â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 async function fetchSources(page: number): Promise<SourcesResponse> {
   const res = await apiClient.get<SourcesResponse>(
@@ -206,7 +208,7 @@ async function deleteSource(id: string): Promise<void> {
   await apiClient.delete(`/sources/${id}`);
 }
 
-// ─── Table ────────────────────────────────────────────────────────────────────
+// â”€â”€â”€ Table â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 const PAGE_SIZE = 20;
 
@@ -531,7 +533,7 @@ export default function NewSourcePage() {
   const mutation = useMutation({
     mutationFn: createSource,
     onSuccess: (data) => {
-      toast.success("Source created. Starting initial sync…");
+      toast.success("Source created. Starting initial syncâ€¦");
       router.push(`/admin/sources/${data.id}`);
     },
     onError: () => toast.error("Failed to create source."),
@@ -572,7 +574,7 @@ export default function NewSourcePage() {
                 >
                   <FormControl>
                     <SelectTrigger>
-                      <SelectValue placeholder="Select connector…" />
+                      <SelectValue placeholder="Select connectorâ€¦" />
                     </SelectTrigger>
                   </FormControl>
                   <SelectContent>
@@ -625,7 +627,7 @@ export default function NewSourcePage() {
               Cancel
             </Button>
             <Button type="submit" disabled={mutation.isPending}>
-              {mutation.isPending ? "Creating…" : "Create source"}
+              {mutation.isPending ? "Creatingâ€¦" : "Create source"}
             </Button>
           </div>
         </form>
@@ -648,7 +650,7 @@ Identical TanStack Table pattern for `/admin/connectors`. The `ConnectorsTable` 
 | Status | `active` / `error` |
 | Source count | Number of sources using this connector |
 | Last tested | Timestamp of last connection test |
-| Actions | Test connection (⚡), Edit (✏️), Delete (🗑️) |
+| Actions | Test connection (âš¡), Edit (âœï¸), Delete (ðŸ—‘ï¸) |
 
 Connector Form Fields (by type):
 
@@ -660,7 +662,7 @@ web:        allowed_domains[], crawl_depth, user_agent
 file:       allowed_extensions[], max_file_size_mb
 ```
 
-Secret fields use `type="password"` and show ••••••• when a value is already saved.
+Secret fields use `type="password"` and show â€¢â€¢â€¢â€¢â€¢â€¢â€¢ when a value is already saved.
 
 ---
 

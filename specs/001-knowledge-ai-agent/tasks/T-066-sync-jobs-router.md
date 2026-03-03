@@ -1,12 +1,14 @@
-# T-066 — Sync Jobs API Router
+﻿# T-066 â€” Sync Jobs API Router
+
+**Status:** Done
 
 ## Context
 ```
-Python 3.12 | FastAPI · SQLAlchemy 2.x · Pydantic v2 · dependency-injector
-JWT 15-min access + 7-day rotating httpOnly refresh cookie · bcrypt · RBAC (admin/user)
-RFC 7807 Problem Details — all non-2xx API responses
-snake_case vars/files/tables · PascalCase classes · SCREAMING_SNAKE_CASE constants
-Structured logging · INFO level · X-Request-ID correlation
+Python 3.12 | FastAPI Â· SQLAlchemy 2.x Â· Pydantic v2 Â· dependency-injector
+JWT 15-min access + 7-day rotating httpOnly refresh cookie Â· bcrypt Â· RBAC (admin/user)
+RFC 7807 Problem Details â€” all non-2xx API responses
+snake_case vars/files/tables Â· PascalCase classes Â· SCREAMING_SNAKE_CASE constants
+Structured logging Â· INFO level Â· X-Request-ID correlation
 ```
 
 ## Goal
@@ -25,8 +27,8 @@ Expose three HTTP endpoints for Sync Job management:
 - [ ] `POST /sources/{source_id}/sync` dispatches `sync_source.delay()`, returns `SyncJobResponse` with `status="pending"`
 - [ ] `GET /sync-jobs/{job_id}` returns live `SyncJobResponse` (404 if not found)
 - [ ] `GET /sources/{source_id}/sync-jobs` returns list sorted `created_at DESC` with `limit`/`offset` pagination
-- [ ] Non-admin calls to admin-only routes → 403 RFC 7807
-- [ ] Source not found → 404 RFC 7807
+- [ ] Non-admin calls to admin-only routes â†’ 403 RFC 7807
+- [ ] Source not found â†’ 404 RFC 7807
 - [ ] Router registered at `/api/v1`
 - [ ] Rate limit: `POST /sync` no more than 5 per minute per user (via `slowapi` limiter)
 
@@ -56,7 +58,7 @@ from app.services.sync_job_service import SyncJobService
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/sources", tags=["sync-jobs"])
 
-# ── Trigger sync ──────────────────────────────────────────────────────────
+# â”€â”€ Trigger sync â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 @router.post(
     "/{source_id}/sync",
@@ -82,7 +84,7 @@ async def trigger_sync(
 
     job = await sync_job_svc.create_job(source_id=source_id)
 
-    # Dispatch async — import here to avoid circular at module load
+    # Dispatch async â€” import here to avoid circular at module load
     from app.tasks.sync_source import sync_source  # noqa: PLC0415
 
     sync_source.delay(str(source_id))
@@ -93,7 +95,7 @@ async def trigger_sync(
     return SyncJobResponse.model_validate(job)
 
 
-# ── Get sync job ───────────────────────────────────────────────────────────
+# â”€â”€ Get sync job â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 dedicated_router = APIRouter(prefix="/sync-jobs", tags=["sync-jobs"])
 
@@ -120,7 +122,7 @@ async def get_sync_job(
     return SyncJobResponse.model_validate(job)
 
 
-# ── List sync jobs for a source ────────────────────────────────────────────
+# â”€â”€ List sync jobs for a source â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 @router.get(
     "/{source_id}/sync-jobs",
@@ -153,7 +155,7 @@ async def list_sync_jobs(
 
 ---
 
-## 2  Schema additions — `app/schemas/sync_job.py`
+## 2  Schema additions â€” `app/schemas/sync_job.py`
 
 ```python
 # append to existing sync_job.py
@@ -169,7 +171,7 @@ class SyncJobListResponse(BaseModel):
 
 ---
 
-## 3  Register routers — `app/api/v1/__init__.py`
+## 3  Register routers â€” `app/api/v1/__init__.py`
 
 ```python
 # append to existing router inclusions
@@ -182,7 +184,7 @@ api_router.include_router(sync_jobs_dedicated_router)  # /sync-jobs/{job_id}
 
 ---
 
-## 4  Problem Details helper — `app/core/problem_details.py` (if not yet exists)
+## 4  Problem Details helper â€” `app/core/problem_details.py` (if not yet exists)
 
 ```python
 # app/core/problem_details.py
@@ -242,7 +244,7 @@ async def get_current_admin_user(
 
 ---
 
-## 7  Tests (outline) — `tests/integration/test_sync_jobs_router.py`
+## 7  Tests (outline) â€” `tests/integration/test_sync_jobs_router.py`
 
 ```python
 async def test_trigger_sync_admin_202(client, admin_token, db_source):
@@ -278,7 +280,7 @@ async def test_list_sync_jobs(client, admin_token, db_source, db_jobs):
 
 | Requirement | Satisfied by |
 |---|---|
-| FR-030 — trigger ingestion | `POST /sources/{id}/sync` |
-| FR-033 — observe job status | `GET /sync-jobs/{id}` |
-| FR-019 — admin-only trigger | `get_current_admin_user` dep |
-| RFC 7807 — error format | `problem()` helper |
+| FR-030 â€” trigger ingestion | `POST /sources/{id}/sync` |
+| FR-033 â€” observe job status | `GET /sync-jobs/{id}` |
+| FR-019 â€” admin-only trigger | `get_current_admin_user` dep |
+| RFC 7807 â€” error format | `problem()` helper |

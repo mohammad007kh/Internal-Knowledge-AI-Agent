@@ -1,37 +1,37 @@
----
+﻿---
 id: T-001
-title: Project Scaffolding — Directory Structure, Tooling Configuration, and Monorepo Root
-status: Not Started
+title: Project Scaffolding â€” Directory Structure, Tooling Configuration, and Monorepo Root
+status: Done
 created: 2026-02-25
-phase: Phase 0 — Foundation
+phase: Phase 0 â€” Foundation
 user_story: cross
 requirements: []
 ---
 
-## 📋 Embedded Context (READ THIS FIRST)
+## ðŸ“‹ Embedded Context (READ THIS FIRST)
 
 ### Project Standards
 | Standard | Value |
 |---|---|
 | Python | 3.12 |
-| Backend | FastAPI · SQLAlchemy 2.x · Pydantic v2 · dependency-injector |
-| Frontend | Next.js 15 App Router · shadcn/ui · Tailwind CSS |
-| State | React Context · TanStack Query · react-hook-form · Zod |
-| Database | PostgreSQL 16 + pgvector · HNSW m=16 ef_construction=64 · UUID PKs · soft-delete + audit columns |
+| Backend | FastAPI Â· SQLAlchemy 2.x Â· Pydantic v2 Â· dependency-injector |
+| Frontend | Next.js 15 App Router Â· shadcn/ui Â· Tailwind CSS |
+| State | React Context Â· TanStack Query Â· react-hook-form Â· Zod |
+| Database | PostgreSQL 16 + pgvector Â· HNSW m=16 ef_construction=64 Â· UUID PKs Â· soft-delete + audit columns |
 | Migrations | Alembic versioned |
-| Background | Celery + Redis · Beat replicas=1 STRICT |
-| File Storage | MinIO · presigned PUT pattern |
-| Auth | JWT 15-min access + 7-day rotating httpOnly refresh cookie · bcrypt · RBAC (admin/user) |
+| Background | Celery + Redis Â· Beat replicas=1 STRICT |
+| File Storage | MinIO Â· presigned PUT pattern |
+| Auth | JWT 15-min access + 7-day rotating httpOnly refresh cookie Â· bcrypt Â· RBAC (admin/user) |
 | Encryption | Fernet (connection configs at rest) |
-| AI Pipeline | LangGraph 8-node · interrupt() for clarification · SSE streaming |
-| Tracing | Langfuse self-hosted · every pipeline run must emit a trace |
-| Error Format | RFC 7807 Problem Details — all non-2xx API responses |
-| Logging | Structured · INFO level · X-Request-ID correlation |
-| Security | CORS strict · CSRF SameSite=Strict httpOnly · CSP moderate · rate-limit IP |
-| UI | Dark mode · responsive · WCAG-AA · no animations · Lucide icons · Sonner toasts |
-| Naming | snake_case vars/files/tables · PascalCase classes · SCREAMING_SNAKE_CASE constants |
-| Commits | Conventional commits · branch pattern: NNN-description |
-| Testing | pytest + httpx + Playwright · ≥80% coverage |
+| AI Pipeline | LangGraph 8-node Â· interrupt() for clarification Â· SSE streaming |
+| Tracing | Langfuse self-hosted Â· every pipeline run must emit a trace |
+| Error Format | RFC 7807 Problem Details â€” all non-2xx API responses |
+| Logging | Structured Â· INFO level Â· X-Request-ID correlation |
+| Security | CORS strict Â· CSRF SameSite=Strict httpOnly Â· CSP moderate Â· rate-limit IP |
+| UI | Dark mode Â· responsive Â· WCAG-AA Â· no animations Â· Lucide icons Â· Sonner toasts |
+| Naming | snake_case vars/files/tables Â· PascalCase classes Â· SCREAMING_SNAKE_CASE constants |
+| Commits | Conventional commits Â· branch pattern: NNN-description |
+| Testing | pytest + httpx + Playwright Â· â‰¥80% coverage |
 | Infrastructure | Docker Compose 9 services: frontend, backend, worker, beat, db, redis, minio, langfuse, langfuse-db |
 
 ### Domain Rules
@@ -41,25 +41,25 @@ requirements: []
 - All passwords validated via `validate_password_policy()` (FR-034)
 
 ### API Context
-Contracts: `specs/001-knowledge-ai-agent/contracts/` — auth.yaml, admin.yaml, chat.yaml, sources.yaml, users.yaml
+Contracts: `specs/001-knowledge-ai-agent/contracts/` â€” auth.yaml, admin.yaml, chat.yaml, sources.yaml, users.yaml
 
 ### Feature Summary
-Internal Knowledge AI Agent — single-tenant MVP. LangGraph 8-node pipeline; 9 Docker Compose services; FastAPI backend + Next.js 15 frontend; PostgreSQL 16 + pgvector; Celery + Redis for background jobs; MinIO for file storage; Langfuse for LLM tracing.
+Internal Knowledge AI Agent â€” single-tenant MVP. LangGraph 8-node pipeline; 9 Docker Compose services; FastAPI backend + Next.js 15 frontend; PostgreSQL 16 + pgvector; Celery + Redis for background jobs; MinIO for file storage; Langfuse for LLM tracing.
 
 ### Gate Criteria
-- `make dev` — all 9 Docker Compose services start and pass healthchecks
-- `make test` — pytest and tsc run without errors
-- `make lint` — ruff and biome pass with zero errors
+- `make dev` â€” all 9 Docker Compose services start and pass healthchecks
+- `make test` â€” pytest and tsc run without errors
+- `make lint` â€” ruff and biome pass with zero errors
 
 ---
 
-## 🎯 Objective
+## ðŸŽ¯ Objective
 
-Establish the complete monorepo directory structure, language tooling configuration files (pyproject.toml, package.json, tsconfig.json), linting/formatting configs (ruff, biome), and the `.env.example` template. This is the scaffolding task — no application logic, only structure and config.
+Establish the complete monorepo directory structure, language tooling configuration files (pyproject.toml, package.json, tsconfig.json), linting/formatting configs (ruff, biome), and the `.env.example` template. This is the scaffolding task â€” no application logic, only structure and config.
 
 ---
 
-## 🛠️ Implementation Details
+## ðŸ› ï¸ Implementation Details
 
 ### Files to Create
 
@@ -91,7 +91,7 @@ Establish the complete monorepo directory structure, language tooling configurat
 | `README.md` | Project README with setup instructions |
 
 ### Files to Update
-- _(None — this is the initial scaffold task)_
+- _(None â€” this is the initial scaffold task)_
 
 ### Code / Logic Requirements
 
@@ -104,7 +104,7 @@ Establish the complete monorepo directory structure, language tooling configurat
 **`backend/src/config/app_config.yaml`** must include:
 ```yaml
 file_upload:
-  max_size_bytes: 52428800  # 50 MB default — change here, NOT in .env
+  max_size_bytes: 52428800  # 50 MB default â€” change here, NOT in .env
   supported_formats: [pdf, docx, xlsx, csv, txt, md]
 
 bootstrap:
@@ -135,7 +135,7 @@ ENCRYPTION_KEY=<fernet-key-base64>
 
 ---
 
-## 🔌 Wiring Checklist
+## ðŸ”Œ Wiring Checklist
 
 - [ ] `backend/pyproject.toml` includes all required dependencies
 - [ ] `backend/src/config/app_config.yaml` defines `file_upload.max_size_bytes` (NOT .env)
@@ -145,7 +145,7 @@ ENCRYPTION_KEY=<fernet-key-base64>
 
 ---
 
-## ✅ Verification
+## âœ… Verification
 
 ```bash
 # Verify Python tooling
@@ -170,7 +170,7 @@ python -c "import yaml; c=yaml.safe_load(open('backend/src/config/app_config.yam
 
 ---
 
-## 📝 Completion Log
+## ðŸ“ Completion Log
 
 - [ ] Code implemented
 - [ ] Tests passed

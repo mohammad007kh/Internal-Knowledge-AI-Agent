@@ -1,31 +1,31 @@
----
+﻿---
 id: T-010
 title: Structured Logging Middleware + X-Request-ID Correlation
-status: Not Started
+status: Done
 created: 2026-02-25
-phase: Phase 0 — Foundation
+phase: Phase 0 â€” Foundation
 user_story: cross
 requirements: []
 priority: P1
 depends_on: [T-004]
 ---
 
-## 📋 Embedded Context
+## ðŸ“‹ Embedded Context
 
-**Standard**: Structured logging (JSON) · INFO level default · `X-Request-ID` correlation header  
+**Standard**: Structured logging (JSON) Â· INFO level default Â· `X-Request-ID` correlation header  
 **Library**: `structlog` with `structlog.stdlib.BoundLogger` interface  
 **Integration**: FastAPI middleware + lifespan: inject `request_id` into every log record  
 **Rule**: Never log secrets, tokens, passwords, or connection strings
 
 ---
 
-## 🎯 Objective
+## ðŸŽ¯ Objective
 
 Configure structlog for JSON-formatted structured logging, add a FastAPI middleware that extracts or generates an `X-Request-ID` on every request and injects it into the structlog context, and ensure all subsequent log calls within a request include the correlation ID automatically.
 
 ---
 
-## 🛠️ Files to Create
+## ðŸ› ï¸ Files to Create
 
 | Path | Purpose |
 |------|---------|
@@ -33,8 +33,8 @@ Configure structlog for JSON-formatted structured logging, add a FastAPI middlew
 | `backend/src/api/middleware/logging_middleware.py` | FastAPI middleware: X-Request-ID injection + request/response logging |
 
 ### Files to Update
-- `backend/src/main.py` — add `LoggingMiddleware` to app
-- `backend/src/core/__init__.py` — export `get_logger`
+- `backend/src/main.py` â€” add `LoggingMiddleware` to app
+- `backend/src/core/__init__.py` â€” export `get_logger`
 
 ---
 
@@ -119,17 +119,17 @@ LOG_LEVEL: str = "info"
 
 ---
 
-## 🔌 Wiring Checklist
+## ðŸ”Œ Wiring Checklist
 
 - [ ] `configure_logging()` called before app starts (in `create_app` or lifespan)
-- [ ] `LoggingMiddleware` added via `app.add_middleware()` — BEFORE error handlers
+- [ ] `LoggingMiddleware` added via `app.add_middleware()` â€” BEFORE error handlers
 - [ ] Every response includes `X-Request-ID` header
 - [ ] `get_logger()` importable from `src.core`
 - [ ] Middleware never logs request body (PII risk)
 
 ---
 
-## ✅ Verification
+## âœ… Verification
 
 ```bash
 # Start backend and check log format
@@ -148,7 +148,7 @@ curl -s -I http://localhost:8000/health | grep X-Request-ID
 
 ---
 
-## 📝 Completion Log
+## ðŸ“ Completion Log
 
 - [ ] Code implemented
 - [ ] Tests passed

@@ -1,9 +1,11 @@
-# T-048 — Database Connector
+﻿# T-048 â€” Database Connector
+
+**Status:** Done
 
 ## Context
 ```
-Python 3.12 | SQLAlchemy 2.x async · asyncpg
-SourceType.DATABASE · @register decorator · BaseConnector ABC
+Python 3.12 | SQLAlchemy 2.x async Â· asyncpg
+SourceType.DATABASE Â· @register decorator Â· BaseConnector ABC
 FR-020: connection_string MUST NEVER appear in any log or exception message
 Config is pre-decrypted by SourceService._decrypt_config before reaching connector
 ```
@@ -13,7 +15,7 @@ Implement `DatabaseConnector`: connect to an arbitrary async-compatible SQL data
 
 ---
 
-## File — `app/connectors/database_connector.py`
+## File â€” `app/connectors/database_connector.py`
 
 ```python
 from __future__ import annotations
@@ -42,11 +44,11 @@ class DatabaseConnector(BaseConnector):
     connection string.
 
     Expected *config* keys (pre-decrypted by SourceService):
-        connection_string (str, required) — async-compatible URL, e.g.
+        connection_string (str, required) â€” async-compatible URL, e.g.
                                             "postgresql+asyncpg://user:pass@host/db"
-        query             (str, required) — single SELECT statement; must return
+        query             (str, required) â€” single SELECT statement; must return
                                             named columns
-        page_size         (int, optional, default 1000) — rows per OFFSET page
+        page_size         (int, optional, default 1000) â€” rows per OFFSET page
 
     IMPORTANT: connection_string is consumed once in connect().
                It is NEVER stored as a plain attribute after that.
@@ -55,7 +57,7 @@ class DatabaseConnector(BaseConnector):
 
     def __init__(self, config: dict[str, Any]) -> None:
         super().__init__(config)
-        # Pop connection_string immediately — do not keep as plain attribute
+        # Pop connection_string immediately â€” do not keep as plain attribute
         self._conn_str_hash: str = hashlib.sha256(
             config["connection_string"].encode()
         ).hexdigest()[:12]
@@ -84,7 +86,7 @@ class DatabaseConnector(BaseConnector):
             async with engine.connect() as conn:
                 await conn.execute(sa.text("SELECT 1"))
         except Exception as exc:
-            # Re-raise a sanitised error — original exc may contain credentials
+            # Re-raise a sanitised error â€” original exc may contain credentials
             raise ConnectionError(
                 f"Database connection failed for source "
                 f"[conn_hash={self._conn_str_hash}]: see server logs for details"
@@ -136,7 +138,7 @@ class DatabaseConnector(BaseConnector):
 
             if not rows:
                 logger.info(
-                    "DatabaseConnector: extraction complete — %d rows yielded "
+                    "DatabaseConnector: extraction complete â€” %d rows yielded "
                     "[query_hash=%s]",
                     row_index,
                     query_hash,
@@ -161,9 +163,9 @@ class DatabaseConnector(BaseConnector):
 
             offset += self._page_size
             if len(rows) < self._page_size:
-                # Last page — no need for another round-trip
+                # Last page â€” no need for another round-trip
                 logger.info(
-                    "DatabaseConnector: final page reached — %d rows total "
+                    "DatabaseConnector: final page reached â€” %d rows total "
                     "[query_hash=%s]",
                     row_index,
                     query_hash,
@@ -200,13 +202,13 @@ class DatabaseConnector(BaseConnector):
 
 ## Design Notes
 
-### FR-020 — Connection string redaction
+### FR-020 â€” Connection string redaction
 
 The connection string is accessed exclusively via `self._config["connection_string"]` at call-time (inside `connect()` and `test_connection()`). It is never assigned to an instance attribute, never interpolated into log messages, and never included in re-raised exceptions. Logging at all levels uses only `conn_hash` (first 12 hex chars of SHA-256).
 
 ### Pagination strategy
 
-The connector wraps the caller-supplied `query` in a subquery and applies `LIMIT … OFFSET …` pages. This is portable (PostgreSQL, MySQL, SQLite) but may be slow on large datasets without an ORDER BY in the inner query — callers should include an ORDER BY in their query string for deterministic results.
+The connector wraps the caller-supplied `query` in a subquery and applies `LIMIT â€¦ OFFSET â€¦` pages. This is portable (PostgreSQL, MySQL, SQLite) but may be slow on large datasets without an ORDER BY in the inner query â€” callers should include an ORDER BY in their query string for deterministic results.
 
 ### Row-to-text serialisation
 

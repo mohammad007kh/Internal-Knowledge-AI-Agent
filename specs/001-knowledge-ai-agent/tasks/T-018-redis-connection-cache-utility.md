@@ -1,11 +1,11 @@
-# T-018 — Redis Connection Factory + Cache Utility
+﻿# T-018 â€” Redis Connection Factory + Cache Utility
 
 ---
 id: T-018
 title: Redis Async Connection Factory and Cache Helper Utilities
-status: Not Started
+status: Done
 created: 2026-02-26
-phase: Phase 0 — Foundation
+phase: Phase 0 â€” Foundation
 user_story: cross
 requirements: []
 priority: P1
@@ -28,8 +28,8 @@ Create a managed Redis connection using `redis.asyncio` (part of the `redis` pac
 - [ ] `cache_get(key: str) -> Any | None` returns deserialized Python value or `None`
 - [ ] `cache_set(key: str, value: Any, ttl: int = 300)` serializes and sets with TTL
 - [ ] `cache_delete(key: str)` removes a key
-- [ ] All cache helpers handle `redis.exceptions.RedisError` gracefully — log warning, return `None` / no-op
-- [ ] Connection health check is part of `GET /health` response (ping → `{"redis": "ok" | "degraded"}`)
+- [ ] All cache helpers handle `redis.exceptions.RedisError` gracefully â€” log warning, return `None` / no-op
+- [ ] Connection health check is part of `GET /health` response (ping â†’ `{"redis": "ok" | "degraded"}`)
 - [ ] Unit tests: cache round-trip, missing key returns None, error returns None without raising
 - [ ] Integration test: Redis container in CI (already in `docker-compose.yml`, T-007 pytest services)
 
@@ -39,9 +39,9 @@ Create a managed Redis connection using `redis.asyncio` (part of the `redis` pac
 
 | Path | Action |
 |------|---------|
-| `backend/src/core/redis.py` | Create — singleton + dependency + cache helpers |
-| `backend/src/main.py` | Update — initialize redis in lifespan |
-| `backend/src/api/health.py` | Update — include Redis ping in health response |
+| `backend/src/core/redis.py` | Create â€” singleton + dependency + cache helpers |
+| `backend/src/main.py` | Update â€” initialize redis in lifespan |
+| `backend/src/api/health.py` | Update â€” include Redis ping in health response |
 | `backend/tests/unit/test_redis_cache.py` | Create |
 
 ---
@@ -60,7 +60,7 @@ from src.core.config import settings
 
 logger = logging.getLogger(__name__)
 
-# Module-level singleton — set in lifespan startup, used by middleware
+# Module-level singleton â€” set in lifespan startup, used by middleware
 redis_client: Redis | None = None
 
 
@@ -90,7 +90,7 @@ async def close_redis() -> None:
 
 
 async def get_redis() -> Redis | None:
-    """FastAPI dependency — yields the module-level Redis client."""
+    """FastAPI dependency â€” yields the module-level Redis client."""
     return redis_client
 
 
@@ -104,7 +104,7 @@ async def redis_ping() -> bool:
         return False
 
 
-# ─── Cache helpers ──────────────────────────────────────────────────────────────
+# â”€â”€â”€ Cache helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 async def cache_get(key: str) -> Any | None:
     """Return deserialized value or None if key is missing / Redis is unavailable."""
@@ -149,11 +149,11 @@ from src.core.redis import init_redis, close_redis
 async def lifespan(app: FastAPI):
     # Startup
     await run_migrations()        # from T-014
-    await init_redis()            # ← add this
+    await init_redis()            # â† add this
     await bootstrap_admin()       # from T-020
     yield
     # Shutdown
-    await close_redis()           # ← add this
+    await close_redis()           # â† add this
     await engine.dispose()
 ```
 
@@ -227,13 +227,13 @@ async def test_cache_get_no_client():
 | Standard | Value |
 |---|---|
 | Python | 3.12 |
-| Backend | FastAPI · SQLAlchemy 2.x · Pydantic v2 · dependency-injector |
-| Background | Celery + Redis · Beat replicas=1 STRICT |
-| Logging | Structured · INFO level · X-Request-ID correlation |
+| Backend | FastAPI Â· SQLAlchemy 2.x Â· Pydantic v2 Â· dependency-injector |
+| Background | Celery + Redis Â· Beat replicas=1 STRICT |
+| Logging | Structured Â· INFO level Â· X-Request-ID correlation |
 | Security | Rate-limit IP (uses Redis) |
 
 ### Domain Rules
-- The Redis singleton must be initialized in the `lifespan` startup — NOT imported at module load time
-- Redis errors must NEVER crash the application — all cache helpers must fail silently
+- The Redis singleton must be initialized in the `lifespan` startup â€” NOT imported at module load time
+- Redis errors must NEVER crash the application â€” all cache helpers must fail silently
 - `REDIS_URL` comes from `settings`, never from `os.environ` directly
 - The cache helpers are for volatile data (rate limits, short-lived tokens, embeddings cache). Do NOT use them to store user data or anything requiring ACID guarantees.

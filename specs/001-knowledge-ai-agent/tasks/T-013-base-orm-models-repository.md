@@ -1,9 +1,9 @@
----
+﻿---
 id: T-013
-title: Base ORM Models — TimestampMixin, SoftDeleteMixin, UUIDMixin, and Common Patterns
-status: Not Started
+title: Base ORM Models â€” TimestampMixin, SoftDeleteMixin, UUIDMixin, and Common Patterns
+status: Done
 created: 2026-02-25
-phase: Phase 0 — Foundation
+phase: Phase 0 â€” Foundation
 user_story: cross
 requirements: []
 priority: P1
@@ -25,7 +25,7 @@ Define the canonical SQLAlchemy 2.x base model mixins and patterns that every OR
 - [ ] All tables have `created_at TIMESTAMPTZ` and `updated_at TIMESTAMPTZ` (auto-updated on write)
 - [ ] Soft-deletable models have `deleted_at TIMESTAMPTZ NULL`; `SoftDeleteMixin.is_deleted` property returns bool
 - [ ] `BaseRepository[T]` provides `get_by_id`, `list`, `create`, `update`, `soft_delete`, `hard_delete`
-- [ ] All repos in scope use `AsyncSession` exclusively — no sync queries
+- [ ] All repos in scope use `AsyncSession` exclusively â€” no sync queries
 - [ ] Unit tests verify `created_at` and `updated_at` are set on insert
 
 ---
@@ -173,14 +173,14 @@ class BaseRepository(Generic[T]):
 | Standard | Value |
 |---|---|
 | Python | 3.12 |
-| Database | PostgreSQL 16 + pgvector · HNSW m=16 ef_construction=64 · UUID PKs · soft-delete + audit columns |
+| Database | PostgreSQL 16 + pgvector Â· HNSW m=16 ef_construction=64 Â· UUID PKs Â· soft-delete + audit columns |
 | Migrations | Alembic versioned |
-| Backend | FastAPI · SQLAlchemy 2.x · Pydantic v2 · dependency-injector |
-| Testing | pytest + httpx · ≥80% coverage |
+| Backend | FastAPI Â· SQLAlchemy 2.x Â· Pydantic v2 Â· dependency-injector |
+| Testing | pytest + httpx Â· â‰¥80% coverage |
 
 ---
 
-## 📝 Completion Log
+## ðŸ“ Completion Log
 
 - [ ] Code implemented
 - [ ] Unit tests pass

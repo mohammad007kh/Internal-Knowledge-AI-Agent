@@ -1,6 +1,8 @@
-# T-099 · Coverage Gate, CI Pipeline & Final Spec Verification
+﻿# T-099 Â· Coverage Gate, CI Pipeline & Final Spec Verification
 
-**Phase:** 9 — Testing, Polish & SC Verification  
+**Status:** Done
+
+**Phase:** 9 â€” Testing, Polish & SC Verification  
 **Depends on:** T-091, T-092, T-093, T-094, T-095, T-096, T-097, T-098  
 **Blocks:** nothing (final task)
 
@@ -9,23 +11,23 @@
 ## Context
 
 ```
-Python 3.12 | FastAPI · SQLAlchemy 2.x · Pydantic v2 · dependency-injector
-Next.js 15 App Router · shadcn/ui · Tailwind CSS v4
-React Context · TanStack Query v5 · react-hook-form · Zod
-PostgreSQL 16 + pgvector · HNSW m=16 ef_construction=64 · UUID PKs · soft-delete + audit columns
+Python 3.12 | FastAPI Â· SQLAlchemy 2.x Â· Pydantic v2 Â· dependency-injector
+Next.js 15 App Router Â· shadcn/ui Â· Tailwind CSS v4
+React Context Â· TanStack Query v5 Â· react-hook-form Â· Zod
+PostgreSQL 16 + pgvector Â· HNSW m=16 ef_construction=64 Â· UUID PKs Â· soft-delete + audit columns
 Alembic versioned migrations
-Celery + Redis · Beat replicas=1 STRICT
-MinIO · presigned PUT pattern
-JWT 15-min access + 7-day rotating httpOnly refresh cookie · bcrypt · RBAC (admin/user)
+Celery + Redis Â· Beat replicas=1 STRICT
+MinIO Â· presigned PUT pattern
+JWT 15-min access + 7-day rotating httpOnly refresh cookie Â· bcrypt Â· RBAC (admin/user)
 Fernet (connection configs + LLM API keys at rest)
-LangGraph 8-node · interrupt() for clarification · SSE streaming
-Langfuse self-hosted · every pipeline run must emit a trace
-RFC 7807 Problem Details — all non-2xx API responses
-Structured logging · INFO level · X-Request-ID correlation
-CORS strict · CSRF SameSite=Strict httpOnly · CSP moderate · rate-limit IP
-Dark mode · responsive · WCAG-AA · no animations · Lucide icons · Sonner toasts
-snake_case vars/files/tables · PascalCase classes · SCREAMING_SNAKE_CASE constants
-pytest + httpx + Playwright · ≥80% coverage
+LangGraph 8-node Â· interrupt() for clarification Â· SSE streaming
+Langfuse self-hosted Â· every pipeline run must emit a trace
+RFC 7807 Problem Details â€” all non-2xx API responses
+Structured logging Â· INFO level Â· X-Request-ID correlation
+CORS strict Â· CSRF SameSite=Strict httpOnly Â· CSP moderate Â· rate-limit IP
+Dark mode Â· responsive Â· WCAG-AA Â· no animations Â· Lucide icons Â· Sonner toasts
+snake_case vars/files/tables Â· PascalCase classes Â· SCREAMING_SNAKE_CASE constants
+pytest + httpx + Playwright Â· â‰¥80% coverage
 Docker Compose 9 services: frontend, backend, worker, beat, db, redis, minio, langfuse, langfuse-db
 ```
 
@@ -35,7 +37,7 @@ Docker Compose 9 services: frontend, backend, worker, beat, db, redis, minio, la
 
 This is the **capstone task** for Phase 9. It:
 
-1. Enforces the ≥ 80 % pytest coverage gate across all backend code  
+1. Enforces the â‰¥ 80 % pytest coverage gate across all backend code  
 2. Creates the GitHub Actions CI pipeline that runs on every PR and main push  
 3. Runs the final cross-cutting spec compliance check confirming every FR/NFR from the spec has a corresponding test or explicit waiver  
 4. Produces a human-readable `SPEC_COMPLIANCE_REPORT.md` artifact
@@ -47,21 +49,21 @@ This is the **capstone task** for Phase 9. It:
 ```
 .github/
   workflows/
-    ci.yml                        ← full CI pipeline
-    playwright.yml                ← Playwright E2E workflow (separate for parallelism)
+    ci.yml                        â† full CI pipeline
+    playwright.yml                â† Playwright E2E workflow (separate for parallelism)
 
 src/backend/
-  pyproject.toml                  ← coverage config (≥80% fail threshold)
+  pyproject.toml                  â† coverage config (â‰¥80% fail threshold)
 
 scripts/
-  spec_compliance_check.py        ← FR/NFR → test-file traceability verifier
+  spec_compliance_check.py        â† FR/NFR â†’ test-file traceability verifier
 
-SPEC_COMPLIANCE_REPORT.md         ← produced by script; committed in CI
+SPEC_COMPLIANCE_REPORT.md         â† produced by script; committed in CI
 ```
 
 ---
 
-## 1. `pyproject.toml` — Coverage Gate
+## 1. `pyproject.toml` â€” Coverage Gate
 
 ```toml
 [tool.pytest.ini_options]
@@ -73,7 +75,7 @@ addopts = [
   "--cov=app",
   "--cov-report=term-missing",
   "--cov-report=xml:coverage.xml",
-  "--cov-fail-under=80",     # ← HARD GATE
+  "--cov-fail-under=80",     # â† HARD GATE
 ]
 markers = [
   "slow: marks tests as slow (deselect with -m 'not slow')",
@@ -96,7 +98,7 @@ output = "coverage.xml"
 
 ---
 
-## 2. GitHub Actions — Backend CI — `.github/workflows/ci.yml`
+## 2. GitHub Actions â€” Backend CI â€” `.github/workflows/ci.yml`
 
 ```yaml
 name: CI
@@ -112,9 +114,9 @@ env:
   NODE_VERSION: "20"
 
 jobs:
-  # ──────────────────────────────────────────────────────────────────────────
+  # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   # Backend: lint, type-check, unit + integration tests, 80% coverage gate
-  # ──────────────────────────────────────────────────────────────────────────
+  # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   backend:
     name: Backend Tests
     runs-on: ubuntu-latest
@@ -198,9 +200,9 @@ jobs:
           name: backend-coverage
           path: src/backend/coverage.xml
 
-  # ──────────────────────────────────────────────────────────────────────────
+  # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   # Frontend: lint, type-check, unit tests
-  # ──────────────────────────────────────────────────────────────────────────
+  # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   frontend:
     name: Frontend Tests
     runs-on: ubuntu-latest
@@ -230,9 +232,9 @@ jobs:
       - name: Unit tests (Vitest)
         run: npm run test -- --coverage --reporter=verbose
 
-  # ──────────────────────────────────────────────────────────────────────────
+  # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   # Docker Compose: smoke test all 9 services start cleanly
-  # ──────────────────────────────────────────────────────────────────────────
+  # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   compose-smoke:
     name: Docker Compose Smoke
     runs-on: ubuntu-latest
@@ -279,9 +281,9 @@ jobs:
         if: always()
         run: docker compose down -v
 
-  # ──────────────────────────────────────────────────────────────────────────
+  # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   # Spec compliance check
-  # ──────────────────────────────────────────────────────────────────────────
+  # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   spec-compliance:
     name: Spec Compliance Check
     runs-on: ubuntu-latest
@@ -306,7 +308,7 @@ jobs:
 
 ---
 
-## 3. GitHub Actions — Playwright E2E — `.github/workflows/playwright.yml`
+## 3. GitHub Actions â€” Playwright E2E â€” `.github/workflows/playwright.yml`
 
 ```yaml
 name: E2E Tests (Playwright)
@@ -378,7 +380,7 @@ jobs:
 
 ---
 
-## 4. Spec Compliance Script — `scripts/spec_compliance_check.py`
+## 4. Spec Compliance Script â€” `scripts/spec_compliance_check.py`
 
 ```python
 #!/usr/bin/env python3
@@ -411,8 +413,8 @@ NFR_PATTERN = re.compile(r"(NFR-\d{3})")
 
 # FRs / NFRs that are intentionally not tested directly (infrastructure-level)
 WAIVERS: set[str] = {
-    "NFR-001",  # availability / uptime — infra concern, not unit-testable
-    "NFR-009",  # Docker CPU limits — container runtime config
+    "NFR-001",  # availability / uptime â€” infra concern, not unit-testable
+    "NFR-009",  # Docker CPU limits â€” container runtime config
 }
 
 
@@ -467,22 +469,22 @@ def write_report(
     lines.append(f"- **Uncovered**: {len(uncovered)}\n\n")
 
     if uncovered:
-        lines.append("## ❌ Uncovered Requirements\n\n")
+        lines.append("## âŒ Uncovered Requirements\n\n")
         for rid in sorted(uncovered):
-            lines.append(f"- `{rid}` — no test file references this ID\n")
+            lines.append(f"- `{rid}` â€” no test file references this ID\n")
         lines.append("\n")
 
-    lines.append("## ✅ Covered Requirements\n\n")
+    lines.append("## âœ… Covered Requirements\n\n")
     for rid in sorted(covered):
         tests = coverage[rid]
         if rid in waivers:
-            lines.append(f"- `{rid}` — **WAIVED** (infrastructure / runtime)\n")
+            lines.append(f"- `{rid}` â€” **WAIVED** (infrastructure / runtime)\n")
         else:
-            lines.append(f"- `{rid}` — {len(tests)} test file(s)\n")
+            lines.append(f"- `{rid}` â€” {len(tests)} test file(s)\n")
             for t in tests[:3]:
                 lines.append(f"  - `{t}`\n")
             if len(tests) > 3:
-                lines.append(f"  - … and {len(tests) - 3} more\n")
+                lines.append(f"  - â€¦ and {len(tests) - 3} more\n")
 
     output.write_text("".join(lines), encoding="utf-8")
     return len(covered), len(uncovered)
@@ -502,7 +504,7 @@ def main() -> None:
     print(f"Found {len(req_ids)} requirements in spec.")
 
     test_files = collect_test_files()
-    print(f"Scanning {len(test_files)} test files…")
+    print(f"Scanning {len(test_files)} test filesâ€¦")
 
     coverage = build_coverage_map(req_ids, test_files)
     output_path = Path(args.output)
@@ -536,12 +538,12 @@ This file is created by the developer upon completing T-099:
 
 ## Coverage gate
 - [ ] `pytest --cov=app --cov-fail-under=80` exits 0 locally
-- [ ] `coverage.xml` produced; report shows ≥ 80% branch coverage
+- [ ] `coverage.xml` produced; report shows â‰¥ 80% branch coverage
 
 ## CI pipeline
 - [ ] `.github/workflows/ci.yml` passes all jobs on a feature branch PR
-- [ ] Backend tests: lint → type-check → migrations → pytest (80% gate)
-- [ ] Frontend tests: lint → tsc → vitest
+- [ ] Backend tests: lint â†’ type-check â†’ migrations â†’ pytest (80% gate)
+- [ ] Frontend tests: lint â†’ tsc â†’ vitest
 - [ ] compose-smoke: all 9 services healthy; `/api/v1/health` returns 200
 
 ## E2E
@@ -554,15 +556,15 @@ This file is created by the developer upon completing T-099:
 - [ ] Waivers documented: NFR-001, NFR-009
 
 ## All Phase 9 tasks signed-off
-- [ ] T-091 — Integration test scaffolding
-- [ ] T-092 — Celery task queue integration tests
-- [ ] T-093 — Playwright E2E critical user journeys
-- [ ] T-094 — Accessibility audit (WCAG-AA)
-- [ ] T-095 — Worker crash & retry integration tests
-- [ ] T-096 — Security hardening tests
-- [ ] T-097 — Dark mode, responsive layout & polish
-- [ ] T-098 — Structured logging & Langfuse trace verification
-- [ ] T-099 — Coverage gate, CI pipeline & final spec verification (this task)
+- [ ] T-091 â€” Integration test scaffolding
+- [ ] T-092 â€” Celery task queue integration tests
+- [ ] T-093 â€” Playwright E2E critical user journeys
+- [ ] T-094 â€” Accessibility audit (WCAG-AA)
+- [ ] T-095 â€” Worker crash & retry integration tests
+- [ ] T-096 â€” Security hardening tests
+- [ ] T-097 â€” Dark mode, responsive layout & polish
+- [ ] T-098 â€” Structured logging & Langfuse trace verification
+- [ ] T-099 â€” Coverage gate, CI pipeline & final spec verification (this task)
 ```
 
 ---
@@ -570,9 +572,9 @@ This file is created by the developer upon completing T-099:
 ## Definition of Done
 
 - [ ] `--cov-fail-under=80` set in `pyproject.toml`; `pytest` fails if coverage drops below 80%
-- [ ] `ci.yml` → backend job: ruff lint → ruff format → mypy → alembic upgrade → pytest (gate)
-- [ ] `ci.yml` → frontend job: ESLint → tsc → vitest
-- [ ] `ci.yml` → compose-smoke (main/develop only): all 9 services healthy
+- [ ] `ci.yml` â†’ backend job: ruff lint â†’ ruff format â†’ mypy â†’ alembic upgrade â†’ pytest (gate)
+- [ ] `ci.yml` â†’ frontend job: ESLint â†’ tsc â†’ vitest
+- [ ] `ci.yml` â†’ compose-smoke (main/develop only): all 9 services healthy
 - [ ] `playwright.yml` runs E2E in chromium + firefox; uploads HTML report
 - [ ] `scripts/spec_compliance_check.py` exits 0 (all FRs/NFRs covered or waived)
 - [ ] `SPEC_COMPLIANCE_REPORT.md` artifact: 0 uncovered requirements listed

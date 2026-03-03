@@ -1,11 +1,12 @@
-# T-029 — Email Service (Invitation + Password Reset)
+﻿# T-029 â€” Email Service (Invitation + Password Reset)
 
 ## Metadata
 | Field | Value |
 |---|---|
+| **Status** | Done |
 | **ID** | T-029 |
-| **Title** | Email Service — invitation link + password reset emails |
-| **Phase** | 1 — Authentication & User Management |
+| **Title** | Email Service â€” invitation link + password reset emails |
+| **Phase** | 1 â€” Authentication & User Management |
 | **Domain** | Backend / Infrastructure |
 | **Depends on** | T-004 |
 | **Blocks** | T-026, T-028, T-030 |
@@ -14,7 +15,7 @@
 ---
 
 ## Goal
-Implement `EmailService` — a simple abstraction over SMTP (or a dev console logger). In development it logs the email content to stdout (`LOG_EMAILS=true`). In production it sends via SMTP. The service is injected via the dependency-injector container, so switching providers requires only a config change.
+Implement `EmailService` â€” a simple abstraction over SMTP (or a dev console logger). In development it logs the email content to stdout (`LOG_EMAILS=true`). In production it sends via SMTP. The service is injected via the dependency-injector container, so switching providers requires only a config change.
 
 ---
 
@@ -23,7 +24,7 @@ Implement `EmailService` — a simple abstraction over SMTP (or a dev console lo
 ### 1. `app/core/config.py` additions
 ```python
 class Settings(BaseSettings):
-    # ── Email ──────────────────────────────────────────────────────────
+    # â”€â”€ Email â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     SMTP_HOST: str = "localhost"
     SMTP_PORT: int = 587
     SMTP_USER: str | None = None
@@ -34,7 +35,7 @@ class Settings(BaseSettings):
     # Dev shortcut: log emails to stdout instead of sending
     EMAIL_LOG_ONLY: bool = False
 
-    # Frontend URL — needed to build links in emails
+    # Frontend URL â€” needed to build links in emails
     FRONTEND_URL: str = "http://localhost:3000"
 ```
 
@@ -74,7 +75,7 @@ class EmailService:
         )
         body_html = f"""
         <p>You have been invited to join <strong>Internal Knowledge AI Agent</strong>.</p>
-        <p><a href="{setup_url}">Set your password →</a></p>
+        <p><a href="{setup_url}">Set your password â†’</a></p>
         <p>This link expires in 7 days. Do not share it with anyone.</p>
         """
         await self._send(to_email, subject, body_text, body_html)
@@ -84,7 +85,7 @@ class EmailService:
         reset_url = (
             f"{settings.FRONTEND_URL}/auth/password-reset/confirm?token={raw_token}"
         )
-        subject = "Password Reset — Internal Knowledge AI Agent"
+        subject = "Password Reset â€” Internal Knowledge AI Agent"
         body_text = (
             f"A password reset was requested for your account.\n\n"
             f"Click the link below to set a new password:\n\n"
@@ -93,12 +94,12 @@ class EmailService:
         )
         body_html = f"""
         <p>A password reset was requested for your account.</p>
-        <p><a href="{reset_url}">Reset your password →</a></p>
+        <p><a href="{reset_url}">Reset your password â†’</a></p>
         <p>This link expires in 1 hour. If you did not request this, you can safely ignore this email.</p>
         """
         await self._send(to_email, subject, body_text, body_html)
 
-    # ─── Internal ─────────────────────────────────────────────────────────
+    # â”€â”€â”€ Internal â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     async def _send(
         self, to: str, subject: str, body_text: str, body_html: str
@@ -127,7 +128,7 @@ class EmailService:
             logger.error(
                 "Failed to send email to %s: %s", to, exc, exc_info=True
             )
-            # Do NOT re-raise — email failure must not 500 the API response
+            # Do NOT re-raise â€” email failure must not 500 the API response
 
     def _send_sync(self, to: str, msg: MIMEMultipart) -> None:
         """Blocking SMTP call run in a thread-pool executor."""
@@ -170,7 +171,7 @@ Mailpit exposes a web UI on port 8025 where sent emails appear. For CI and unit 
 - [ ] `EmailService.send_invitation()` builds correct URL: `{FRONTEND_URL}/auth/setup?token={token}`
 - [ ] `EmailService.send_password_reset()` builds correct URL: `{FRONTEND_URL}/auth/password-reset/confirm?token={token}`
 - [ ] When `EMAIL_LOG_ONLY=true`, logs email content and returns without SMTP connection attempt
-- [ ] SMTP failures are caught and logged — they do NOT re-raise (API response is not affected)
+- [ ] SMTP failures are caught and logged â€” they do NOT re-raise (API response is not affected)
 - [ ] All SMTP calls run in a thread-pool executor (non-blocking async)
 - [ ] Unit tests: invitation URL assembled correctly, reset URL assembled correctly, log-only mode does not call SMTP
 - [ ] `EmailService` registered as `Singleton` in DI container
@@ -180,4 +181,4 @@ Mailpit exposes a web UI on port 8025 where sent emails appear. For CI and unit 
 ## Notes
 - Token is passed RAW to the email service; the service does no hashing (T-025 already stored the hash)
 - `send_invitation` and `send_password_reset` are the only two email templates needed for Phase 1
-- Both methods return `None` — callers must not depend on a return value
+- Both methods return `None` â€” callers must not depend on a return value

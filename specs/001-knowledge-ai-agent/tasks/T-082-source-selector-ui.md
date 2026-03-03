@@ -1,6 +1,8 @@
-# T-082 · Source Selector & Conversation Context UI
+﻿# T-082 Â· Source Selector & Conversation Context UI
 
-**Phase:** 5 — Chat Frontend  
+**Status:** Done
+
+**Phase:** 5 â€” Chat Frontend  
 **Depends on:** T-080 (layout), T-074 (sources API)  
 **Blocks:** T-086
 
@@ -9,23 +11,23 @@
 ## Context
 
 ```
-Python 3.12 | FastAPI · SQLAlchemy 2.x · Pydantic v2 · dependency-injector
-Next.js 15 App Router · shadcn/ui · Tailwind CSS v4
-React Context · TanStack Query v5 · react-hook-form · Zod
-PostgreSQL 16 + pgvector · HNSW m=16 ef_construction=64 · UUID PKs · soft-delete + audit columns
+Python 3.12 | FastAPI Â· SQLAlchemy 2.x Â· Pydantic v2 Â· dependency-injector
+Next.js 15 App Router Â· shadcn/ui Â· Tailwind CSS v4
+React Context Â· TanStack Query v5 Â· react-hook-form Â· Zod
+PostgreSQL 16 + pgvector Â· HNSW m=16 ef_construction=64 Â· UUID PKs Â· soft-delete + audit columns
 Alembic versioned migrations
-Celery + Redis · Beat replicas=1 STRICT
-MinIO · presigned PUT pattern
-JWT 15-min access + 7-day rotating httpOnly refresh cookie · bcrypt · RBAC (admin/user)
+Celery + Redis Â· Beat replicas=1 STRICT
+MinIO Â· presigned PUT pattern
+JWT 15-min access + 7-day rotating httpOnly refresh cookie Â· bcrypt Â· RBAC (admin/user)
 Fernet (connection configs at rest)
-LangGraph 8-node · interrupt() for clarification · SSE streaming
-Langfuse self-hosted · every pipeline run must emit a trace
-RFC 7807 Problem Details — all non-2xx API responses
-Structured logging · INFO level · X-Request-ID correlation
-CORS strict · CSRF SameSite=Strict httpOnly · CSP moderate · rate-limit IP
-Dark mode · responsive · WCAG-AA · no animations · Lucide icons · Sonner toasts
-snake_case vars/files/tables · PascalCase classes · SCREAMING_SNAKE_CASE constants
-pytest + httpx + Playwright · ≥80% coverage
+LangGraph 8-node Â· interrupt() for clarification Â· SSE streaming
+Langfuse self-hosted Â· every pipeline run must emit a trace
+RFC 7807 Problem Details â€” all non-2xx API responses
+Structured logging Â· INFO level Â· X-Request-ID correlation
+CORS strict Â· CSRF SameSite=Strict httpOnly Â· CSP moderate Â· rate-limit IP
+Dark mode Â· responsive Â· WCAG-AA Â· no animations Â· Lucide icons Â· Sonner toasts
+snake_case vars/files/tables Â· PascalCase classes Â· SCREAMING_SNAKE_CASE constants
+pytest + httpx + Playwright Â· â‰¥80% coverage
 Docker Compose 9 services: frontend, backend, worker, beat, db, redis, minio, langfuse, langfuse-db
 ```
 
@@ -35,8 +37,8 @@ Docker Compose 9 services: frontend, backend, worker, beat, db, redis, minio, la
 
 Allow users to scope a chat session to one or more knowledge sources. Implement:
 
-1. **Source Selector Popover** — appears when creating a new session or editing an existing one  
-2. **Source Chips** — show selected sources below the chat input bar  
+1. **Source Selector Popover** â€” appears when creating a new session or editing an existing one  
+2. **Source Chips** â€” show selected sources below the chat input bar  
 3. **PATCH /chat/sessions/{id}** call to update `source_ids` on the session  
 
 ---
@@ -162,7 +164,7 @@ export function SourceSelector({
           <Input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search sources…"
+            placeholder="Search sourcesâ€¦"
             className="h-7 border-0 p-0 text-sm shadow-none focus-visible:ring-0"
             aria-label="Search sources"
           />
@@ -203,7 +205,7 @@ export function SourceSelector({
                     <div className="flex-1 min-w-0">
                       <p className="truncate text-sm">{source.name}</p>
                       <p className="text-xs text-muted-foreground">
-                        {source.type} · {source.document_count} docs
+                        {source.type} Â· {source.document_count} docs
                       </p>
                     </div>
                   </li>
@@ -400,7 +402,7 @@ export function useSessionSources({ sessionId }: UseSessionSourcesOptions) {
 
 ## 4. Wire into ChatLayout / ChatInputBar
 
-### `src/components/chat/ChatInputBar.tsx` — updated
+### `src/components/chat/ChatInputBar.tsx` â€” updated
 
 Add source selector row above the textarea:
 
@@ -473,8 +475,8 @@ export function ChatInputBar({ onSend, disabled, sessionId }: ChatInputBarProps)
           ref={textareaRef}
           placeholder={
             sessionId
-              ? "Ask a question… (Enter to send)"
-              : "Select a session first…"
+              ? "Ask a questionâ€¦ (Enter to send)"
+              : "Select a session firstâ€¦"
           }
           className={cn("max-h-40 min-h-[2.75rem] flex-1 resize-none rounded-xl")}
           rows={1}

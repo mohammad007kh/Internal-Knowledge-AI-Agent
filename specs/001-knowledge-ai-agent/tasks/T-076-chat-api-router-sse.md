@@ -1,12 +1,14 @@
-# T-076 — Chat Sessions API Router + SSE Streaming Endpoint
+﻿# T-076 â€” Chat Sessions API Router + SSE Streaming Endpoint
+
+**Status:** Done
 
 ## Context
 ```
-Python 3.12 | FastAPI · SQLAlchemy 2.x · Pydantic v2 · dependency-injector
-LangGraph compiled graph · interrupt() for clarification · SSE streaming
-JWT 15-min access + 7-day rotating httpOnly refresh cookie · RBAC (admin/user)
-RFC 7807 Problem Details — all non-2xx API responses
-snake_case vars/files/tables · PascalCase classes · SCREAMING_SNAKE_CASE constants
+Python 3.12 | FastAPI Â· SQLAlchemy 2.x Â· Pydantic v2 Â· dependency-injector
+LangGraph compiled graph Â· interrupt() for clarification Â· SSE streaming
+JWT 15-min access + 7-day rotating httpOnly refresh cookie Â· RBAC (admin/user)
+RFC 7807 Problem Details â€” all non-2xx API responses
+snake_case vars/files/tables Â· PascalCase classes Â· SCREAMING_SNAKE_CASE constants
 Rate limit: 30 requests/min per user on streaming endpoint
 ```
 
@@ -32,7 +34,7 @@ Expose **5 HTTP endpoints** for the chat feature:
 - [ ] `POST /chat/sessions/{id}/messages` returns `StreamingResponse` with `Content-Type: text/event-stream`
 - [ ] SSE streams `delta` events token-by-token, then a `done` event
 - [ ] When `interrupt()` triggered, streams a `clarification` event and suspends
-- [ ] Non-owner access to session → 403 RFC 7807
+- [ ] Non-owner access to session â†’ 403 RFC 7807
 - [ ] Router registered at `/api/v1`
 
 ---
@@ -75,7 +77,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/chat", tags=["chat"])
 
 
-# ── Helpers ───────────────────────────────────────────────────────────────
+# â”€â”€ Helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 
 def _assert_session_owner(session, user: User) -> None:
@@ -91,7 +93,7 @@ def _assert_session_owner(session, user: User) -> None:
         )
 
 
-# ── Session CRUD ──────────────────────────────────────────────────────────
+# â”€â”€ Session CRUD â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 
 @router.post("/sessions", status_code=status.HTTP_201_CREATED, response_model=ChatSessionResponse)
@@ -206,7 +208,7 @@ async def delete_session(
     await db_session.commit()
 
 
-# ── Streaming Chat Endpoint ───────────────────────────────────────────────
+# â”€â”€ Streaming Chat Endpoint â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 
 @router.post("/sessions/{session_id}/messages")
@@ -227,19 +229,19 @@ async def send_message(
     """Send a user message; stream the assistant reply as SSE.
 
     SSE event types:
-    - ``delta``         — incremental text token
-    - ``done``          — pipeline complete, final message persisted
-    - ``clarification`` — interrupt() triggered, user input required
-    - ``error``         — unrecoverable pipeline error
+    - ``delta``         â€” incremental text token
+    - ``done``          â€” pipeline complete, final message persisted
+    - ``clarification`` â€” interrupt() triggered, user input required
+    - ``error``         â€” unrecoverable pipeline error
     """
-    # Validate session ownership ─────────────────────────────────────────
+    # Validate session ownership â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     session = await chat_session_repository.get(db_session, session_id=session_id)
     _assert_session_owner(session, current_user)
 
-    # Determine source allowlist ─────────────────────────────────────────
+    # Determine source allowlist â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     source_ids = body.source_ids or []  # TODO: fall back to user's permitted sources
 
-    # Start Langfuse trace ───────────────────────────────────────────────
+    # Start Langfuse trace â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     trace_id = langfuse_tracing.start_trace(
         session_id=session_id,
         user_id=str(current_user.id),
@@ -273,7 +275,7 @@ async def send_message(
             ):
                 kind = event["event"]
 
-                # Stream token deltas ────────────────────────────────────
+                # Stream token deltas â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
                 if kind == "on_chat_model_stream":
                     token = event.get("data", {}).get("chunk", {})
                     if hasattr(token, "content") and token.content:
@@ -284,13 +286,13 @@ async def send_message(
                         )
                         yield delta_event.to_sse()
 
-                # Capture final state ────────────────────────────────────
+                # Capture final state â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
                 elif kind == "on_chain_end" and event.get("name") == "LangGraph":
                     output = event.get("data", {}).get("output", {})
                     final_answer = output.get("final_answer", final_answer)
 
         except GraphInterrupt as exc:
-            # LangGraph paused for clarification ─────────────────────────
+            # LangGraph paused for clarification â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
             question = str(exc) if str(exc) else "Could you clarify your question?"
             clarify_event = ChatStreamEvent(
                 event=StreamEventType.CLARIFICATION,
@@ -310,7 +312,7 @@ async def send_message(
             langfuse_tracing.end_trace(trace_id, output="", error=str(exc)[:200])
             return
 
-        # Final done event ───────────────────────────────────────────────
+        # Final done event â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         done_event = ChatStreamEvent(
             event=StreamEventType.DONE,
             data={
@@ -334,7 +336,7 @@ async def send_message(
 
 ---
 
-## 2  `app/api/v1/__init__.py` — patch
+## 2  `app/api/v1/__init__.py` â€” patch
 
 ```python
 # Add router registration:
@@ -349,19 +351,19 @@ api_router.include_router(chat_router)
 
 ```
 1. POST /api/v1/chat/sessions          body: {"title": "Test session"}
-   → 201 { id: "<session_id>", ... }
+   â†’ 201 { id: "<session_id>", ... }
 
 2. POST /api/v1/chat/sessions/<id>/messages
    body: {"query": "What is our refund policy?", "source_ids": []}
    headers: Accept: text/event-stream
-   → Stream:
+   â†’ Stream:
        data: {"event":"delta","data":{"token":"You"}}
        data: {"event":"delta","data":{"token":" can"}}
        ...
        data: {"event":"done","data":{"session_id":"...", "trace_id":"..."}}
 
 3. GET  /api/v1/chat/sessions/<id>
-   → { session: {...}, messages: [ {role: "user", ...}, {role: "assistant", ...} ] }
+   â†’ { session: {...}, messages: [ {role: "user", ...}, {role: "assistant", ...} ] }
 ```
 
 ---

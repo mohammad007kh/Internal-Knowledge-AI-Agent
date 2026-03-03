@@ -1,17 +1,19 @@
-# T-045 — Connector Base + Registry
+﻿# T-045 â€” Connector Base + Registry
+
+**Status:** Done
 
 ## Context
 ```
-Python 3.12 | AsyncIterator · ABC · Pydantic v2
-Connectors: WebUrl · FileUpload · Database · Confluence · SharePoint (SourceType enum)
+Python 3.12 | AsyncIterator Â· ABC Â· Pydantic v2
+Connectors: WebUrl Â· FileUpload Â· Database Â· Confluence Â· SharePoint (SourceType enum)
 ```
 
 ## Goal
-Define the shared `Document` value object, the `BaseConnector` abstract class, and the `CONNECTOR_REGISTRY` with its `@register` decorator and `get_connector` factory. All concrete connectors (T-046–T-049) will import from these modules.
+Define the shared `Document` value object, the `BaseConnector` abstract class, and the `CONNECTOR_REGISTRY` with its `@register` decorator and `get_connector` factory. All concrete connectors (T-046â€“T-049) will import from these modules.
 
 ---
 
-## File 1 — `app/connectors/base.py`
+## File 1 â€” `app/connectors/base.py`
 
 ```python
 from __future__ import annotations
@@ -31,7 +33,7 @@ from pydantic import BaseModel, Field
 class Document(BaseModel):
     """
     Unit of extracted content produced by a connector and passed downstream
-    to the chunker → embedder → vector store pipeline.
+    to the chunker â†’ embedder â†’ vector store pipeline.
 
     `raw_storage_path` is the MinIO object key where the raw file/page has been
     archived, or None if the connector streams inline text only.
@@ -55,7 +57,7 @@ class BaseConnector(ABC):
     Concrete implementations MUST be registered via the `@register` decorator
     in `app/connectors/registry.py` before `get_connector` can return them.
 
-    Usage (async context manager — preferred):
+    Usage (async context manager â€” preferred):
         async with get_connector(source_type, config) as conn:
             async for doc in conn.extract_documents():
                 ...
@@ -71,7 +73,7 @@ class BaseConnector(ABC):
         self._config = config
 
     # ---------------------------------------------------------------- #
-    # Abstract interface — all subclasses implement these
+    # Abstract interface â€” all subclasses implement these
     # ---------------------------------------------------------------- #
 
     @abstractmethod
@@ -92,7 +94,7 @@ class BaseConnector(ABC):
     async def disconnect(self) -> None:
         """
         Release all resources held by the connector.
-        Must be idempotent — safe to call even if `connect` was never called.
+        Must be idempotent â€” safe to call even if `connect` was never called.
         """
 
     @abstractmethod
@@ -100,7 +102,7 @@ class BaseConnector(ABC):
         """
         Attempt a lightweight connectivity check.
         Return True on success, False on any failure.
-        MUST NOT raise — all exceptions must be caught internally.
+        MUST NOT raise â€” all exceptions must be caught internally.
         """
 
     # ---------------------------------------------------------------- #
@@ -117,7 +119,7 @@ class BaseConnector(ABC):
 
 ---
 
-## File 2 — `app/connectors/registry.py`
+## File 2 â€” `app/connectors/registry.py`
 
 ```python
 from __future__ import annotations
@@ -168,7 +170,7 @@ def get_connector(
     """
     Factory: return a new connector instance for *source_type*.
 
-    Each call constructs a fresh instance — connectors are NOT singletons.
+    Each call constructs a fresh instance â€” connectors are NOT singletons.
 
     Raises
     ------
@@ -187,7 +189,7 @@ def get_connector(
 
 ---
 
-## File 3 — `app/connectors/__init__.py`
+## File 3 â€” `app/connectors/__init__.py`
 
 ```python
 """
@@ -200,12 +202,12 @@ execute before `get_connector` is first called.
 from .base import BaseConnector, Document
 from .registry import CONNECTOR_REGISTRY, get_connector, register
 
-# Concrete connectors — imported for side-effect (registration)
-from . import web_url_connector       # noqa: F401 — T-046
-from . import file_upload_connector   # noqa: F401 — T-047
-from . import database_connector      # noqa: F401 — T-048
-from . import confluence_connector    # noqa: F401 — T-049
-from . import sharepoint_connector    # noqa: F401 — T-049
+# Concrete connectors â€” imported for side-effect (registration)
+from . import web_url_connector       # noqa: F401 â€” T-046
+from . import file_upload_connector   # noqa: F401 â€” T-047
+from . import database_connector      # noqa: F401 â€” T-048
+from . import confluence_connector    # noqa: F401 â€” T-049
+from . import sharepoint_connector    # noqa: F401 â€” T-049
 
 __all__ = [
     "BaseConnector",
@@ -216,7 +218,7 @@ __all__ = [
 ]
 ```
 
-> **Note:** The concrete connector imports will resolve after T-046–T-049 are implemented. Until then, remove the stubs or guard with `try/except ImportError`.
+> **Note:** The concrete connector imports will resolve after T-046â€“T-049 are implemented. Until then, remove the stubs or guard with `try/except ImportError`.
 
 ---
 

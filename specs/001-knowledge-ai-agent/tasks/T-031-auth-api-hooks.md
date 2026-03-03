@@ -1,11 +1,12 @@
-# T-031 — Frontend Auth TanStack Query Hooks
+﻿# T-031 â€” Frontend Auth TanStack Query Hooks
 
 ## Metadata
 | Field | Value |
 |---|---|
+| **Status** | Done |
 | **ID** | T-031 |
-| **Title** | Frontend Auth API Hooks — TanStack Query mutations for all auth flows |
-| **Phase** | 1 — Authentication & User Management |
+| **Title** | Frontend Auth API Hooks â€” TanStack Query mutations for all auth flows |
+| **Phase** | 1 â€” Authentication & User Management |
 | **Domain** | Frontend / Data Layer |
 | **Depends on** | T-005, T-025, T-026, T-032 |
 | **Blocks** | T-030, T-033, T-038 |
@@ -15,19 +16,19 @@
 | Standard | Value |
 |---|---|
 | Python | 3.12 |
-| Backend | FastAPI · SQLAlchemy 2.x · Pydantic v2 · dependency-injector |
-| Frontend | Next.js 15 App Router · shadcn/ui · Tailwind CSS v4 |
-| State | React Context · TanStack Query v5 · react-hook-form · Zod |
-| Database | PostgreSQL 16 + pgvector · UUID PKs · soft-delete + audit columns |
-| Auth | JWT 15-min access + 7-day rotating httpOnly refresh cookie · bcrypt · RBAC (admin/user) |
-| Error Format | RFC 7807 Problem Details — all non-2xx API responses |
-| UI | Dark mode · responsive · WCAG-AA · no animations · Lucide icons · Sonner toasts |
-| Testing | pytest + httpx + Playwright · ≥80% coverage |
+| Backend | FastAPI Â· SQLAlchemy 2.x Â· Pydantic v2 Â· dependency-injector |
+| Frontend | Next.js 15 App Router Â· shadcn/ui Â· Tailwind CSS v4 |
+| State | React Context Â· TanStack Query v5 Â· react-hook-form Â· Zod |
+| Database | PostgreSQL 16 + pgvector Â· UUID PKs Â· soft-delete + audit columns |
+| Auth | JWT 15-min access + 7-day rotating httpOnly refresh cookie Â· bcrypt Â· RBAC (admin/user) |
+| Error Format | RFC 7807 Problem Details â€” all non-2xx API responses |
+| UI | Dark mode Â· responsive Â· WCAG-AA Â· no animations Â· Lucide icons Â· Sonner toasts |
+| Testing | pytest + httpx + Playwright Â· â‰¥80% coverage |
 | Infrastructure | Docker Compose 9 services |
 
 ### Domain Rules
 - Connection strings and file paths MUST NEVER appear in user-facing output (FR-020)
-- Invitations are the only path to new accounts — no self-registration (FR-021)
+- Invitations are the only path to new accounts â€” no self-registration (FR-021)
 - All passwords validated via validate_password_policy() (FR-034)
 
 ---
@@ -42,11 +43,11 @@ human-readable messages.
 
 ## Deliverables
 
-### 1. `src/frontend/lib/api/auth.ts` — typed API functions
+### 1. `src/frontend/lib/api/auth.ts` â€” typed API functions
 ```typescript
 import { apiClient } from "@/lib/api-client";
 
-// ── Request / Response types ────────────────────────────────────────────────
+// â”€â”€ Request / Response types â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 export interface LoginRequest {
   email: string;
@@ -79,7 +80,7 @@ export interface PasswordResetConfirmRequest {
   new_password: string;
 }
 
-// ── API functions ────────────────────────────────────────────────────────────
+// â”€â”€ API functions â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 export async function loginApi(body: LoginRequest): Promise<TokenResponse> {
   return apiClient<TokenResponse>("/auth/login", {
@@ -226,8 +227,8 @@ export function useChangePassword() {
 
 ---
 
-### 3. `src/frontend/lib/api-client.ts` — additions / refinement (extends T-005 stub)
-The existing stub from T-005 handles 401 → refresh. Extend it to translate RFC 7807
+### 3. `src/frontend/lib/api-client.ts` â€” additions / refinement (extends T-005 stub)
+The existing stub from T-005 handles 401 â†’ refresh. Extend it to translate RFC 7807
 `ProblemDetail` responses into plain `Error` objects with a meaningful `message`:
 
 ```typescript
@@ -241,7 +242,7 @@ interface ProblemDetail {
 }
 
 /**
- * Internal helper — parses RFC 7807 ProblemDetail bodies into plain Error.
+ * Internal helper â€” parses RFC 7807 ProblemDetail bodies into plain Error.
  * Called by apiClient after a non-2xx response.
  */
 async function parseErrorResponse(res: Response): Promise<Error> {
@@ -281,4 +282,4 @@ async function parseErrorResponse(res: Response): Promise<Error> {
 - `useLogin()` mutation calls `POST /api/v1/auth/login` with correct JSON body
 - On a 401 ProblemDetail response, the mutation rejects with `err.message` equal to the `detail` field
 - `useLogout()` clears the access token and calls `queryClient.clear()`
-- TypeScript compiles cleanly — no `any` types in exported interfaces
+- TypeScript compiles cleanly â€” no `any` types in exported interfaces

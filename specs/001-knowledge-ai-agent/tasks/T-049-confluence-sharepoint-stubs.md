@@ -1,14 +1,16 @@
-# T-049 — Confluence & SharePoint Connector Stubs
+﻿# T-049 â€” Confluence & SharePoint Connector Stubs
+
+**Status:** Done
 
 ## Context
 ```
-Python 3.12 | FastAPI · SQLAlchemy 2.x · Pydantic v2 · dependency-injector
-Next.js 15 App Router · shadcn/ui · Tailwind CSS v4
-PostgreSQL 16 + pgvector · Celery + Redis · MinIO
-JWT 15-min access + 7-day rotating httpOnly refresh cookie · bcrypt · RBAC
+Python 3.12 | FastAPI Â· SQLAlchemy 2.x Â· Pydantic v2 Â· dependency-injector
+Next.js 15 App Router Â· shadcn/ui Â· Tailwind CSS v4
+PostgreSQL 16 + pgvector Â· Celery + Redis Â· MinIO
+JWT 15-min access + 7-day rotating httpOnly refresh cookie Â· bcrypt Â· RBAC
 Fernet (connection configs at rest)
-LangGraph 8-node · Langfuse self-hosted
-RFC 7807 Problem Details — all non-2xx API responses
+LangGraph 8-node Â· Langfuse self-hosted
+RFC 7807 Problem Details â€” all non-2xx API responses
 Docker Compose 9 services
 ```
 
@@ -20,10 +22,10 @@ by `SourceType`, but every method raises `NotImplementedError` (or returns `Fals
 
 ---
 
-## File 1 — `app/connectors/confluence_connector.py`
+## File 1 â€” `app/connectors/confluence_connector.py`
 
 ```python
-"""Confluence connector stub — not implemented in this release."""
+"""Confluence connector stub â€” not implemented in this release."""
 from __future__ import annotations
 
 import logging
@@ -42,12 +44,12 @@ class ConfluenceConnector(BaseConnector):
     Stub connector for Atlassian Confluence.
 
     Config keys (reserved for future use):
-        base_url       str  — Confluence base URL, e.g. https://myorg.atlassian.net
-        username       str  — Atlassian account email
-        api_token      str  — Atlassian API token (stored encrypted)
-        space_key      str  — Confluence space key, e.g. "ENG"
-        include_pages  bool — include regular pages (default True)
-        include_blogs  bool — include blog posts (default False)
+        base_url       str  â€” Confluence base URL, e.g. https://myorg.atlassian.net
+        username       str  â€” Atlassian account email
+        api_token      str  â€” Atlassian API token (stored encrypted)
+        space_key      str  â€” Confluence space key, e.g. "ENG"
+        include_pages  bool â€” include regular pages (default True)
+        include_blogs  bool â€” include blog posts (default False)
 
     All methods raise NotImplementedError until a future release implements them.
     test_connection() returns False (never raises) to satisfy BaseConnector contract.
@@ -85,24 +87,24 @@ class ConfluenceConnector(BaseConnector):
 
     async def test_connection(self) -> bool:
         """
-        Always returns False — connector not yet implemented.
+        Always returns False â€” connector not yet implemented.
 
         Returns False rather than raising so the generic test-connection
         endpoint can give the caller a clean "unsupported" response
         without an unhandled 500.
         """
         logger.info(
-            "test_connection called on ConfluenceConnector stub — returning False"
+            "test_connection called on ConfluenceConnector stub â€” returning False"
         )
         return False
 ```
 
 ---
 
-## File 2 — `app/connectors/sharepoint_connector.py`
+## File 2 â€” `app/connectors/sharepoint_connector.py`
 
 ```python
-"""SharePoint connector stub — not implemented in this release."""
+"""SharePoint connector stub â€” not implemented in this release."""
 from __future__ import annotations
 
 import logging
@@ -121,12 +123,12 @@ class SharePointConnector(BaseConnector):
     Stub connector for Microsoft SharePoint / OneDrive.
 
     Config keys (reserved for future use):
-        tenant_id      str  — Azure AD tenant ID
-        client_id      str  — Azure App Registration client ID
-        client_secret  str  — Azure App Registration secret (stored encrypted)
-        site_url       str  — SharePoint site URL
-        library_name   str  — Document library name (default "Documents")
-        recursive      bool — recurse into sub-folders (default True)
+        tenant_id      str  â€” Azure AD tenant ID
+        client_id      str  â€” Azure App Registration client ID
+        client_secret  str  â€” Azure App Registration secret (stored encrypted)
+        site_url       str  â€” SharePoint site URL
+        library_name   str  â€” Document library name (default "Documents")
+        recursive      bool â€” recurse into sub-folders (default True)
 
     All methods raise NotImplementedError until a future release implements them.
     test_connection() returns False (never raises) to satisfy BaseConnector contract.
@@ -162,30 +164,30 @@ class SharePointConnector(BaseConnector):
 
     async def test_connection(self) -> bool:
         """
-        Always returns False — connector not yet implemented.
+        Always returns False â€” connector not yet implemented.
         """
         logger.info(
-            "test_connection called on SharePointConnector stub — returning False"
+            "test_connection called on SharePointConnector stub â€” returning False"
         )
         return False
 ```
 
 ---
 
-## Update — `app/connectors/__init__.py`
+## Update â€” `app/connectors/__init__.py`
 
 Remove the `try/except ImportError` guards added in T-045 for these two connectors now
 that the stubs exist. The final file should import all five connectors unconditionally:
 
 ```python
 """
-Connector package — imports register all concrete connectors into CONNECTOR_REGISTRY.
+Connector package â€” imports register all concrete connectors into CONNECTOR_REGISTRY.
 Import order does not matter; each connector self-registers via @register().
 """
 from app.connectors.base import BaseConnector, Document
 from app.connectors.registry import CONNECTOR_REGISTRY, get_connector, register
 
-# Concrete implementations — side-effect imports trigger @register()
+# Concrete implementations â€” side-effect imports trigger @register()
 from app.connectors.confluence_connector import ConfluenceConnector  # noqa: F401
 from app.connectors.database_connector import DatabaseConnector  # noqa: F401
 from app.connectors.file_upload_connector import FileUploadConnector  # noqa: F401

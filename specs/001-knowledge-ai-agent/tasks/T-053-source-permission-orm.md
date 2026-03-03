@@ -1,9 +1,11 @@
-# T-053 — SourcePermission ORM Model & Migration
+﻿# T-053 â€” SourcePermission ORM Model & Migration
+
+**Status:** Done
 
 ## Context
 ```
-Python 3.12 | SQLAlchemy 2.x (async) · Pydantic v2
-PostgreSQL 16 · UUID PKs · Alembic versioned migrations
+Python 3.12 | SQLAlchemy 2.x (async) Â· Pydantic v2
+PostgreSQL 16 Â· UUID PKs Â· Alembic versioned migrations
 Multi-tenant source access control (FR-019)
 ```
 
@@ -14,10 +16,10 @@ never expose unapproved source data").
 
 ---
 
-## File 1 — `app/models/source_permission.py`
+## File 1 â€” `app/models/source_permission.py`
 
 ```python
-"""SourcePermission join model — governs which user can access which source."""
+"""SourcePermission join model â€” governs which user can access which source."""
 from __future__ import annotations
 
 import uuid
@@ -39,7 +41,7 @@ class SourcePermission(UUIDMixin, TimestampMixin, Base):
 
     Notes
     -----
-    - Hard-deleted (no soft-delete) — revocation is immediate.
+    - Hard-deleted (no soft-delete) â€” revocation is immediate.
     - `UniqueConstraint(source_id, user_id)` prevents duplicate grants.
     - Cascade on both parent FKs so rows are removed when a source or
       user is deleted.
@@ -64,7 +66,7 @@ class SourcePermission(UUIDMixin, TimestampMixin, Base):
     )
 
     # ------------------------------------------------------------------
-    # Relationships (lazy="raise" — always use explicit joins or services)
+    # Relationships (lazy="raise" â€” always use explicit joins or services)
     # ------------------------------------------------------------------
     source: Mapped["Source"] = relationship(  # noqa: F821
         "Source",
@@ -80,7 +82,7 @@ class SourcePermission(UUIDMixin, TimestampMixin, Base):
 
 ---
 
-## File 2 — `app/models/source.py` (patch — add `permissions` relationship)
+## File 2 â€” `app/models/source.py` (patch â€” add `permissions` relationship)
 
 ```python
 # Inside Source class, before the closing `__repr__`:
@@ -94,7 +96,7 @@ permissions: Mapped[list["SourcePermission"]] = relationship(
 
 ---
 
-## File 3 — `app/models/user.py` (patch — add `source_permissions` relationship)
+## File 3 â€” `app/models/user.py` (patch â€” add `source_permissions` relationship)
 
 ```python
 # Inside User class:
@@ -108,7 +110,7 @@ source_permissions: Mapped[list["SourcePermission"]] = relationship(
 
 ---
 
-## File 4 — `app/db/base.py` (patch — register model for Alembic)
+## File 4 â€” `app/db/base.py` (patch â€” register model for Alembic)
 
 ```python
 from app.models.source_permission import SourcePermission  # noqa: F401
@@ -116,7 +118,7 @@ from app.models.source_permission import SourcePermission  # noqa: F401
 
 ---
 
-## File 5 — `alembic/versions/0007_source_permissions.py`
+## File 5 â€” `alembic/versions/0007_source_permissions.py`
 
 ```python
 """source_permissions table

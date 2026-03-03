@@ -1,12 +1,14 @@
-# T-074 — LangGraph Full Pipeline Wiring + Compilation
+﻿# T-074 â€” LangGraph Full Pipeline Wiring + Compilation
+
+**Status:** Done
 
 ## Context
 ```
-Python 3.12 | FastAPI · SQLAlchemy 2.x · Pydantic v2 · dependency-injector
-LangGraph 8-node · interrupt() for clarification · SSE streaming
-Langfuse self-hosted · every pipeline run must emit a trace
-OpenAI API · tenacity 3-retry
-snake_case vars/files/tables · PascalCase classes · SCREAMING_SNAKE_CASE constants
+Python 3.12 | FastAPI Â· SQLAlchemy 2.x Â· Pydantic v2 Â· dependency-injector
+LangGraph 8-node Â· interrupt() for clarification Â· SSE streaming
+Langfuse self-hosted Â· every pipeline run must emit a trace
+OpenAI API Â· tenacity 3-retry
+snake_case vars/files/tables Â· PascalCase classes Â· SCREAMING_SNAKE_CASE constants
 ```
 
 ## Goal
@@ -33,7 +35,7 @@ that can be called from the API router.
 
 ```python
 # app/agent/nodes/history.py
-"""load_history — LangGraph node."""
+"""load_history â€” LangGraph node."""
 from __future__ import annotations
 
 import logging
@@ -99,7 +101,7 @@ async def load_history(
 
 ```python
 # app/agent/nodes/persist.py
-"""save_message + format_response — LangGraph nodes."""
+"""save_message + format_response â€” LangGraph nodes."""
 from __future__ import annotations
 
 import logging
@@ -141,7 +143,7 @@ async def save_message(
     answer = state.get("final_answer", "")
 
     if not answer:
-        logger.warning("save_message: empty final_answer for session=%s — skipping", session_id)
+        logger.warning("save_message: empty final_answer for session=%s â€” skipping", session_id)
         return {}
 
     try:
@@ -167,14 +169,14 @@ async def save_message(
     except Exception:
         logger.exception("save_message: DB write failed for session=%s", session_id)
         await db_session.rollback()
-        # Non-fatal — the answer was still generated; don't set error state
+        # Non-fatal â€” the answer was still generated; don't set error state
 
     return {}
 ```
 
 ---
 
-## 3  `app/agent/nodes/__init__.py` — final version
+## 3  `app/agent/nodes/__init__.py` â€” final version
 
 ```python
 # app/agent/nodes/__init__.py
@@ -188,11 +190,11 @@ from app.agent.nodes.retrieve import retrieve_context  # noqa: F401
 
 ---
 
-## 4  `app/agent/pipeline.py` — final version
+## 4  `app/agent/pipeline.py` â€” final version
 
 ```python
 # app/agent/pipeline.py
-"""LangGraph 8-node pipeline — fully wired and compiled."""
+"""LangGraph 8-node pipeline â€” fully wired and compiled."""
 from __future__ import annotations
 
 import functools
@@ -245,7 +247,7 @@ def build_pipeline(
     """
     workflow = StateGraph(AgentState)
 
-    # Partially apply all dependencies ──────────────────────────────────
+    # Partially apply all dependencies â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     _load_history = functools.partial(
         load_history,
         chat_session_repository=chat_session_repository,
@@ -275,7 +277,7 @@ def build_pipeline(
         db_session=db_session,
     )
 
-    # Register nodes ─────────────────────────────────────────────────────
+    # Register nodes â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     workflow.add_node("load_history", _load_history)
     workflow.add_node("check_clarification", _check_clarification)
     workflow.add_node("handle_clarification", handle_clarification)
@@ -284,7 +286,7 @@ def build_pipeline(
     workflow.add_node("format_response", format_response)
     workflow.add_node("save_message", _save_message)
 
-    # Edges ───────────────────────────────────────────────────────────────
+    # Edges â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     workflow.add_edge(START, "load_history")
     workflow.add_edge("load_history", "check_clarification")
     workflow.add_conditional_edges(
@@ -344,7 +346,7 @@ async def run_pipeline(
 
 ---
 
-## 5  `containers.py` — patch (add pipeline factory)
+## 5  `containers.py` â€” patch (add pipeline factory)
 
 ```python
 # Inside ApplicationContainer, after chat_message_repository:
@@ -371,7 +373,7 @@ pipeline = providers.Factory(
 
 ---
 
-## 6  Integration Smoke Test — `tests/integration/test_pipeline_smoke.py`
+## 6  Integration Smoke Test â€” `tests/integration/test_pipeline_smoke.py`
 
 ```python
 # tests/integration/test_pipeline_smoke.py
@@ -453,7 +455,7 @@ async def test_pipeline_short_query_triggers_clarification(mocked_pipeline):
         source_ids=["src-1"],
         trace_id="trace-2",
     )
-    # Graph ends at handle_clarification node → final_answer is None
+    # Graph ends at handle_clarification node â†’ final_answer is None
     assert result.get("requires_clarification") is True
 ```
 

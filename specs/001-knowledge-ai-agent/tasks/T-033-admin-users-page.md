@@ -1,11 +1,12 @@
-# T-033 — Admin Users Page (Frontend)
+﻿# T-033 â€” Admin Users Page (Frontend)
 
 ## Metadata
 | Field | Value |
 |---|---|
+| **Status** | Done |
 | **ID** | T-033 |
-| **Title** | Admin Users Page — paginated list, invite modal, role change, deactivate |
-| **Phase** | 1 — Authentication & User Management |
+| **Title** | Admin Users Page â€” paginated list, invite modal, role change, deactivate |
+| **Phase** | 1 â€” Authentication & User Management |
 | **Domain** | Frontend / Admin UI |
 | **Depends on** | T-028, T-031, T-032, T-038 |
 | **Blocks** | T-036, T-039 |
@@ -15,13 +16,13 @@
 | Standard | Value |
 |---|---|
 | Python | 3.12 |
-| Backend | FastAPI · SQLAlchemy 2.x · Pydantic v2 · dependency-injector |
-| Frontend | Next.js 15 App Router · shadcn/ui · Tailwind CSS v4 |
-| State | React Context · TanStack Query v5 · react-hook-form · Zod |
-| Auth | JWT 15-min access + 7-day rotating httpOnly refresh cookie · bcrypt · RBAC (admin/user) |
-| Error Format | RFC 7807 Problem Details — all non-2xx API responses |
-| UI | Dark mode · responsive · WCAG-AA · no animations · Lucide icons · Sonner toasts |
-| Testing | pytest + httpx + Playwright · ≥80% coverage |
+| Backend | FastAPI Â· SQLAlchemy 2.x Â· Pydantic v2 Â· dependency-injector |
+| Frontend | Next.js 15 App Router Â· shadcn/ui Â· Tailwind CSS v4 |
+| State | React Context Â· TanStack Query v5 Â· react-hook-form Â· Zod |
+| Auth | JWT 15-min access + 7-day rotating httpOnly refresh cookie Â· bcrypt Â· RBAC (admin/user) |
+| Error Format | RFC 7807 Problem Details â€” all non-2xx API responses |
+| UI | Dark mode Â· responsive Â· WCAG-AA Â· no animations Â· Lucide icons Â· Sonner toasts |
+| Testing | pytest + httpx + Playwright Â· â‰¥80% coverage |
 | Infrastructure | Docker Compose 9 services |
 
 ### Domain Rules
@@ -35,7 +36,7 @@
 Build the `/admin/users` page (admin-only) that lets administrators:
 1. **List** all users (paginated, 50 per page)
 2. **Invite** a new user by email (opens a modal)
-3. **Change role** for any user (admin ↔ user)
+3. **Change role** for any user (admin â†” user)
 4. **Deactivate** a user (soft-delete; cannot deactivate self)
 
 The page lives under `app/(dashboard)/admin/users/`. Access control is enforced both in
@@ -45,7 +46,7 @@ the Next.js middleware (T-038) and the backend router (T-028).
 
 ## Deliverables
 
-### 1. `src/frontend/lib/api/users.ts` — typed API functions
+### 1. `src/frontend/lib/api/users.ts` â€” typed API functions
 ```typescript
 import { apiClient } from "@/lib/api-client";
 
@@ -272,7 +273,7 @@ export function InviteUserModal({ open, onClose }: Props) {
               Cancel
             </Button>
             <Button type="submit" disabled={isSubmitting}>
-              {isSubmitting ? "Sending…" : "Send invitation"}
+              {isSubmitting ? "Sendingâ€¦" : "Send invitation"}
             </Button>
           </DialogFooter>
         </form>
@@ -517,7 +518,7 @@ export default function AdminUsersPage() {
 ---
 
 ## Gate Criteria
-- `make lint` passes — no TypeScript errors
+- `make lint` passes â€” no TypeScript errors
 - `/admin/users` renders an accessible table of users with pagination
 - "Invite user" button opens the modal; submitting calls `POST /api/v1/users/invitations`
 - Role toggle icon button calls `PATCH /api/v1/users/{id}/role`; success shows Sonner toast

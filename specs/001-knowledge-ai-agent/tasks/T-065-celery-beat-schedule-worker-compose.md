@@ -1,11 +1,13 @@
-# T-065 — Celery Beat Schedule & Worker Docker Services
+﻿# T-065 â€” Celery Beat Schedule & Worker Docker Services
+
+**Status:** Done
 
 ## Context
 ```
 Docker Compose 9 services: frontend, backend, worker, beat, db, redis, minio, langfuse, langfuse-db
 Redis 7 as broker + result backend
 FR-033: exactly 1 beat replica (deploy.mode=replicated, deploy.replicas=1)
-snake_case vars/files/tables · PascalCase classes · SCREAMING_SNAKE_CASE constants
+snake_case vars/files/tables Â· PascalCase classes Â· SCREAMING_SNAKE_CASE constants
 ```
 
 ## Goal
@@ -23,11 +25,11 @@ snake_case vars/files/tables · PascalCase classes · SCREAMING_SNAKE_CASE const
 - [ ] `worker` service uses `concurrency: 4` (configurable via env)
 - [ ] Both services depend on `redis` and `db` (with `condition: service_healthy`)
 - [ ] `CELERY_WORKER_CONCURRENCY` env var sets worker concurrency
-- [ ] No `--pool=gevent` or `--pool=eventlet` — use default prefork
+- [ ] No `--pool=gevent` or `--pool=eventlet` â€” use default prefork
 
 ---
 
-## 1  Beat Schedule — `app/tasks/celeryconfig.py` patch
+## 1  Beat Schedule â€” `app/tasks/celeryconfig.py` patch
 
 ```python
 # -- append at bottom of celeryconfig.py --
@@ -41,12 +43,12 @@ beat_schedule = {
     },
 }
 
-beat_max_loop_interval = 30   # seconds — wake Beat up every 30 s max
+beat_max_loop_interval = 30   # seconds â€” wake Beat up every 30 s max
 ```
 
 ---
 
-## 2  Fan-Out Task — `app/tasks/trigger_all_syncs.py`
+## 2  Fan-Out Task â€” `app/tasks/trigger_all_syncs.py`
 
 ```python
 # app/tasks/trigger_all_syncs.py
@@ -88,13 +90,13 @@ async def _trigger_async() -> dict:
 
 ---
 
-## 3  Docker Compose — `docker-compose.yml` additions
+## 3  Docker Compose â€” `docker-compose.yml` additions
 
 > Add under the top-level `services:` key  
 > (add alongside existing `backend`, `db`, `redis` entries)
 
 ```yaml
-# ── Celery worker ─────────────────────────────────────────────────────────
+# â”€â”€ Celery worker â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   worker:
     build:
       context: .
@@ -122,7 +124,7 @@ async def _trigger_async() -> dict:
     networks:
       - internal
 
-# ── Celery beat (strictly 1 replica) ─────────────────────────────────────
+# â”€â”€ Celery beat (strictly 1 replica) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   beat:
     build:
       context: .
@@ -144,7 +146,7 @@ async def _trigger_async() -> dict:
     restart: unless-stopped
     deploy:
       mode: replicated
-      replicas: 1                # FR-033 — MUST be exactly 1
+      replicas: 1                # FR-033 â€” MUST be exactly 1
     networks:
       - internal
 ```
@@ -175,10 +177,10 @@ hostname = os.environ.get("HOSTNAME", "")
 if not hostname.startswith("beat"):
     # If somehow two beat containers start, only the one with hostname starting
     # 'beat' should proceed.  This is Belt-and-suspenders for non-Swarm deploys.
-    pass  # Do nothing — Redis distributed lock is in T-066
+    pass  # Do nothing â€” Redis distributed lock is in T-066
 ```
 
-**Primary enforcement:** Docker Compose `deploy.replicas: 1` — only one beat container is started.
+**Primary enforcement:** Docker Compose `deploy.replicas: 1` â€” only one beat container is started.
 
 ---
 
@@ -211,6 +213,6 @@ docker compose exec worker celery -A app.tasks.celery_app inspect ping
 
 | Requirement | Satisfied by |
 |---|---|
-| FR-033 — periodic sync | `beat_schedule["sync-all-sources"]` every 30 min |
-| FR-033 — exactly 1 beat replica | `deploy.replicas: 1` + Docker Compose guard |
-| FR-033 — fan-out | `trigger_all_syncs` dispatches per active source |
+| FR-033 â€” periodic sync | `beat_schedule["sync-all-sources"]` every 30 min |
+| FR-033 â€” exactly 1 beat replica | `deploy.replicas: 1` + Docker Compose guard |
+| FR-033 â€” fan-out | `trigger_all_syncs` dispatches per active source |

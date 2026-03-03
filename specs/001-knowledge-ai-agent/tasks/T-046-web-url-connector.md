@@ -1,9 +1,11 @@
-# T-046 — WebUrl Connector
+﻿# T-046 â€” WebUrl Connector
+
+**Status:** Done
 
 ## Context
 ```
-Python 3.12 | httpx (async) · BeautifulSoup4 · MinIO (presigned PUT)
-SourceType.WEB_URL · @register decorator · BaseConnector ABC
+Python 3.12 | httpx (async) Â· BeautifulSoup4 Â· MinIO (presigned PUT)
+SourceType.WEB_URL Â· @register decorator Â· BaseConnector ABC
 FR-020: connection strings must never appear in user-facing output
 ```
 
@@ -12,7 +14,7 @@ Implement `WebUrlConnector`: fetch a web page (respecting `robots.txt`), extract
 
 ---
 
-## File — `app/connectors/web_url_connector.py`
+## File â€” `app/connectors/web_url_connector.py`
 
 ```python
 from __future__ import annotations
@@ -44,10 +46,10 @@ class WebUrlConnector(BaseConnector):
     Connector for publicly accessible web URLs.
 
     Expected *config* keys:
-        url (str, required)           — target page URL
-        user_agent (str, optional)    — HTTP User-Agent header
-        timeout (float, optional)     — request timeout in seconds
-        check_robots (bool, optional) — default True; set False for internal URLs
+        url (str, required)           â€” target page URL
+        user_agent (str, optional)    â€” HTTP User-Agent header
+        timeout (float, optional)     â€” request timeout in seconds
+        check_robots (bool, optional) â€” default True; set False for internal URLs
 
     MinIO bucket key pattern: ``raw/web/{source_id}/{sanitised_domain}.html``
     """
@@ -96,9 +98,9 @@ class WebUrlConnector(BaseConnector):
             resp = await self._client.get(robots_url)
             if resp.status_code == 200:
                 rp.parse(resp.text.splitlines())
-            # Any non-200 → assume allowed
+            # Any non-200 â†’ assume allowed
         except Exception:
-            # Network errors while fetching robots.txt → assume allowed
+            # Network errors while fetching robots.txt â†’ assume allowed
             pass
         return rp.can_fetch(self._user_agent, self._url)
 
@@ -111,7 +113,7 @@ class WebUrlConnector(BaseConnector):
 
         if not await self._is_allowed():
             logger.warning(
-                "WebUrlConnector: robots.txt disallows crawling %s — skipping",
+                "WebUrlConnector: robots.txt disallows crawling %s â€” skipping",
                 self._url,
             )
             return
@@ -123,7 +125,7 @@ class WebUrlConnector(BaseConnector):
         raw_html = response.content
         if len(raw_html) > _MAX_CONTENT_LENGTH:
             logger.warning(
-                "WebUrlConnector: response from %s exceeds %d bytes — truncating",
+                "WebUrlConnector: response from %s exceeds %d bytes â€” truncating",
                 self._url,
                 _MAX_CONTENT_LENGTH,
             )
@@ -151,7 +153,7 @@ class WebUrlConnector(BaseConnector):
             )
         except Exception as exc:
             logger.warning(
-                "WebUrlConnector: failed to archive HTML to MinIO (%s) — continuing",
+                "WebUrlConnector: failed to archive HTML to MinIO (%s) â€” continuing",
                 exc,
             )
 
@@ -191,7 +193,7 @@ class WebUrlConnector(BaseConnector):
 
 ---
 
-## `app/services/storage_service.py` (Stub — expand in T-047)
+## `app/services/storage_service.py` (Stub â€” expand in T-047)
 
 Add `upload_bytes` if not already present:
 
@@ -229,5 +231,5 @@ async def upload_bytes(
 - [ ] HTML is stripped of `<script>`, `<style>`, `<nav>`, `<footer>`, `<header>` tags before text extraction
 - [ ] Raw HTML is uploaded to MinIO at `raw/web/{source_id}/{domain}.html`; `raw_storage_path` is set on `Document`
 - [ ] If MinIO upload fails, the connector logs a warning and yields the `Document` anyway (no exception)
-- [ ] `test_connection()` sends a HEAD request and returns `False` (not raises) on any exception or HTTP ≥ 400
+- [ ] `test_connection()` sends a HEAD request and returns `False` (not raises) on any exception or HTTP â‰¥ 400
 - [ ] `_url` and `_config` are never included in log output at WARNING/ERROR level

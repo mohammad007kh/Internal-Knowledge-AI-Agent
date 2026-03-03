@@ -1,28 +1,28 @@
----
+﻿---
 id: T-002
 title: Docker Compose 9-Service Configuration with Healthchecks
-status: Not Started
+status: Done
 created: 2026-02-25
-phase: Phase 0 — Foundation
+phase: Phase 0 â€” Foundation
 user_story: cross
 requirements: []
 ---
 
-## 📋 Embedded Context (READ THIS FIRST)
+## ðŸ“‹ Embedded Context (READ THIS FIRST)
 
 ### Project Standards
 | Standard | Value |
 |---|---|
 | Python | 3.12 |
-| Backend | FastAPI · SQLAlchemy 2.x · Pydantic v2 · dependency-injector |
-| Frontend | Next.js 15 App Router · shadcn/ui · Tailwind CSS |
-| Background | Celery + Redis · Beat replicas=1 STRICT |
-| File Storage | MinIO · presigned PUT pattern |
+| Backend | FastAPI Â· SQLAlchemy 2.x Â· Pydantic v2 Â· dependency-injector |
+| Frontend | Next.js 15 App Router Â· shadcn/ui Â· Tailwind CSS |
+| Background | Celery + Redis Â· Beat replicas=1 STRICT |
+| File Storage | MinIO Â· presigned PUT pattern |
 | Tracing | Langfuse self-hosted |
 | Infrastructure | Docker Compose 9 services: frontend, backend, worker, beat, db, redis, minio, langfuse, langfuse-db |
 
 ### Domain Rules
-- `beat` service MUST have `replicas: 1` — duplicate schedule hazard if scaled
+- `beat` service MUST have `replicas: 1` â€” duplicate schedule hazard if scaled
 - Auto-restart: `restart: on-failure` with max 3 attempts enforced by health_monitor.py at application level
 - `langfuse-db` is a separate Postgres instance from the app `db`
 - MinIO bucket name comes from `MINIO_BUCKET` env var
@@ -31,19 +31,19 @@ requirements: []
 9-service Docker Compose stack. Frontend (Next.js, port 3000), Backend (FastAPI, port 8000), Worker (Celery), Beat (Celery Beat, replicas=1), DB (PostgreSQL 16 + pgvector, port 5432), Redis (port 6379), MinIO (ports 9000+9001), Langfuse (port 3001), Langfuse-DB (PostgreSQL, port 5433).
 
 ### Gate Criteria
-- `docker compose up -d` — all 9 services reach healthy status
-- `docker compose ps` — no service in "restarting" or "exited" state
+- `docker compose up -d` â€” all 9 services reach healthy status
+- `docker compose ps` â€” no service in "restarting" or "exited" state
 - `make dev` completes with all healthchecks green
 
 ---
 
-## 🎯 Objective
+## ðŸŽ¯ Objective
 
 Create `docker-compose.yml` with all 9 services, network isolation, named volumes, healthchecks, and an `app_config.yaml` volume mount. Create `docker-compose.override.yml` for development (volume mounts and exposed ports). Each service has a correct healthcheck so dependent services wait for readiness.
 
 ---
 
-## 🛠️ Implementation Details
+## ðŸ› ï¸ Implementation Details
 
 ### Files to Create
 
@@ -54,7 +54,7 @@ Create `docker-compose.yml` with all 9 services, network isolation, named volume
 | `Makefile` | `make dev`, `make test`, `make lint`, `make build`, `make down` targets |
 
 ### Files to Update
-- _(None — new files)_
+- _(None â€” new files)_
 
 ### Code / Logic Requirements
 
@@ -107,7 +107,7 @@ services:
     depends_on:
       - worker
     env_file: .env
-    # NOTE: NEVER scale beat beyond 1 replica — duplicate schedule hazard
+    # NOTE: NEVER scale beat beyond 1 replica â€” duplicate schedule hazard
     deploy:
       replicas: 1
 
@@ -209,7 +209,7 @@ build:
 
 ---
 
-## 🔌 Wiring Checklist
+## ðŸ”Œ Wiring Checklist
 
 - [ ] All 9 services defined in docker-compose.yml
 - [ ] `beat` has `deploy.replicas: 1` comment explaining the constraint
@@ -220,7 +220,7 @@ build:
 
 ---
 
-## ✅ Verification
+## âœ… Verification
 
 ```bash
 # Start all services and verify healthy
@@ -245,7 +245,7 @@ curl -s http://localhost:8000/health | python -m json.tool
 
 ---
 
-## 📝 Completion Log
+## ðŸ“ Completion Log
 
 - [ ] Code implemented
 - [ ] Tests passed

@@ -1,22 +1,22 @@
----
+﻿---
 id: T-003
 title: PostgreSQL + pgvector Init, Alembic Baseline Migration, and DB Healthcheck
-status: Not Started
+status: Done
 created: 2026-02-25
-phase: Phase 0 — Foundation
+phase: Phase 0 â€” Foundation
 user_story: cross
 requirements: []
 ---
 
-## 📋 Embedded Context (READ THIS FIRST)
+## ðŸ“‹ Embedded Context (READ THIS FIRST)
 
 ### Project Standards
 | Standard | Value |
 |---|---|
 | Python | 3.12 |
-| Backend | FastAPI · SQLAlchemy 2.x · Pydantic v2 |
-| Database | PostgreSQL 16 + pgvector · HNSW m=16 ef_construction=64 · UUID PKs · soft-delete + audit columns |
-| Migrations | Alembic versioned — never direct DDL in production |
+| Backend | FastAPI Â· SQLAlchemy 2.x Â· Pydantic v2 |
+| Database | PostgreSQL 16 + pgvector Â· HNSW m=16 ef_construction=64 Â· UUID PKs Â· soft-delete + audit columns |
+| Migrations | Alembic versioned â€” never direct DDL in production |
 | Naming | snake_case tables and columns |
 | Primary Keys | UUID (uuid4), not auto-increment integers |
 
@@ -36,13 +36,13 @@ PostgreSQL 16 with pgvector for both relational data and vector similarity searc
 
 ---
 
-## 🎯 Objective
+## ðŸŽ¯ Objective
 
 Configure SQLAlchemy async engine, set up Alembic with the correct async migration environment, enable the pgvector extension, and establish the `TimestampMixin` and `UUIDMixin` base model patterns used by all subsequent ORM models.
 
 ---
 
-## 🛠️ Implementation Details
+## ðŸ› ï¸ Implementation Details
 
 ### Files to Create
 
@@ -55,7 +55,7 @@ Configure SQLAlchemy async engine, set up Alembic with the correct async migrati
 | `backend/alembic/versions/0001_enable_pgvector.py` | Enable `vector` extension |
 
 ### Files to Update
-- `backend/src/core/__init__.py` — export `get_db`, `AsyncSession`
+- `backend/src/core/__init__.py` â€” export `get_db`, `AsyncSession`
 
 ### Code / Logic Requirements
 
@@ -107,7 +107,7 @@ def downgrade() -> None:
 
 ---
 
-## 🔌 Wiring Checklist
+## ðŸ”Œ Wiring Checklist
 
 - [ ] `get_db()` dependency exported from `src.core.database`
 - [ ] All model files import `Base` from `src.models.base`
@@ -117,7 +117,7 @@ def downgrade() -> None:
 
 ---
 
-## ✅ Verification
+## âœ… Verification
 
 ```bash
 # Run migrations on clean database
@@ -145,7 +145,7 @@ echo "Roundtrip: OK"
 
 ---
 
-## 📝 Completion Log
+## ðŸ“ Completion Log
 
 - [ ] Code implemented
 - [ ] Tests passed

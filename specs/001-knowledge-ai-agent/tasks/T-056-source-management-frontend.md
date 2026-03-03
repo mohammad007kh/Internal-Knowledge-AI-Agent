@@ -1,23 +1,25 @@
-# T-056 — Source Management Frontend
+﻿# T-056 â€” Source Management Frontend
+
+**Status:** Done
 
 ## Context
 ```
-Next.js 15 App Router · shadcn/ui · Tailwind CSS v4
-TanStack Query v5 · react-hook-form · Zod
+Next.js 15 App Router Â· shadcn/ui Â· Tailwind CSS v4
+TanStack Query v5 Â· react-hook-form Â· Zod
 Routes: (dashboard)/admin/sources/...
 RBAC: admin-only pages; non-admin see /dashboard/sources read-only list
-Dark mode · WCAG-AA · Lucide icons · Sonner toasts
+Dark mode Â· WCAG-AA Â· Lucide icons Â· Sonner toasts
 ```
 
 ## Goal
 Four pages + two hook files:
-1. Admin source list (`/admin/sources`) — CRUD + test-connection
+1. Admin source list (`/admin/sources`) â€” CRUD + test-connection
 2. Grant/revoke permissions modal (`/admin/sources/[id]/permissions`)
-3. Two TanStack Query hook files — `useSources`, `useSourcePermissions`
+3. Two TanStack Query hook files â€” `useSources`, `useSourcePermissions`
 
 ---
 
-## File 1 — `app/(dashboard)/admin/sources/page.tsx`
+## File 1 â€” `app/(dashboard)/admin/sources/page.tsx`
 
 ```tsx
 import { Suspense } from "react";
@@ -29,7 +31,7 @@ export default function SourcesPage() {
   return (
     <main className="flex-1 space-y-4 p-8">
       <h1 className="text-2xl font-semibold">Knowledge Sources</h1>
-      <Suspense fallback={<p>Loading…</p>}>
+      <Suspense fallback={<p>Loadingâ€¦</p>}>
         <SourcesTable />
       </Suspense>
     </main>
@@ -39,7 +41,7 @@ export default function SourcesPage() {
 
 ---
 
-## File 2 — `app/(dashboard)/admin/sources/_components/SourcesTable.tsx`
+## File 2 â€” `app/(dashboard)/admin/sources/_components/SourcesTable.tsx`
 
 ```tsx
 "use client";
@@ -133,7 +135,7 @@ export function SourcesTable() {
 
 ---
 
-## File 3 — `app/(dashboard)/admin/sources/_components/CreateSourceDialog.tsx`
+## File 3 â€” `app/(dashboard)/admin/sources/_components/CreateSourceDialog.tsx`
 
 ```tsx
 "use client";
@@ -248,7 +250,7 @@ export function CreateSourceDialog({ open, onOpenChange }: Props) {
 
 ---
 
-## File 4 — `app/(dashboard)/admin/sources/[id]/permissions/page.tsx`
+## File 4 â€” `app/(dashboard)/admin/sources/[id]/permissions/page.tsx`
 
 ```tsx
 import { Suspense } from "react";
@@ -262,7 +264,7 @@ export default function PermissionsPage({ params }: Props) {
   return (
     <main className="flex-1 space-y-4 p-8">
       <h1 className="text-2xl font-semibold">Source Permissions</h1>
-      <Suspense fallback={<p>Loading…</p>}>
+      <Suspense fallback={<p>Loadingâ€¦</p>}>
         <PermissionsManager sourceId={params.id} />
       </Suspense>
     </main>
@@ -272,7 +274,7 @@ export default function PermissionsPage({ params }: Props) {
 
 ---
 
-## File 5 — `app/(dashboard)/admin/sources/[id]/permissions/_components/PermissionsManager.tsx`
+## File 5 â€” `app/(dashboard)/admin/sources/[id]/permissions/_components/PermissionsManager.tsx`
 
 ```tsx
 "use client";
@@ -355,7 +357,7 @@ export function PermissionsManager({ sourceId }: Props) {
 
 ---
 
-## File 6 — `app/hooks/useSources.ts`
+## File 6 â€” `app/hooks/useSources.ts`
 
 ```typescript
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -409,7 +411,7 @@ export function useTestConnection() {
 
 ---
 
-## File 7 — `app/hooks/useSourcePermissions.ts`
+## File 7 â€” `app/hooks/useSourcePermissions.ts`
 
 ```typescript
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";

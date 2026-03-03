@@ -1,31 +1,31 @@
----
+﻿---
 id: T-008
-title: pytest Foundation — conftest, Fixtures, Async Test Client, Test Database
-status: Not Started
+title: pytest Foundation â€” conftest, Fixtures, Async Test Client, Test Database
+status: Done
 created: 2026-02-25
-phase: Phase 0 — Foundation
+phase: Phase 0 â€” Foundation
 user_story: cross
 requirements: []
 priority: P1
 depends_on: [T-003, T-004]
 ---
 
-## 📋 Embedded Context
+## ðŸ“‹ Embedded Context
 
-**Stack**: Python 3.12 · FastAPI · SQLAlchemy 2.x async · pytest + httpx · asyncio_mode=auto  
+**Stack**: Python 3.12 Â· FastAPI Â· SQLAlchemy 2.x async Â· pytest + httpx Â· asyncio_mode=auto  
 **Test org**: `backend/tests/unit/` and `backend/tests/integration/`; colocated conftest files  
-**Coverage gate**: ≥80% line coverage (enforced in CI via `--cov-fail-under=80`)  
+**Coverage gate**: â‰¥80% line coverage (enforced in CI via `--cov-fail-under=80`)  
 **Pattern**: Async fixtures with `pytest-asyncio`; `anyio_backend = "asyncio"`; isolated test DB per session
 
 ---
 
-## 🎯 Objective
+## ðŸŽ¯ Objective
 
 Create the pytest foundation: root `conftest.py` with async test client, isolated test database (via `alembic upgrade head` on a temp schema), override DI container for test services, and shared fixtures (admin user, regular user, auth headers).
 
 ---
 
-## 🛠️ Files to Create
+## ðŸ› ï¸ Files to Create
 
 | Path | Purpose |
 |------|---------|
@@ -126,7 +126,7 @@ async def admin_headers(client: AsyncClient, admin_user):
 
 ---
 
-## 🔌 Wiring Checklist
+## ðŸ”Œ Wiring Checklist
 
 - [ ] `pyproject.toml` has `[tool.pytest.ini_options] asyncio_mode = "auto"`
 - [ ] Test DB URL points to `test_knowledge_agent` database (not `knowledge_agent`)
@@ -136,11 +136,11 @@ async def admin_headers(client: AsyncClient, admin_user):
 
 ---
 
-## ✅ Verification
+## âœ… Verification
 
 ```bash
 cd backend
-# Run with no tests yet — verify conftest loads without errors
+# Run with no tests yet â€” verify conftest loads without errors
 python -m pytest tests/ --collect-only 2>&1 | grep "ERROR" | wc -l
 # Expected: 0 (no collection errors)
 
@@ -151,7 +151,7 @@ python -m pytest tests/ -k "not test_" --setup-only 2>&1 | tail -5
 
 ---
 
-## 📝 Completion Log
+## ðŸ“ Completion Log
 
 - [ ] Code implemented
 - [ ] Tests passed

@@ -1,11 +1,13 @@
-# T-052 — DocumentRepository & ChunkRepository
+﻿# T-052 â€” DocumentRepository & ChunkRepository
+
+**Status:** Done
 
 ## Context
 ```
-Python 3.12 | FastAPI · SQLAlchemy 2.x (async) · Pydantic v2 · dependency-injector
-PostgreSQL 16 + pgvector · HNSW (m=16, ef_construction=64)
-UUID PKs · soft-delete on documents · Alembic migrations
-RFC 7807 Problem Details — all non-2xx API responses
+Python 3.12 | FastAPI Â· SQLAlchemy 2.x (async) Â· Pydantic v2 Â· dependency-injector
+PostgreSQL 16 + pgvector Â· HNSW (m=16, ef_construction=64)
+UUID PKs Â· soft-delete on documents Â· Alembic migrations
+RFC 7807 Problem Details â€” all non-2xx API responses
 ```
 
 ## Goal
@@ -15,7 +17,7 @@ layer, and vector similarity search encapsulated behind a clean repository inter
 
 ---
 
-## File 1 — `app/repositories/document_repository.py`
+## File 1 â€” `app/repositories/document_repository.py`
 
 ```python
 """CRUD repository for the Document ORM model."""
@@ -33,7 +35,7 @@ from app.models.document import Document
 class DocumentRepository:
     """
     All Document database access is funnelled through this repository.
-    Soft-delete: callers call `soft_delete()` — hard DELETE is only used
+    Soft-delete: callers call `soft_delete()` â€” hard DELETE is only used
     by cascade when the parent Source is deleted.
     """
 
@@ -119,7 +121,7 @@ class DocumentRepository:
 
 ---
 
-## File 2 — `app/repositories/chunk_repository.py`
+## File 2 â€” `app/repositories/chunk_repository.py`
 
 ```python
 """CRUD + vector-search repository for the Chunk ORM model."""
@@ -137,7 +139,7 @@ from app.models.chunk import EMBEDDING_DIM, Chunk
 
 class ChunkRepository:
     """
-    All Chunk database access — including HNSW cosine similarity search —
+    All Chunk database access â€” including HNSW cosine similarity search â€”
     is encapsulated here.  Service layer never touches raw SQL.
     """
 
@@ -248,7 +250,7 @@ class ChunkRepository:
 
 ---
 
-## File 3 — `app/containers.py` (patch)
+## File 3 â€” `app/containers.py` (patch)
 
 Register both repositories as `Factory` providers:
 
@@ -274,7 +276,7 @@ chunk_repository = providers.Factory(
 
 1. `DocumentRepository` is importable from `app.repositories.document_repository`.
 2. `ChunkRepository` is importable from `app.repositories.chunk_repository`.
-3. `similarity_search` raises `ValueError` when `query_embedding` length ≠ 1536.
+3. `similarity_search` raises `ValueError` when `query_embedding` length â‰  1536.
 4. `similarity_search` issues `SET LOCAL hnsw.ef_search = N` before the SELECT.
 5. `bulk_create` on `ChunkRepository` inserts multiple rows in one flush.
 6. `soft_delete_by_source` on `DocumentRepository` updates `is_active=False` and

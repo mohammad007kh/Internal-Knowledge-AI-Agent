@@ -1,11 +1,12 @@
-# T-037 — Router Wiring and Container Registration (Phase 1 Completion)
+﻿# T-037 â€” Router Wiring and Container Registration (Phase 1 Completion)
 
 ## Metadata
 | Field | Value |
 |---|---|
+| **Status** | Done |
 | **ID** | T-037 |
-| **Title** | Router Wiring and DI Container Registration — wire all Phase 1 services into the app |
-| **Phase** | 1 — Authentication & User Management |
+| **Title** | Router Wiring and DI Container Registration â€” wire all Phase 1 services into the app |
+| **Phase** | 1 â€” Authentication & User Management |
 | **Domain** | Backend / Infrastructure |
 | **Depends on** | T-004, T-015, T-019, T-022, T-023, T-024, T-025, T-026, T-027, T-028, T-029 |
 | **Blocks** | T-039 |
@@ -15,14 +16,14 @@
 | Standard | Value |
 |---|---|
 | Python | 3.12 |
-| Backend | FastAPI · SQLAlchemy 2.x · Pydantic v2 · dependency-injector |
+| Backend | FastAPI Â· SQLAlchemy 2.x Â· Pydantic v2 Â· dependency-injector |
 | DI | dependency-injector IoC container (constructor injection) |
-| Error Format | RFC 7807 Problem Details — all non-2xx API responses |
-| Logging | Structured · INFO level · X-Request-ID correlation |
+| Error Format | RFC 7807 Problem Details â€” all non-2xx API responses |
+| Logging | Structured Â· INFO level Â· X-Request-ID correlation |
 | Infrastructure | Docker Compose 9 services |
 
 ### Domain Rules
-- All services are wired via the IoC container — never instantiate services directly in routes
+- All services are wired via the IoC container â€” never instantiate services directly in routes
 - bootstrap_admin executes once on startup only if zero users exist (FR-024)
 
 ---
@@ -36,7 +37,7 @@ This ties together all the individually-built pieces into a running application.
 
 ## Deliverables
 
-### 1. `app/core/container.py` — complete Phase 1 container
+### 1. `app/core/container.py` â€” complete Phase 1 container
 ```python
 from dependency_injector import containers, providers
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -59,12 +60,12 @@ class Container(containers.DeclarativeContainer):
     fresh instance wired with the correct request-scoped DB session.
     """
 
-    # ── Infrastructure ───────────────────────────────────────────────────────
+    # â”€â”€ Infrastructure â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     config = providers.Configuration()
 
     db_session = providers.Resource(get_db)   # FastAPI overrides this per-request
 
-    # ── Repositories ─────────────────────────────────────────────────────────
+    # â”€â”€ Repositories â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     user_repository = providers.Factory(
         UserRepository,
         session=db_session,
@@ -75,7 +76,7 @@ class Container(containers.DeclarativeContainer):
         session=db_session,
     )
 
-    # ── Services ─────────────────────────────────────────────────────────────
+    # â”€â”€ Services â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     password_service = providers.Singleton(PasswordService)
 
     email_service = providers.Singleton(EmailService)
@@ -96,22 +97,22 @@ class Container(containers.DeclarativeContainer):
 
 ---
 
-### 2. `app/core/deps.py` — container-aware provider functions
+### 2. `app/core/deps.py` â€” container-aware provider functions
 Add module-level provider functions that FastAPI `Depends()` calls can reference.
 These bridge the IoC container to FastAPI's dependency system:
 
 ```python
-# app/core/deps.py  — additions to T-027 base
+# app/core/deps.py  â€” additions to T-027 base
 
 from app.core.container import Container
 
-# Container instance — initialised once per process in create_app()
+# Container instance â€” initialised once per process in create_app()
 _container: Container | None = None
 
 
 def get_container() -> Container:
     if _container is None:
-        raise RuntimeError("Container not initialised — call init_container() first")
+        raise RuntimeError("Container not initialised â€” call init_container() first")
     return _container
 
 
@@ -127,7 +128,7 @@ def init_container() -> Container:
     return _container
 
 
-# ── Convenience provider functions used in routers ───────────────────────────
+# â”€â”€ Convenience provider functions used in routers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 def get_auth_service():
     return get_container().auth_service()
@@ -143,7 +144,7 @@ def get_email_service():
 
 ---
 
-### 3. `app/main.py` — wire routers + lifespan
+### 3. `app/main.py` â€” wire routers + lifespan
 ```python
 from contextlib import asynccontextmanager
 
@@ -163,11 +164,11 @@ from app.services.bootstrap import bootstrap_admin
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # ── Startup ───────────────────────────────────────────────────────────────
+    # â”€â”€ Startup â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     init_container()
     await bootstrap_admin()
     yield
-    # ── Shutdown (add cleanup here as needed) ────────────────────────────────
+    # â”€â”€ Shutdown (add cleanup here as needed) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 
 def create_app() -> FastAPI:
@@ -179,15 +180,15 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
 
-    # ── Middleware (order matters — outermost first) ──────────────────────────
+    # â”€â”€ Middleware (order matters â€” outermost first) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     app.add_middleware(SecurityHeadersMiddleware)
     app.add_middleware(RateLimitMiddleware)
     app.add_middleware(RequestLoggingMiddleware)
 
-    # ── Exception handlers ───────────────────────────────────────────────────
+    # â”€â”€ Exception handlers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     register_exception_handlers(app)
 
-    # ── Routers ──────────────────────────────────────────────────────────────
+    # â”€â”€ Routers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     V1_PREFIX = "/api/v1"
     app.include_router(health_router, prefix=V1_PREFIX)
     app.include_router(auth_router, prefix=V1_PREFIX)
@@ -198,12 +199,12 @@ def create_app() -> FastAPI:
 
 ---
 
-### 4. `app/api/v1/users.py` — fix import references to use container
+### 4. `app/api/v1/users.py` â€” fix import references to use container
 Update the users router (T-028) to import `get_user_service` / `get_email_service` from
 `app.core.deps` instead of any ad-hoc stubs:
 
 ```python
-# app/api/v1/users.py  — corrected imports
+# app/api/v1/users.py  â€” corrected imports
 
 from app.core.deps import get_user_service, get_email_service, require_role
 from app.models.user import UserRole
@@ -215,9 +216,9 @@ from app.models.user import UserRole
 
 ---
 
-### 5. `app/api/v1/auth.py` — fix import references
+### 5. `app/api/v1/auth.py` â€” fix import references
 ```python
-# app/api/v1/auth.py  — corrected imports (T-026 base)
+# app/api/v1/auth.py  â€” corrected imports (T-026 base)
 
 from app.core.deps import get_auth_service, get_email_service, require_authenticated
 ```

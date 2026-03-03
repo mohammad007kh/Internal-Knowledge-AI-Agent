@@ -1,6 +1,8 @@
-# T-086 · Chat E2E Playwright Tests
+﻿# T-086 Â· Chat E2E Playwright Tests
 
-**Phase:** 5 — Chat Frontend  
+**Status:** Done
+
+**Phase:** 5 â€” Chat Frontend  
 **Depends on:** T-081, T-082, T-083, T-084, T-085  
 **Blocks:** T-090 (prod release)
 
@@ -9,23 +11,23 @@
 ## Context
 
 ```
-Python 3.12 | FastAPI · SQLAlchemy 2.x · Pydantic v2 · dependency-injector
-Next.js 15 App Router · shadcn/ui · Tailwind CSS v4
-React Context · TanStack Query v5 · react-hook-form · Zod
-PostgreSQL 16 + pgvector · HNSW m=16 ef_construction=064 · UUID PKs · soft-delete + audit columns
+Python 3.12 | FastAPI Â· SQLAlchemy 2.x Â· Pydantic v2 Â· dependency-injector
+Next.js 15 App Router Â· shadcn/ui Â· Tailwind CSS v4
+React Context Â· TanStack Query v5 Â· react-hook-form Â· Zod
+PostgreSQL 16 + pgvector Â· HNSW m=16 ef_construction=064 Â· UUID PKs Â· soft-delete + audit columns
 Alembic versioned migrations
-Celery + Redis · Beat replicas=1 STRICT
-MinIO · presigned PUT pattern
-JWT 15-min access + 7-day rotating httpOnly refresh cookie · bcrypt · RBAC (admin/user)
+Celery + Redis Â· Beat replicas=1 STRICT
+MinIO Â· presigned PUT pattern
+JWT 15-min access + 7-day rotating httpOnly refresh cookie Â· bcrypt Â· RBAC (admin/user)
 Fernet (connection configs at rest)
-LangGraph 8-node · interrupt() for clarification · SSE streaming
-Langfuse self-hosted · every pipeline run must emit a trace
-RFC 7807 Problem Details — all non-2xx API responses
-Structured logging · INFO level · X-Request-ID correlation
-CORS strict · CSRF SameSite=Strict httpOnly · CSP moderate · rate-limit IP
-Dark mode · responsive · WCAG-AA · no animations · Lucide icons · Sonner toasts
-snake_case vars/files/tables · PascalCase classes · SCREAMING_SNAKE_CASE constants
-pytest + httpx + Playwright · ≥80% coverage
+LangGraph 8-node Â· interrupt() for clarification Â· SSE streaming
+Langfuse self-hosted Â· every pipeline run must emit a trace
+RFC 7807 Problem Details â€” all non-2xx API responses
+Structured logging Â· INFO level Â· X-Request-ID correlation
+CORS strict Â· CSRF SameSite=Strict httpOnly Â· CSP moderate Â· rate-limit IP
+Dark mode Â· responsive Â· WCAG-AA Â· no animations Â· Lucide icons Â· Sonner toasts
+snake_case vars/files/tables Â· PascalCase classes Â· SCREAMING_SNAKE_CASE constants
+pytest + httpx + Playwright Â· â‰¥80% coverage
 Docker Compose 9 services: frontend, backend, worker, beat, db, redis, minio, langfuse, langfuse-db
 ```
 
@@ -180,7 +182,7 @@ export class ChatPage {
 import { test, expect } from "@playwright/test";
 import { ChatPage } from "./pages/ChatPage";
 
-test.describe("Chat – full user journey", () => {
+test.describe("Chat â€“ full user journey", () => {
   let chat: ChatPage;
 
   test.beforeEach(async ({ page }) => {
@@ -188,7 +190,7 @@ test.describe("Chat – full user journey", () => {
     await chat.goto();
   });
 
-  // ── 1. Create & rename session ──────────────────────────────────────────
+  // â”€â”€ 1. Create & rename session â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   test("creates a new session and renames it", async ({ page }) => {
     await chat.createSession();
@@ -206,7 +208,7 @@ test.describe("Chat – full user journey", () => {
     ).toBeVisible();
   });
 
-  // ── 2. Send a message and observe streaming ──────────────────────────────
+  // â”€â”€ 2. Send a message and observe streaming â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   test("sends a message and sees streamed response", async ({ page }) => {
     // Create a session first
@@ -236,7 +238,7 @@ test.describe("Chat – full user journey", () => {
     await expect(messages).toHaveCount(2, { timeout: 10_000 });
   });
 
-  // ── 3. Citation panel ───────────────────────────────────────────────────
+  // â”€â”€ 3. Citation panel â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   test("opens citation panel on citation button click", async ({ page }) => {
     // Use a seeded session with a known assistant message that has citations
@@ -284,7 +286,7 @@ test.describe("Chat – full user journey", () => {
     ).toHaveAttribute("aria-hidden", "true");
   });
 
-  // ── 4. Source selector ──────────────────────────────────────────────────
+  // â”€â”€ 4. Source selector â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   test("source selector updates session sources", async ({ page }) => {
     await chat.createSession();
@@ -309,12 +311,12 @@ test.describe("Chat – full user journey", () => {
       // Chip appears below input
       await expect(page.getByRole("list", { name: /selected sources/i })).toBeVisible();
     } else {
-      // No sources available — empty state shown
+      // No sources available â€” empty state shown
       await expect(page.getByText(/no sources available/i)).toBeVisible();
     }
   });
 
-  // ── 5. Feedback thumbs up ──────────────────────────────────────────────
+  // â”€â”€ 5. Feedback thumbs up â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   test("submits thumbs up feedback on assistant message", async ({ page }) => {
     // Find an assistant message
@@ -331,7 +333,7 @@ test.describe("Chat – full user journey", () => {
     await expect(helpfulBtn).toBeDisabled({ timeout: 5_000 });
   });
 
-  // ── 6. Delete session ───────────────────────────────────────────────────
+  // â”€â”€ 6. Delete session â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   test("deletes a session with confirmation", async ({ page }) => {
     // Ensure there's a session to delete
@@ -359,7 +361,7 @@ test.describe("Chat – full user journey", () => {
     await expect(sessionBtn).not.toBeVisible({ timeout: 5_000 });
   });
 
-  // ── 7. Accessibility snapshot ──────────────────────────────────────────
+  // â”€â”€ 7. Accessibility snapshot â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   test("chat page has no critical accessibility violations", async ({ page }) => {
     const { injectAxe, checkA11y } = await import("axe-playwright");

@@ -1,7 +1,9 @@
-# T-094 · Accessibility Audit — WCAG-AA Compliance
+﻿# T-094 Â· Accessibility Audit â€” WCAG-AA Compliance
 
-**Phase:** 9 — Testing, Polish & SC Verification  
-**Depends on:** T-093 (E2E suite in place), full frontend complete (T-080–T-089)  
+**Status:** Done
+
+**Phase:** 9 â€” Testing, Polish & SC Verification  
+**Depends on:** T-093 (E2E suite in place), full frontend complete (T-080â€“T-089)  
 **Blocks:** T-099
 
 ---
@@ -9,23 +11,23 @@
 ## Context
 
 ```
-Python 3.12 | FastAPI · SQLAlchemy 2.x · Pydantic v2 · dependency-injector
-Next.js 15 App Router · shadcn/ui · Tailwind CSS v4
-React Context · TanStack Query v5 · react-hook-form · Zod
-PostgreSQL 16 + pgvector · HNSW m=16 ef_construction=64 · UUID PKs · soft-delete + audit columns
+Python 3.12 | FastAPI Â· SQLAlchemy 2.x Â· Pydantic v2 Â· dependency-injector
+Next.js 15 App Router Â· shadcn/ui Â· Tailwind CSS v4
+React Context Â· TanStack Query v5 Â· react-hook-form Â· Zod
+PostgreSQL 16 + pgvector Â· HNSW m=16 ef_construction=64 Â· UUID PKs Â· soft-delete + audit columns
 Alembic versioned migrations
-Celery + Redis · Beat replicas=1 STRICT
-MinIO · presigned PUT pattern
-JWT 15-min access + 7-day rotating httpOnly refresh cookie · bcrypt · RBAC (admin/user)
+Celery + Redis Â· Beat replicas=1 STRICT
+MinIO Â· presigned PUT pattern
+JWT 15-min access + 7-day rotating httpOnly refresh cookie Â· bcrypt Â· RBAC (admin/user)
 Fernet (connection configs + LLM API keys at rest)
-LangGraph 8-node · interrupt() for clarification · SSE streaming
-Langfuse self-hosted · every pipeline run must emit a trace
-RFC 7807 Problem Details — all non-2xx API responses
-Structured logging · INFO level · X-Request-ID correlation
-CORS strict · CSRF SameSite=Strict httpOnly · CSP moderate · rate-limit IP
-Dark mode · responsive · WCAG-AA · no animations · Lucide icons · Sonner toasts
-snake_case vars/files/tables · PascalCase classes · SCREAMING_SNAKE_CASE constants
-pytest + httpx + Playwright · ≥80% coverage
+LangGraph 8-node Â· interrupt() for clarification Â· SSE streaming
+Langfuse self-hosted Â· every pipeline run must emit a trace
+RFC 7807 Problem Details â€” all non-2xx API responses
+Structured logging Â· INFO level Â· X-Request-ID correlation
+CORS strict Â· CSRF SameSite=Strict httpOnly Â· CSP moderate Â· rate-limit IP
+Dark mode Â· responsive Â· WCAG-AA Â· no animations Â· Lucide icons Â· Sonner toasts
+snake_case vars/files/tables Â· PascalCase classes Â· SCREAMING_SNAKE_CASE constants
+pytest + httpx + Playwright Â· â‰¥80% coverage
 Docker Compose 9 services: frontend, backend, worker, beat, db, redis, minio, langfuse, langfuse-db
 ```
 
@@ -35,10 +37,10 @@ Docker Compose 9 services: frontend, backend, worker, beat, db, redis, minio, la
 
 Verify every page meets **WCAG 2.1 Level AA** across four dimensions:
 
-1. **Automated axe scan** (via `@axe-core/playwright`) — zero critical/serious violations  
-2. **Keyboard navigation** — all interactive elements reachable and operable by keyboard alone  
-3. **Colour contrast** — text meets 4.5 : 1 (normal) and 3 : 1 (large) ratios in both light and dark mode  
-4. **Screen-reader semantics** — ARIA landmarks, roles, labels, live regions
+1. **Automated axe scan** (via `@axe-core/playwright`) â€” zero critical/serious violations  
+2. **Keyboard navigation** â€” all interactive elements reachable and operable by keyboard alone  
+3. **Colour contrast** â€” text meets 4.5 : 1 (normal) and 3 : 1 (large) ratios in both light and dark mode  
+4. **Screen-reader semantics** â€” ARIA landmarks, roles, labels, live regions
 
 File locations:
 
@@ -49,7 +51,7 @@ File locations:
 
 ---
 
-## 1. Automated axe Scan — `tests/e2e/accessibility/axe-scan.spec.ts`
+## 1. Automated axe Scan â€” `tests/e2e/accessibility/axe-scan.spec.ts`
 
 ```typescript
 import { test, expect } from "@playwright/test";
@@ -81,7 +83,7 @@ async function signInUser(page: import("@playwright/test").Page) {
 }
 
 for (const { path, name, requiresAuth, requiresAdmin } of PAGES_TO_SCAN) {
-  test(`axe: ${name} (${path}) — zero critical/serious violations`, async ({ page }) => {
+  test(`axe: ${name} (${path}) â€” zero critical/serious violations`, async ({ page }) => {
     if (requiresAdmin) {
       await signInAdmin(page);
     } else if (requiresAuth) {
@@ -115,13 +117,13 @@ for (const { path, name, requiresAuth, requiresAdmin } of PAGES_TO_SCAN) {
 
 ---
 
-## 2. Keyboard Navigation Tests — `tests/e2e/accessibility/keyboard-nav.spec.ts`
+## 2. Keyboard Navigation Tests â€” `tests/e2e/accessibility/keyboard-nav.spec.ts`
 
 ```typescript
 import { test, expect } from "./auth.fixture";
 
 test.describe("Keyboard navigation", () => {
-  test("login form — all fields and button reachable via Tab", async ({ page }) => {
+  test("login form â€” all fields and button reachable via Tab", async ({ page }) => {
     await page.goto("/login");
 
     // Tab through interactive elements in order
@@ -141,7 +143,7 @@ test.describe("Keyboard navigation", () => {
     await expect(page.getByRole("alert")).toBeVisible();
   });
 
-  test("admin modal — focus trapped inside dialog", async ({ adminPage: page }) => {
+  test("admin modal â€” focus trapped inside dialog", async ({ adminPage: page }) => {
     await page.goto("/admin/users");
     await page.getByRole("button", { name: /invite user/i }).click();
     const dialog = page.getByRole("dialog");
@@ -165,7 +167,7 @@ test.describe("Keyboard navigation", () => {
     }
   });
 
-  test("chat input — Enter sends; ESC does nothing dangerous", async ({
+  test("chat input â€” Enter sends; ESC does nothing dangerous", async ({
     userPage: page,
   }) => {
     await page.goto("/chat");
@@ -195,7 +197,7 @@ test.describe("Keyboard navigation", () => {
     // Skip-link optional if layout uses landmark nav; just ensure no error
   });
 
-  test("source wizard — Stepper steps reachable via Tab+Space", async ({
+  test("source wizard â€” Stepper steps reachable via Tab+Space", async ({
     adminPage: page,
   }) => {
     await page.goto("/admin/sources/new");
@@ -208,7 +210,7 @@ test.describe("Keyboard navigation", () => {
 
 ---
 
-## 3. ARIA Labels Tests — `tests/e2e/accessibility/aria-labels.spec.ts`
+## 3. ARIA Labels Tests â€” `tests/e2e/accessibility/aria-labels.spec.ts`
 
 ```typescript
 import { test, expect } from "./auth.fixture";
@@ -294,7 +296,7 @@ test.describe("ARIA labels and semantics", () => {
 
 ---
 
-## 4. Colour Contrast Verification — `tests/e2e/accessibility/colour-contrast.spec.ts`
+## 4. Colour Contrast Verification â€” `tests/e2e/accessibility/colour-contrast.spec.ts`
 
 ```typescript
 import { test, expect } from "./auth.fixture";
@@ -319,7 +321,7 @@ async function setTheme(page: import("@playwright/test").Page, theme: "light" | 
 
 for (const { path, auth } of PAGES) {
   for (const theme of ["light", "dark"] as const) {
-    test(`contrast: ${path} in ${theme} mode — no violation`, async ({ page, browser }) => {
+    test(`contrast: ${path} in ${theme} mode â€” no violation`, async ({ page, browser }) => {
       if (auth === "admin") {
         const ctx = await browser.newContext();
         const p = await ctx.newPage();
@@ -370,8 +372,8 @@ for (const { path, auth } of PAGES) {
 | Keyboard | 2.1.1 | Every interactive element reachable by Tab |
 | No keyboard trap | 2.1.2 | Focus can move away from any component |
 | Focus visible | 2.4.7 | Focus indicator visible (min 2 px outline) |
-| Contrast (text) | 1.4.3 | ≥ 4.5 : 1 for normal text |
-| Contrast (large) | 1.4.3 | ≥ 3 : 1 for text ≥ 18 pt or bold ≥ 14 pt |
+| Contrast (text) | 1.4.3 | â‰¥ 4.5 : 1 for normal text |
+| Contrast (large) | 1.4.3 | â‰¥ 3 : 1 for text â‰¥ 18 pt or bold â‰¥ 14 pt |
 | Name, Role, Value | 4.1.2 | All UI components have accessible name + role |
 | Status messages | 4.1.3 | Status changes announced via `aria-live` |
 
@@ -379,34 +381,34 @@ for (const { path, auth } of PAGES) {
 
 ```tsx
 // 1. Icon button without accessible name
-// ❌ Before:
+// âŒ Before:
 <button onClick={close}><X /></button>
-// ✅ After:
+// âœ… After:
 <button onClick={close} aria-label="Close dialog"><X aria-hidden="true" /></button>
 
 // 2. Loading state not announced
-// ❌ Before:
+// âŒ Before:
 <div className="animate-pulse h-8 w-48 bg-muted rounded" />
-// ✅ After:
+// âœ… After:
 <div
   className="h-8 w-48 bg-muted rounded"
   role="status"
-  aria-label="Loading…"
+  aria-label="Loadingâ€¦"
 />
 
 // 3. Error messages not associated with inputs
-// ❌ Before:
+// âŒ Before:
 <input id="email" type="email" />
 <p className="text-destructive">Invalid email</p>
-// ✅ After:
+// âœ… After:
 <input id="email" type="email" aria-describedby="email-error" aria-invalid="true" />
 <p id="email-error" className="text-destructive" role="alert">Invalid email</p>
 
 // 4. Colour: ensure CSS variables meet contrast requirements
 // tailwind.config.ts (dark mode):
-// --background: 222.2 84% 4.9%;    → very dark blue (background)
-// --foreground: 210 40% 98%;        → near-white (text)
-// Verify: oklch luminance ratio ≥ 4.5:1 (use https://www.siegemedia.com/contrast-ratio)
+// --background: 222.2 84% 4.9%;    â†’ very dark blue (background)
+// --foreground: 210 40% 98%;        â†’ near-white (text)
+// Verify: oklch luminance ratio â‰¥ 4.5:1 (use https://www.siegemedia.com/contrast-ratio)
 ```
 
 ---

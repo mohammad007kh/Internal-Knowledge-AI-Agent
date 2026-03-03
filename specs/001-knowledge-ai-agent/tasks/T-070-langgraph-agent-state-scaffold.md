@@ -1,26 +1,28 @@
-# T-070 — LangGraph AgentState + Chat ORM + Pipeline Scaffold
+﻿# T-070 â€” LangGraph AgentState + Chat ORM + Pipeline Scaffold
+
+**Status:** Done
 
 ## Context
 ```
-Python 3.12 | FastAPI · SQLAlchemy 2.x · Pydantic v2 · dependency-injector
-PostgreSQL 16 + pgvector · UUID PKs · soft-delete + audit columns
-Alembic versioned migrations (down_revision chain: 0008 → 0009)
-LangGraph 8-node · interrupt() for clarification · SSE streaming
-Langfuse self-hosted · every pipeline run must emit a trace
-JWT 15-min access + 7-day rotating httpOnly refresh cookie · RBAC (admin/user)
-snake_case vars/files/tables · PascalCase classes · SCREAMING_SNAKE_CASE constants
+Python 3.12 | FastAPI Â· SQLAlchemy 2.x Â· Pydantic v2 Â· dependency-injector
+PostgreSQL 16 + pgvector Â· UUID PKs Â· soft-delete + audit columns
+Alembic versioned migrations (down_revision chain: 0008 â†’ 0009)
+LangGraph 8-node Â· interrupt() for clarification Â· SSE streaming
+Langfuse self-hosted Â· every pipeline run must emit a trace
+JWT 15-min access + 7-day rotating httpOnly refresh cookie Â· RBAC (admin/user)
+snake_case vars/files/tables Â· PascalCase classes Â· SCREAMING_SNAKE_CASE constants
 ```
 
 ## Goal
 Establish the **Phase 4 LangGraph foundation**:
 
-1. `AgentState` TypedDict — shared state bag that flows through all 8 nodes  
+1. `AgentState` TypedDict â€” shared state bag that flows through all 8 nodes  
 2. `ChatSession` + `ChatMessage` ORM models  
 3. Alembic migration `0009_chat.py`  
 4. Empty `StateGraph` scaffold with 8 named node stubs  
 5. DI container registrations for chat repositories  
 
-No LLM calls yet — this task is pure wiring/scaffolding.
+No LLM calls yet â€” this task is pure wiring/scaffolding.
 
 ---
 
@@ -49,7 +51,7 @@ No LLM calls yet — this task is pure wiring/scaffolding.
 
 ```python
 # app/agent/state.py
-"""AgentState — shared state bag for the LangGraph pipeline."""
+"""AgentState â€” shared state bag for the LangGraph pipeline."""
 from __future__ import annotations
 
 from typing import Annotated, Optional
@@ -66,7 +68,7 @@ class AgentState(TypedDict):
     ------
     messages:
         Full conversation history (role + content).  ``add_messages``
-        reducer appends rather than overwrites — never set this field
+        reducer appends rather than overwrites â€” never set this field
         directly, let LangGraph manage it.
     source_ids:
         Allowlist of source UUIDs the current user may access (FR-019).
@@ -212,7 +214,7 @@ class ChatMessage(Base):
 
 ---
 
-## 4  `app/models/__init__.py` — patch
+## 4  `app/models/__init__.py` â€” patch
 
 Add to the existing `__init__.py` imports:
 
@@ -306,7 +308,7 @@ def downgrade() -> None:
 
 ```python
 # app/agent/pipeline.py
-"""LangGraph StateGraph scaffold — 8-node pipeline.
+"""LangGraph StateGraph scaffold â€” 8-node pipeline.
 
 Node stubs are empty coroutines that return an unchanged state dict.
 Each node is replaced by its real implementation in subsequent tasks:
@@ -326,7 +328,7 @@ from app.agent.state import AgentState
 logger = logging.getLogger(__name__)
 
 
-# ── Node stubs ────────────────────────────────────────────────────────────
+# â”€â”€ Node stubs â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 
 async def load_history(state: AgentState) -> dict:
@@ -378,7 +380,7 @@ def route(state: AgentState) -> str:
     return "retrieve_context"
 
 
-# ── Graph assembly ─────────────────────────────────────────────────────────
+# â”€â”€ Graph assembly â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 
 def build_pipeline() -> StateGraph:
@@ -386,23 +388,23 @@ def build_pipeline() -> StateGraph:
 
     Topology
     --------
-    START → load_history → check_clarification
-                                ↓ (route)
-                    ┌─────────────────────────────┐
-                    │ requires_clarification=True  │
-                    │      handle_clarification    │
-                    │             ↓                │
-                    │           END                │
-                    └─────────────────────────────┘
-                    ┌────────────────────┐
-                    │ normal path        │
-                    │  retrieve_context  │
-                    │  generate_response │
-                    │  format_response   │
-                    │  save_message      │
-                    │       ↓           │
-                    │      END          │
-                    └────────────────────┘
+    START â†’ load_history â†’ check_clarification
+                                â†“ (route)
+                    â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”
+                    â”‚ requires_clarification=True  â”‚
+                    â”‚      handle_clarification    â”‚
+                    â”‚             â†“                â”‚
+                    â”‚           END                â”‚
+                    â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜
+                    â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”
+                    â”‚ normal path        â”‚
+                    â”‚  retrieve_context  â”‚
+                    â”‚  generate_response â”‚
+                    â”‚  format_response   â”‚
+                    â”‚  save_message      â”‚
+                    â”‚       â†“           â”‚
+                    â”‚      END          â”‚
+                    â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜
     """
     workflow = StateGraph(AgentState)
 
@@ -446,7 +448,7 @@ def get_pipeline() -> StateGraph:
 
 ---
 
-## 7  Chat Repositories — `app/repositories/chat_repository.py`
+## 7  Chat Repositories â€” `app/repositories/chat_repository.py`
 
 ```python
 # app/repositories/chat_repository.py
@@ -563,7 +565,7 @@ class ChatMessageRepository(BaseRepository[ChatMessage]):
 
 ---
 
-## 8  `containers.py` — patch
+## 8  `containers.py` â€” patch
 
 ```python
 # Inside ApplicationContainer class, after sync_job_service provider:
@@ -586,7 +588,7 @@ chat_message_repository = providers.Factory(
 
 ---
 
-## 9  `requirements.txt` — additions
+## 9  `requirements.txt` â€” additions
 
 ```
 langgraph>=0.1.0

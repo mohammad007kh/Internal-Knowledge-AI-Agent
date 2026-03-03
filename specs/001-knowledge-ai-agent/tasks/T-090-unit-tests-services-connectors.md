@@ -1,6 +1,8 @@
-# T-090 · Unit Tests — Services & Connectors
+﻿# T-090 Â· Unit Tests â€” Services & Connectors
 
-**Phase:** 9 — Testing, Polish & SC Verification  
+**Status:** Done
+
+**Phase:** 9 â€” Testing, Polish & SC Verification  
 **Depends on:** T-089 (all production code complete)  
 **Blocks:** T-099
 
@@ -9,23 +11,23 @@
 ## Context
 
 ```
-Python 3.12 | FastAPI · SQLAlchemy 2.x · Pydantic v2 · dependency-injector
-Next.js 15 App Router · shadcn/ui · Tailwind CSS v4
-React Context · TanStack Query v5 · react-hook-form · Zod
-PostgreSQL 16 + pgvector · HNSW m=16 ef_construction=64 · UUID PKs · soft-delete + audit columns
+Python 3.12 | FastAPI Â· SQLAlchemy 2.x Â· Pydantic v2 Â· dependency-injector
+Next.js 15 App Router Â· shadcn/ui Â· Tailwind CSS v4
+React Context Â· TanStack Query v5 Â· react-hook-form Â· Zod
+PostgreSQL 16 + pgvector Â· HNSW m=16 ef_construction=64 Â· UUID PKs Â· soft-delete + audit columns
 Alembic versioned migrations
-Celery + Redis · Beat replicas=1 STRICT
-MinIO · presigned PUT pattern
-JWT 15-min access + 7-day rotating httpOnly refresh cookie · bcrypt · RBAC (admin/user)
+Celery + Redis Â· Beat replicas=1 STRICT
+MinIO Â· presigned PUT pattern
+JWT 15-min access + 7-day rotating httpOnly refresh cookie Â· bcrypt Â· RBAC (admin/user)
 Fernet (connection configs + LLM API keys at rest)
-LangGraph 8-node · interrupt() for clarification · SSE streaming
-Langfuse self-hosted · every pipeline run must emit a trace
-RFC 7807 Problem Details — all non-2xx API responses
-Structured logging · INFO level · X-Request-ID correlation
-CORS strict · CSRF SameSite=Strict httpOnly · CSP moderate · rate-limit IP
-Dark mode · responsive · WCAG-AA · no animations · Lucide icons · Sonner toasts
-snake_case vars/files/tables · PascalCase classes · SCREAMING_SNAKE_CASE constants
-pytest + httpx + Playwright · ≥80% coverage
+LangGraph 8-node Â· interrupt() for clarification Â· SSE streaming
+Langfuse self-hosted Â· every pipeline run must emit a trace
+RFC 7807 Problem Details â€” all non-2xx API responses
+Structured logging Â· INFO level Â· X-Request-ID correlation
+CORS strict Â· CSRF SameSite=Strict httpOnly Â· CSP moderate Â· rate-limit IP
+Dark mode Â· responsive Â· WCAG-AA Â· no animations Â· Lucide icons Â· Sonner toasts
+snake_case vars/files/tables Â· PascalCase classes Â· SCREAMING_SNAKE_CASE constants
+pytest + httpx + Playwright Â· â‰¥80% coverage
 Docker Compose 9 services: frontend, backend, worker, beat, db, redis, minio, langfuse, langfuse-db
 ```
 
@@ -34,7 +36,7 @@ Docker Compose 9 services: frontend, backend, worker, beat, db, redis, minio, la
 ## Objective
 
 Write the complete unit-test suite for all application services and connectors. Every test uses mocked
-repositories and external clients — no database, no network. Target: **≥ 80 % line coverage** across
+repositories and external clients â€” no database, no network. Target: **â‰¥ 80 % line coverage** across
 the `app/services/` and `app/connectors/` trees (excluding `alembic/versions/`).
 
 File locations:
@@ -51,7 +53,7 @@ File locations:
 
 ---
 
-## 1. Shared Fixtures — `tests/unit/conftest.py`
+## 1. Shared Fixtures â€” `tests/unit/conftest.py`
 
 ```python
 # tests/unit/conftest.py
@@ -133,7 +135,7 @@ def mock_guardrail_event_repo() -> AsyncMock:
 
 ---
 
-## 2. Auth Service Tests — `tests/unit/services/test_auth_service.py`
+## 2. Auth Service Tests â€” `tests/unit/services/test_auth_service.py`
 
 ```python
 # tests/unit/services/test_auth_service.py
@@ -213,7 +215,7 @@ class TestPasswordPolicy:
 
 ---
 
-## 3. User Service Tests — `tests/unit/services/test_user_service.py`
+## 3. User Service Tests â€” `tests/unit/services/test_user_service.py`
 
 ```python
 # tests/unit/services/test_user_service.py
@@ -297,7 +299,7 @@ class TestDeactivateUser:
 
 ---
 
-## 4. Source Service Tests — `tests/unit/services/test_source_service.py`
+## 4. Source Service Tests â€” `tests/unit/services/test_source_service.py`
 
 ```python
 # tests/unit/services/test_source_service.py
@@ -365,7 +367,7 @@ class TestSoftDelete:
 
 ---
 
-## 5. Guardrail Service Tests — `tests/unit/services/test_guardrail_service.py`
+## 5. Guardrail Service Tests â€” `tests/unit/services/test_guardrail_service.py`
 
 ```python
 # tests/unit/services/test_guardrail_service.py
@@ -467,7 +469,7 @@ class TestLogEvent:
 
 ---
 
-## 6. LLM Config Service Tests — `tests/unit/services/test_llm_config_service.py`
+## 6. LLM Config Service Tests â€” `tests/unit/services/test_llm_config_service.py`
 
 ```python
 # tests/unit/services/test_llm_config_service.py
@@ -578,7 +580,7 @@ class TestPerSourceOverride:
 
 ---
 
-## 7. Connector Unit Tests — `tests/unit/connectors/test_postgres_connector.py`
+## 7. Connector Unit Tests â€” `tests/unit/connectors/test_postgres_connector.py`
 
 ```python
 # tests/unit/connectors/test_postgres_connector.py
@@ -634,7 +636,7 @@ class TestFetchRows:
 
 ---
 
-## 8. MongoDB Connector Tests — `tests/unit/connectors/test_mongodb_connector.py`
+## 8. MongoDB Connector Tests â€” `tests/unit/connectors/test_mongodb_connector.py`
 
 ```python
 # tests/unit/connectors/test_mongodb_connector.py
@@ -683,7 +685,7 @@ class TestFetchDocuments:
 
 ---
 
-## 9. Document Connector Tests — `tests/unit/connectors/test_document_connector.py`
+## 9. Document Connector Tests â€” `tests/unit/connectors/test_document_connector.py`
 
 ```python
 # tests/unit/connectors/test_document_connector.py
@@ -711,7 +713,7 @@ class TestValidate:
             connector.validate_file("archive.zip", size_bytes=1024)
 
     def test_file_over_limit_raises(self, connector):
-        # 51 MB — over default 50 MB limit
+        # 51 MB â€” over default 50 MB limit
         with pytest.raises(FileSizeLimitError):
             connector.validate_file("huge.pdf", size_bytes=51 * 1024 * 1024)
 
@@ -762,7 +764,7 @@ omit = [
 ## Definition of Done
 
 - [ ] All 9 test files exist and pass with `pytest tests/unit/`
-- [ ] `pytest --cov` reports ≥ 80 % coverage on `app/services/` and `app/connectors/`
+- [ ] `pytest --cov` reports â‰¥ 80 % coverage on `app/services/` and `app/connectors/`
 - [ ] No test imports a real database connection or makes a network call
 - [ ] `validate_password_policy` parametrized tests all pass
 - [ ] FR-028 baseline jailbreak detection test passes with 0 policies

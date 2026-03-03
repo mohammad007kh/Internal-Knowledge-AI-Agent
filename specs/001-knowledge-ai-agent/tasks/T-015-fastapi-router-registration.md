@@ -1,9 +1,9 @@
----
+﻿---
 id: T-015
 title: FastAPI v1 Router Registration Pattern + Main.py Wiring
-status: Not Started
+status: Done
 created: 2026-02-25
-phase: Phase 0 — Foundation
+phase: Phase 0 â€” Foundation
 user_story: cross
 requirements: []
 priority: P1
@@ -33,9 +33,9 @@ Establish the canonical router-registration pattern so every new API route added
 
 | Path | Action |
 |------|--------|
-| `backend/src/api/v1/router.py` | Create — aggregates all v1 sub-routers |
-| `backend/src/api/v1/ping.py` | Create — stub endpoint for pattern verification |
-| `backend/src/main.py` | Update — include api_v1_router |
+| `backend/src/api/v1/router.py` | Create â€” aggregates all v1 sub-routers |
+| `backend/src/api/v1/ping.py` | Create â€” stub endpoint for pattern verification |
+| `backend/src/main.py` | Update â€” include api_v1_router |
 
 ---
 
@@ -68,7 +68,7 @@ router = APIRouter()
 
 @router.get("")
 async def ping():
-    """Verification endpoint — confirms v1 router is wired."""
+    """Verification endpoint â€” confirms v1 router is wired."""
     return {"ping": "pong", "api_version": "v1"}
 ```
 
@@ -105,13 +105,13 @@ def create_app() -> FastAPI:
         openapi_url="/openapi.json",
     )
 
-    # ── Exception handlers (before middleware + routers) ──
+    # â”€â”€ Exception handlers (before middleware + routers) â”€â”€
     register_exception_handlers(app)
 
-    # ── Middleware ──
+    # â”€â”€ Middleware â”€â”€
     app.add_middleware(LoggingMiddleware)
 
-    # ── Routes ──
+    # â”€â”€ Routes â”€â”€
     app.include_router(health_router, tags=["health"])
     app.include_router(api_v1_router, prefix="/api/v1")
 
@@ -147,10 +147,10 @@ curl -s http://localhost:8000/api/v1/does-not-exist | python -m json.tool
 
 ---
 
-## 📝 Completion Log
+## ðŸ“ Completion Log
 
 - [ ] Code implemented
-- [ ] `GET /api/v1/ping` → `{"ping":"pong"}`
-- [ ] `GET /api/v1/unknown` → RFC 7807 404
+- [ ] `GET /api/v1/ping` â†’ `{"ping":"pong"}`
+- [ ] `GET /api/v1/unknown` â†’ RFC 7807 404
 - [ ] Linter passed
 - [ ] All future router stubs added as comments to `router.py`

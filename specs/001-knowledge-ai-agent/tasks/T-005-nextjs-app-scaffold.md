@@ -1,50 +1,50 @@
----
+﻿---
 id: T-005
-title: Next.js 15 App Scaffold — App Router, shadcn/ui, Tailwind, TanStack Query Provider
-status: Not Started
+title: Next.js 15 App Scaffold â€” App Router, shadcn/ui, Tailwind, TanStack Query Provider
+status: Done
 created: 2026-02-25
-phase: Phase 0 — Foundation
+phase: Phase 0 â€” Foundation
 user_story: cross
 requirements: []
 ---
 
-## 📋 Embedded Context (READ THIS FIRST)
+## ðŸ“‹ Embedded Context (READ THIS FIRST)
 
 ### Project Standards
 | Standard | Value |
 |---|---|
-| Frontend | Next.js 15 App Router · shadcn/ui · Tailwind CSS v4 |
-| State | React Context · TanStack Query v5 |
+| Frontend | Next.js 15 App Router Â· shadcn/ui Â· Tailwind CSS v4 |
+| State | React Context Â· TanStack Query v5 |
 | Forms | react-hook-form + Zod |
-| UI | Dark mode · responsive · WCAG-AA · no animations · Lucide icons · Sonner toasts |
-| Naming | kebab-case component files · PascalCase component names |
-| TypeScript | strict mode · `@/` path alias |
+| UI | Dark mode Â· responsive Â· WCAG-AA Â· no animations Â· Lucide icons Â· Sonner toasts |
+| Naming | kebab-case component files Â· PascalCase component names |
+| TypeScript | strict mode Â· `@/` path alias |
 | Routing | next-router (App Router file-system based) |
 
 ### Domain Rules
 - All user-facing errors use RFC 7807 format when returned from API; frontend shows user-friendly messages
 - Route groups: `(auth)` for unauthenticated pages, `(dashboard)` for authenticated
-- All pages in `(dashboard)` require valid auth — enforced via middleware
+- All pages in `(dashboard)` require valid auth â€” enforced via middleware
 - Dark mode toggle uses `next-themes`
 
 ### Feature Summary
 Next.js 15 App Router scaffold with proper provider hierarchy, route groups, shadcn/ui initialization, and a global layout that wraps all pages with TanStack Query provider, Sonner toaster, and dark mode support.
 
 ### Gate Criteria
-- `cd frontend && npx next build` — zero TypeScript or build errors
-- `cd frontend && npx tsc --noEmit` — zero type errors
+- `cd frontend && npx next build` â€” zero TypeScript or build errors
+- `cd frontend && npx tsc --noEmit` â€” zero type errors
 - `localhost:3000` renders root layout without React errors
 - Dark mode toggle works
 
 ---
 
-## 🎯 Objective
+## ðŸŽ¯ Objective
 
 Initialize the Next.js 15 frontend with App Router, configure Tailwind CSS v4, install and initialize shadcn/ui, set up TanStack Query v5 provider, wrap app in Sonner toaster and theme provider, add `next/middleware.ts` for auth-route protection, and define the `(auth)` and `(dashboard)` route groups.
 
 ---
 
-## 🛠️ Implementation Details
+## ðŸ› ï¸ Implementation Details
 
 ### Files to Create
 
@@ -63,8 +63,8 @@ Initialize the Next.js 15 frontend with App Router, configure Tailwind CSS v4, i
 | `frontend/components.json` | shadcn/ui config |
 
 ### Files to Update
-- `frontend/src/app/globals.css` — import Tailwind, define CSS variables for shadcn
-- `frontend/tailwind.config.ts` — configure dark mode, content paths, shadcn preset
+- `frontend/src/app/globals.css` â€” import Tailwind, define CSS variables for shadcn
+- `frontend/tailwind.config.ts` â€” configure dark mode, content paths, shadcn preset
 
 ### Code / Logic Requirements
 
@@ -154,18 +154,18 @@ npx shadcn@latest add button input label card badge separator toast
 
 ---
 
-## 🔌 Wiring Checklist
+## ðŸ”Œ Wiring Checklist
 
 - [ ] Root layout renders `<Providers>` wrapping `{children}`
 - [ ] Middleware protects all non-public routes
-- [ ] `(auth)` layout renders centered card — no sidebar
+- [ ] `(auth)` layout renders centered card â€” no sidebar
 - [ ] `(dashboard)` layout renders sidebar shell placeholder
 - [ ] `ThemeProvider` and `Toaster` in Providers
 - [ ] `@/` path alias resolves in tsconfig.json
 
 ---
 
-## ✅ Verification
+## âœ… Verification
 
 ```bash
 cd frontend
@@ -189,15 +189,15 @@ curl -s -o /dev/null -w "%{http_code}" http://localhost:3000/chat
 ```
 
 **Success Criteria:**
-- `npx tsc --noEmit` → zero errors
-- `npx next build` → compiles successfully
-- `GET /` → renders root layout
-- `GET /chat` (no cookie) → 307 redirect to `/login`
+- `npx tsc --noEmit` â†’ zero errors
+- `npx next build` â†’ compiles successfully
+- `GET /` â†’ renders root layout
+- `GET /chat` (no cookie) â†’ 307 redirect to `/login`
 - Dark mode toggle cycles light/dark/system
 
 ---
 
-## 📝 Completion Log
+## ðŸ“ Completion Log
 
 - [ ] Code implemented
 - [ ] Tests passed

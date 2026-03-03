@@ -1,29 +1,31 @@
-# T-059 · Source Permissions API Integration Tests + Phase 2 Sign-Off
+﻿# T-059 Â· Source Permissions API Integration Tests + Phase 2 Sign-Off
+
+**Status:** Done
 
 ## Context
 ```
-Python 3.12 | FastAPI · SQLAlchemy 2.x · Pydantic v2 · dependency-injector
-Next.js 15 App Router · shadcn/ui · Tailwind CSS v4
-PostgreSQL 16 + pgvector · UUID PKs · soft-delete + audit columns
-JWT 15-min access + 7-day rotating httpOnly refresh cookie · bcrypt · RBAC (admin/user)
+Python 3.12 | FastAPI Â· SQLAlchemy 2.x Â· Pydantic v2 Â· dependency-injector
+Next.js 15 App Router Â· shadcn/ui Â· Tailwind CSS v4
+PostgreSQL 16 + pgvector Â· UUID PKs Â· soft-delete + audit columns
+JWT 15-min access + 7-day rotating httpOnly refresh cookie Â· bcrypt Â· RBAC (admin/user)
 Fernet (connection configs at rest)
-RFC 7807 Problem Details — all non-2xx API responses
-pytest + httpx + Playwright · ≥80% coverage
+RFC 7807 Problem Details â€” all non-2xx API responses
+pytest + httpx + Playwright Â· â‰¥80% coverage
 Docker Compose 9 services
 ```
 
 ## Goal
 HTTP API-level integration tests for source-permission endpoints using HTTPX async test client
 against a real FastAPI app + PostgreSQL. Completes Phase 2 (Sources & Connectors) and closes
-the T-052–T-059 bucket.
+the T-052â€“T-059 bucket.
 
 ---
 
-## File 1 — `tests/integration/test_source_permissions_api.py`
+## File 1 â€” `tests/integration/test_source_permissions_api.py`
 
 ```python
 """
-Integration tests — Source Permissions API
+Integration tests â€” Source Permissions API
 Routes under test:
   POST   /api/v1/sources/{source_id}/permissions
   DELETE /api/v1/sources/{source_id}/permissions/{user_id}
@@ -109,14 +111,14 @@ async def _make_admin(db_session) -> User:
 
 
 # ---------------------------------------------------------------------------
-# Tests — POST /sources/{id}/permissions
+# Tests â€” POST /sources/{id}/permissions
 # ---------------------------------------------------------------------------
 
 @pytest.mark.asyncio
 async def test_grant_permission_admin_201(
     async_client: AsyncClient, db_session
 ) -> None:
-    """Admin can grant a user access to a source → 201 Created."""
+    """Admin can grant a user access to a source â†’ 201 Created."""
     admin = await _make_admin(db_session)
     user = await _make_user(db_session)
     src = await _make_source(db_session, owner_id=admin.id)
@@ -137,7 +139,7 @@ async def test_grant_permission_admin_201(
 async def test_grant_permission_duplicate_409(
     async_client: AsyncClient, db_session
 ) -> None:
-    """Granting the same permission twice → 409 Conflict (RFC 7807)."""
+    """Granting the same permission twice â†’ 409 Conflict (RFC 7807)."""
     admin = await _make_admin(db_session)
     user = await _make_user(db_session)
     src = await _make_source(db_session, owner_id=admin.id)
@@ -166,7 +168,7 @@ async def test_grant_permission_duplicate_409(
 async def test_grant_permission_non_admin_403(
     async_client: AsyncClient, db_session
 ) -> None:
-    """Non-admin user attempting to grant permissions → 403 Forbidden."""
+    """Non-admin user attempting to grant permissions â†’ 403 Forbidden."""
     admin = await _make_admin(db_session)
     user = await _make_user(db_session)
     other = await _make_user(db_session, email_prefix="other")
@@ -185,7 +187,7 @@ async def test_grant_permission_non_admin_403(
 async def test_grant_permission_missing_source_404(
     async_client: AsyncClient, db_session
 ) -> None:
-    """Granting permission on a non-existent source → 404 (RFC 7807)."""
+    """Granting permission on a non-existent source â†’ 404 (RFC 7807)."""
     admin = await _make_admin(db_session)
     user = await _make_user(db_session)
     fake_id = uuid.uuid4()
@@ -201,14 +203,14 @@ async def test_grant_permission_missing_source_404(
 
 
 # ---------------------------------------------------------------------------
-# Tests — DELETE /sources/{id}/permissions/{user_id}
+# Tests â€” DELETE /sources/{id}/permissions/{user_id}
 # ---------------------------------------------------------------------------
 
 @pytest.mark.asyncio
 async def test_revoke_permission_admin_204(
     async_client: AsyncClient, db_session
 ) -> None:
-    """Admin revokes an existing permission → 204 No Content."""
+    """Admin revokes an existing permission â†’ 204 No Content."""
     admin = await _make_admin(db_session)
     user = await _make_user(db_session)
     src = await _make_source(db_session, owner_id=admin.id)
@@ -233,7 +235,7 @@ async def test_revoke_permission_admin_204(
 async def test_revoke_nonexistent_permission_404(
     async_client: AsyncClient, db_session
 ) -> None:
-    """Revoking a permission that was never granted → 404 (RFC 7807)."""
+    """Revoking a permission that was never granted â†’ 404 (RFC 7807)."""
     admin = await _make_admin(db_session)
     user = await _make_user(db_session)
     src = await _make_source(db_session, owner_id=admin.id)
@@ -248,7 +250,7 @@ async def test_revoke_nonexistent_permission_404(
 
 
 # ---------------------------------------------------------------------------
-# Tests — GET /sources/{id}/permissions
+# Tests â€” GET /sources/{id}/permissions
 # ---------------------------------------------------------------------------
 
 @pytest.mark.asyncio
@@ -283,7 +285,7 @@ async def test_list_permissions_admin_200(
 
 
 # ---------------------------------------------------------------------------
-# Tests — GET /users/me/sources
+# Tests â€” GET /users/me/sources
 # ---------------------------------------------------------------------------
 
 @pytest.mark.asyncio
@@ -332,7 +334,7 @@ async def test_me_sources_admin_sees_all(
 
 
 # ---------------------------------------------------------------------------
-# FR-019 enforcement — no config_encrypted in responses
+# FR-019 enforcement â€” no config_encrypted in responses
 # ---------------------------------------------------------------------------
 
 @pytest.mark.asyncio
@@ -358,9 +360,9 @@ async def test_source_response_never_exposes_config(
 
 ---
 
-## File 2 — Phase 2 Sign-Off Checklist (append to task file)
+## File 2 â€” Phase 2 Sign-Off Checklist (append to task file)
 
-### Phase 2 Acceptance Criteria — T-052 through T-059
+### Phase 2 Acceptance Criteria â€” T-052 through T-059
 
 | FR | Description | Verified by |
 |---|---|---|
@@ -375,15 +377,15 @@ async def test_source_response_never_exposes_config(
 
 ## Acceptance Criteria
 
-- [ ] `test_grant_permission_admin_201` — POST returns 201 + correct `source_id`/`user_id`
-- [ ] `test_grant_permission_duplicate_409` — second POST returns RFC 7807 409 body
-- [ ] `test_grant_permission_non_admin_403` — regular user cannot grant → 403
-- [ ] `test_grant_permission_missing_source_404` — non-existent source → RFC 7807 404
-- [ ] `test_revoke_permission_admin_204` — DELETE after grant → 204
-- [ ] `test_revoke_nonexistent_permission_404` — DELETE with no prior grant → RFC 7807 404
-- [ ] `test_list_permissions_admin_200` — GET returns both user UUIDs
-- [ ] `test_me_sources_returns_permitted_source_ids` — user sees only permitted sources
-- [ ] `test_me_sources_admin_sees_all` — admin bypasses permission filter (FR-019 RBAC)
-- [ ] `test_source_response_never_exposes_config` — `config_encrypted` absent from JSON (FR-020)
+- [ ] `test_grant_permission_admin_201` â€” POST returns 201 + correct `source_id`/`user_id`
+- [ ] `test_grant_permission_duplicate_409` â€” second POST returns RFC 7807 409 body
+- [ ] `test_grant_permission_non_admin_403` â€” regular user cannot grant â†’ 403
+- [ ] `test_grant_permission_missing_source_404` â€” non-existent source â†’ RFC 7807 404
+- [ ] `test_revoke_permission_admin_204` â€” DELETE after grant â†’ 204
+- [ ] `test_revoke_nonexistent_permission_404` â€” DELETE with no prior grant â†’ RFC 7807 404
+- [ ] `test_list_permissions_admin_200` â€” GET returns both user UUIDs
+- [ ] `test_me_sources_returns_permitted_source_ids` â€” user sees only permitted sources
+- [ ] `test_me_sources_admin_sees_all` â€” admin bypasses permission filter (FR-019 RBAC)
+- [ ] `test_source_response_never_exposes_config` â€” `config_encrypted` absent from JSON (FR-020)
 - [ ] All 10 tests pass with `asyncio_mode=auto`; no `sync_to_async` wrappers needed
-- [ ] Phase 2 sign-off table complete — FR-019, FR-020, FR-033, FR-034, FR-035 all mapped
+- [ ] Phase 2 sign-off table complete â€” FR-019, FR-020, FR-033, FR-034, FR-035 all mapped

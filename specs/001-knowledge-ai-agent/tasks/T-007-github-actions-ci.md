@@ -1,34 +1,34 @@
----
+﻿---
 id: T-007
-title: GitHub Actions CI Pipeline — Lint, Test, Build Gate
-status: Not Started
+title: GitHub Actions CI Pipeline â€” Lint, Test, Build Gate
+status: Done
 created: 2026-02-25
-phase: Phase 0 — Foundation
+phase: Phase 0 â€” Foundation
 user_story: cross
 requirements: []
 priority: P1
 depends_on: [T-001, T-002, T-005, T-006]
 ---
 
-## 📋 Embedded Context
+## ðŸ“‹ Embedded Context
 
-**Stack**: Python 3.12 + FastAPI · Next.js 15 App Router · PostgreSQL 16 + pgvector · Docker Compose · pytest + Playwright  
-**Conventions**: Conventional commits · NNN-description branches · RFC 7807 errors · ≥80% coverage gate  
-**Key rule**: CI must fail fast on lint → test → build order; never push broken code to `main`
+**Stack**: Python 3.12 + FastAPI Â· Next.js 15 App Router Â· PostgreSQL 16 + pgvector Â· Docker Compose Â· pytest + Playwright  
+**Conventions**: Conventional commits Â· NNN-description branches Â· RFC 7807 errors Â· â‰¥80% coverage gate  
+**Key rule**: CI must fail fast on lint â†’ test â†’ build order; never push broken code to `main`
 
 ---
 
-## 🎯 Objective
+## ðŸŽ¯ Objective
 
 Create a GitHub Actions workflow that runs on every push and PR: lints backend (ruff + mypy) and frontend (biome + tsc), runs pytest with coverage gate, and verifies Docker Compose builds cleanly. The workflow blocks merges with non-zero exit codes.
 
 ---
 
-## 🛠️ Files to Create
+## ðŸ› ï¸ Files to Create
 
 | Path | Purpose |
 |------|---------|
-| `.github/workflows/ci.yml` | Main CI workflow: lint → test → build |
+| `.github/workflows/ci.yml` | Main CI workflow: lint â†’ test â†’ build |
 | `.github/workflows/pr-checks.yml` | PR title format check (conventional commits) |
 
 ---
@@ -150,7 +150,7 @@ jobs:
 
 ---
 
-## 🔌 Wiring Checklist
+## ðŸ”Œ Wiring Checklist
 
 - [ ] `ci.yml` has postgres + redis service containers with healthchecks
 - [ ] pytest coverage gate set to `--cov-fail-under=80`
@@ -160,13 +160,13 @@ jobs:
 
 ---
 
-## ✅ Verification
+## âœ… Verification
 
 Push a branch with a test commit; verify in GitHub Actions that all 4 jobs appear and the `build` job only starts after `test-backend` passes. Push a PR with a badly formatted title; verify `title-format` fails.
 
 ---
 
-## 📝 Completion Log
+## ðŸ“ Completion Log
 
 - [ ] Code implemented
 - [ ] Tests passed

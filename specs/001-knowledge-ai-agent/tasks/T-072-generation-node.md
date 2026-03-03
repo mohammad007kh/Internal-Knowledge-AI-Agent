@@ -1,13 +1,15 @@
-# T-072 — LangGraph Generation Node
+﻿# T-072 â€” LangGraph Generation Node
+
+**Status:** Done
 
 ## Context
 ```
-Python 3.12 | FastAPI · SQLAlchemy 2.x · Pydantic v2 · dependency-injector
-LangGraph 8-node · interrupt() for clarification · SSE streaming
-Langfuse self-hosted · every pipeline run must emit a trace
-OpenAI API (gpt-4o-mini) · tenacity 3-retry
-RFC 7807 Problem Details — all non-2xx API responses
-snake_case vars/files/tables · PascalCase classes · SCREAMING_SNAKE_CASE constants
+Python 3.12 | FastAPI Â· SQLAlchemy 2.x Â· Pydantic v2 Â· dependency-injector
+LangGraph 8-node Â· interrupt() for clarification Â· SSE streaming
+Langfuse self-hosted Â· every pipeline run must emit a trace
+OpenAI API (gpt-4o-mini) Â· tenacity 3-retry
+RFC 7807 Problem Details â€” all non-2xx API responses
+snake_case vars/files/tables Â· PascalCase classes Â· SCREAMING_SNAKE_CASE constants
 FR-020: connection strings MUST NEVER appear in LLM output or logs
 ```
 
@@ -28,7 +30,7 @@ Implement the **`generate_response` LangGraph node** that:
 - [ ] `model="gpt-4o-mini"`, `temperature=0.2`, `max_tokens=1024`
 - [ ] Langfuse span `"generate_response"` contains `usage.input_tokens` + `usage.output_tokens`
 - [ ] If OpenAI call fails after 3 retries, node sets `state["error"]` and returns empty answer
-- [ ] Unit test: mock `AsyncOpenAI` → assert `final_answer` is populated
+- [ ] Unit test: mock `AsyncOpenAI` â†’ assert `final_answer` is populated
 
 ---
 
@@ -86,7 +88,7 @@ def render_system_prompt(chunks: list[dict]) -> str:
 
 ```python
 # app/agent/nodes/generate.py
-"""generate_response — LangGraph node."""
+"""generate_response â€” LangGraph node."""
 from __future__ import annotations
 
 import logging
@@ -193,7 +195,7 @@ async def generate_response(
 
 ---
 
-## 3  `app/agent/nodes/__init__.py` — patch
+## 3  `app/agent/nodes/__init__.py` â€” patch
 
 ```python
 # app/agent/nodes/__init__.py
@@ -204,7 +206,7 @@ from app.agent.nodes.retrieve import retrieve_context  # noqa: F401
 
 ---
 
-## 4  `app/agent/pipeline.py` — patch
+## 4  `app/agent/pipeline.py` â€” patch
 
 Replace the stub `generate_response` definition and add import:
 
@@ -221,7 +223,7 @@ from app.agent.nodes.generate import generate_response  # noqa: F401
 
 ---
 
-## 5  Unit Tests — `tests/unit/agent/test_generate_node.py`
+## 5  Unit Tests â€” `tests/unit/agent/test_generate_node.py`
 
 ```python
 # tests/unit/agent/test_generate_node.py
@@ -318,7 +320,7 @@ async def test_openai_failure_returns_fallback(base_state, mock_langfuse):
 
 @pytest.mark.asyncio
 async def test_no_context_uses_fallback_message(base_state, mock_openai_client, mock_langfuse):
-    """With no retrieved chunks still calls LLM — fallback text injected into prompt."""
+    """With no retrieved chunks still calls LLM â€” fallback text injected into prompt."""
     base_state["retrieved_chunks"] = []
     result = await generate_response(
         base_state,

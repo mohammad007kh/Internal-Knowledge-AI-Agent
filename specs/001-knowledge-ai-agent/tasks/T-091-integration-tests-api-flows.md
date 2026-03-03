@@ -1,6 +1,8 @@
-# T-091 · Integration Tests — API Flows
+﻿# T-091 Â· Integration Tests â€” API Flows
 
-**Phase:** 9 — Testing, Polish & SC Verification  
+**Status:** Done
+
+**Phase:** 9 â€” Testing, Polish & SC Verification  
 **Depends on:** T-090 (unit suite), T-035 (auth integration baseline)  
 **Blocks:** T-099
 
@@ -9,23 +11,23 @@
 ## Context
 
 ```
-Python 3.12 | FastAPI · SQLAlchemy 2.x · Pydantic v2 · dependency-injector
-Next.js 15 App Router · shadcn/ui · Tailwind CSS v4
-React Context · TanStack Query v5 · react-hook-form · Zod
-PostgreSQL 16 + pgvector · HNSW m=16 ef_construction=64 · UUID PKs · soft-delete + audit columns
+Python 3.12 | FastAPI Â· SQLAlchemy 2.x Â· Pydantic v2 Â· dependency-injector
+Next.js 15 App Router Â· shadcn/ui Â· Tailwind CSS v4
+React Context Â· TanStack Query v5 Â· react-hook-form Â· Zod
+PostgreSQL 16 + pgvector Â· HNSW m=16 ef_construction=64 Â· UUID PKs Â· soft-delete + audit columns
 Alembic versioned migrations
-Celery + Redis · Beat replicas=1 STRICT
-MinIO · presigned PUT pattern
-JWT 15-min access + 7-day rotating httpOnly refresh cookie · bcrypt · RBAC (admin/user)
+Celery + Redis Â· Beat replicas=1 STRICT
+MinIO Â· presigned PUT pattern
+JWT 15-min access + 7-day rotating httpOnly refresh cookie Â· bcrypt Â· RBAC (admin/user)
 Fernet (connection configs + LLM API keys at rest)
-LangGraph 8-node · interrupt() for clarification · SSE streaming
-Langfuse self-hosted · every pipeline run must emit a trace
-RFC 7807 Problem Details — all non-2xx API responses
-Structured logging · INFO level · X-Request-ID correlation
-CORS strict · CSRF SameSite=Strict httpOnly · CSP moderate · rate-limit IP
-Dark mode · responsive · WCAG-AA · no animations · Lucide icons · Sonner toasts
-snake_case vars/files/tables · PascalCase classes · SCREAMING_SNAKE_CASE constants
-pytest + httpx + Playwright · ≥80% coverage
+LangGraph 8-node Â· interrupt() for clarification Â· SSE streaming
+Langfuse self-hosted Â· every pipeline run must emit a trace
+RFC 7807 Problem Details â€” all non-2xx API responses
+Structured logging Â· INFO level Â· X-Request-ID correlation
+CORS strict Â· CSRF SameSite=Strict httpOnly Â· CSP moderate Â· rate-limit IP
+Dark mode Â· responsive Â· WCAG-AA Â· no animations Â· Lucide icons Â· Sonner toasts
+snake_case vars/files/tables Â· PascalCase classes Â· SCREAMING_SNAKE_CASE constants
+pytest + httpx + Playwright Â· â‰¥80% coverage
 Docker Compose 9 services: frontend, backend, worker, beat, db, redis, minio, langfuse, langfuse-db
 ```
 
@@ -37,9 +39,9 @@ Integration tests exercise the full FastAPI application against a **real test da
 a Docker-managed test container or SQLite with the pgvector extension stubbed). They use
 `httpx.AsyncClient` and confirm that:
 
-1. Auth round-trip (login → refresh → logout) works end-to-end  
-2. Ingestion pipeline (source registration → presigned URL → ingest task → chunk query) works  
-3. Chat session round-trip (create session → send message → SSE response) works  
+1. Auth round-trip (login â†’ refresh â†’ logout) works end-to-end  
+2. Ingestion pipeline (source registration â†’ presigned URL â†’ ingest task â†’ chunk query) works  
+3. Chat session round-trip (create session â†’ send message â†’ SSE response) works  
 4. Access control is enforced (user cannot query inaccessible sources)  
 5. Guardrail blocking propagates to the SSE stream  
 6. All error responses conform to **RFC 7807 Problem Details**
@@ -56,7 +58,7 @@ File locations:
 
 ---
 
-## 1. Integration Test Fixtures — `tests/integration/conftest.py`
+## 1. Integration Test Fixtures â€” `tests/integration/conftest.py`
 
 ```python
 # tests/integration/conftest.py
@@ -142,7 +144,7 @@ async def user_token(client: AsyncClient, admin_token: str) -> str:
 
 ---
 
-## 2. Auth Flow Tests — `tests/integration/test_auth_flow.py`
+## 2. Auth Flow Tests â€” `tests/integration/test_auth_flow.py`
 
 ```python
 # tests/integration/test_auth_flow.py
@@ -182,7 +184,7 @@ class TestLoginRefreshLogout:
         )
         assert logout_resp.status_code == 204
 
-        # Refresh after logout → 401
+        # Refresh after logout â†’ 401
         stale_refresh = await client.post(
             "/api/v1/auth/refresh",
             cookies={"refresh_token": cookies["refresh_token"]},
@@ -241,7 +243,7 @@ class TestInviteFlow:
 
 ---
 
-## 3. Ingestion Pipeline Tests — `tests/integration/test_ingestion_pipeline.py`
+## 3. Ingestion Pipeline Tests â€” `tests/integration/test_ingestion_pipeline.py`
 
 ```python
 # tests/integration/test_ingestion_pipeline.py
@@ -336,7 +338,7 @@ class TestIngestionTask:
 
 ---
 
-## 4. Chat Round-Trip Tests — `tests/integration/test_chat_round_trip.py`
+## 4. Chat Round-Trip Tests â€” `tests/integration/test_chat_round_trip.py`
 
 ```python
 # tests/integration/test_chat_round_trip.py
@@ -423,7 +425,7 @@ class TestMessageSSE:
 
 ---
 
-## 5. Access Control Tests — `tests/integration/test_access_control.py`
+## 5. Access Control Tests â€” `tests/integration/test_access_control.py`
 
 ```python
 # tests/integration/test_access_control.py
@@ -508,7 +510,7 @@ class TestSourceAccessEnforcement:
 
 ---
 
-## 6. Guardrail Blocking Tests — `tests/integration/test_guardrail_blocking.py`
+## 6. Guardrail Blocking Tests â€” `tests/integration/test_guardrail_blocking.py`
 
 ```python
 # tests/integration/test_guardrail_blocking.py
@@ -590,7 +592,7 @@ class TestPolicyRule:
 
 ---
 
-## 7. RFC 7807 Compliance Tests — `tests/integration/test_rfc7807_errors.py`
+## 7. RFC 7807 Compliance Tests â€” `tests/integration/test_rfc7807_errors.py`
 
 ```python
 # tests/integration/test_rfc7807_errors.py
@@ -666,13 +668,13 @@ class TestRFC7807Errors:
 ## Definition of Done
 
 - [ ] `pytest tests/integration/` passes against a live test-database container
-- [ ] All auth cycle tests pass (login, refresh, logout, re-refresh → 401)
+- [ ] All auth cycle tests pass (login, refresh, logout, re-refresh â†’ 401)
 - [ ] Forced password-change flag returned on first bootstrap admin login
-- [ ] Invite → accept → login flow passes
+- [ ] Invite â†’ accept â†’ login flow passes
 - [ ] Source registration returns no `config_encrypted` or `password` fields
-- [ ] File > 50 MB → 413 Problem Details response
+- [ ] File > 50 MB â†’ 413 Problem Details response
 - [ ] SSE stream contains `token` events and a `done` event
 - [ ] User without source access cannot see those sources in list
-- [ ] Grant → visible; revoke → invisible (same request cycle)
+- [ ] Grant â†’ visible; revoke â†’ invisible (same request cycle)
 - [ ] All 5 JAILBREAK_MESSAGES produce `guardrail_blocked` event
 - [ ] All RFC 7807 cases return `application/problem+json` with `type`, `title`, `status`, `detail`

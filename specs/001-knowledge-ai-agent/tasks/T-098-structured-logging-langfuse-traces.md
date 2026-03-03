@@ -1,6 +1,8 @@
-# T-098 · Structured Logging, X-Request-ID Correlation & Langfuse Trace Verification
+﻿# T-098 Â· Structured Logging, X-Request-ID Correlation & Langfuse Trace Verification
 
-**Phase:** 9 — Testing, Polish & SC Verification  
+**Status:** Done
+
+**Phase:** 9 â€” Testing, Polish & SC Verification  
 **Depends on:** T-091 (integration stack)  
 **Blocks:** T-099
 
@@ -9,23 +11,23 @@
 ## Context
 
 ```
-Python 3.12 | FastAPI · SQLAlchemy 2.x · Pydantic v2 · dependency-injector
-Next.js 15 App Router · shadcn/ui · Tailwind CSS v4
-React Context · TanStack Query v5 · react-hook-form · Zod
-PostgreSQL 16 + pgvector · HNSW m=16 ef_construction=64 · UUID PKs · soft-delete + audit columns
+Python 3.12 | FastAPI Â· SQLAlchemy 2.x Â· Pydantic v2 Â· dependency-injector
+Next.js 15 App Router Â· shadcn/ui Â· Tailwind CSS v4
+React Context Â· TanStack Query v5 Â· react-hook-form Â· Zod
+PostgreSQL 16 + pgvector Â· HNSW m=16 ef_construction=64 Â· UUID PKs Â· soft-delete + audit columns
 Alembic versioned migrations
-Celery + Redis · Beat replicas=1 STRICT
-MinIO · presigned PUT pattern
-JWT 15-min access + 7-day rotating httpOnly refresh cookie · bcrypt · RBAC (admin/user)
+Celery + Redis Â· Beat replicas=1 STRICT
+MinIO Â· presigned PUT pattern
+JWT 15-min access + 7-day rotating httpOnly refresh cookie Â· bcrypt Â· RBAC (admin/user)
 Fernet (connection configs + LLM API keys at rest)
-LangGraph 8-node · interrupt() for clarification · SSE streaming
-Langfuse self-hosted · every pipeline run must emit a trace
-RFC 7807 Problem Details — all non-2xx API responses
-Structured logging · INFO level · X-Request-ID correlation
-CORS strict · CSRF SameSite=Strict httpOnly · CSP moderate · rate-limit IP
-Dark mode · responsive · WCAG-AA · no animations · Lucide icons · Sonner toasts
-snake_case vars/files/tables · PascalCase classes · SCREAMING_SNAKE_CASE constants
-pytest + httpx + Playwright · ≥80% coverage
+LangGraph 8-node Â· interrupt() for clarification Â· SSE streaming
+Langfuse self-hosted Â· every pipeline run must emit a trace
+RFC 7807 Problem Details â€” all non-2xx API responses
+Structured logging Â· INFO level Â· X-Request-ID correlation
+CORS strict Â· CSRF SameSite=Strict httpOnly Â· CSP moderate Â· rate-limit IP
+Dark mode Â· responsive Â· WCAG-AA Â· no animations Â· Lucide icons Â· Sonner toasts
+snake_case vars/files/tables Â· PascalCase classes Â· SCREAMING_SNAKE_CASE constants
+pytest + httpx + Playwright Â· â‰¥80% coverage
 Docker Compose 9 services: frontend, backend, worker, beat, db, redis, minio, langfuse, langfuse-db
 ```
 
@@ -35,9 +37,9 @@ Docker Compose 9 services: frontend, backend, worker, beat, db, redis, minio, la
 
 Verify three observability requirements that cut across the entire stack:
 
-1. **Structured logging** — every log line is valid JSON with mandatory fields (`timestamp`, `level`, `message`, `request_id`)  
-2. **X-Request-ID correlation** — a client-supplied `X-Request-ID` header is echoed back in the response and injected into every log line for that request  
-3. **Langfuse trace emission** — every pipeline run results in exactly one Langfuse trace with a non-null trace ID and a non-null `total_tokens` usage sum
+1. **Structured logging** â€” every log line is valid JSON with mandatory fields (`timestamp`, `level`, `message`, `request_id`)  
+2. **X-Request-ID correlation** â€” a client-supplied `X-Request-ID` header is echoed back in the response and injected into every log line for that request  
+3. **Langfuse trace emission** â€” every pipeline run results in exactly one Langfuse trace with a non-null trace ID and a non-null `total_tokens` usage sum
 
 ---
 
@@ -47,11 +49,11 @@ Verify three observability requirements that cut across the entire stack:
 src/backend/
   app/
     middleware/
-      logging_middleware.py   ← request_id injection + structured log emit
+      logging_middleware.py   â† request_id injection + structured log emit
     core/
-      logging_config.py       ← JSON formatter setup
+      logging_config.py       â† JSON formatter setup
     services/
-      langfuse_verifier.py    ← helper: poll Langfuse API to confirm trace exists
+      langfuse_verifier.py    â† helper: poll Langfuse API to confirm trace exists
 
 tests/
   integration/
@@ -62,7 +64,7 @@ tests/
 
 ---
 
-## 1. Logging Configuration — `src/backend/app/core/logging_config.py`
+## 1. Logging Configuration â€” `src/backend/app/core/logging_config.py`
 
 ```python
 """
@@ -106,7 +108,7 @@ def configure_logging(level: str = "INFO") -> None:
 
 ---
 
-## 2. Logging Middleware — `src/backend/app/middleware/logging_middleware.py`
+## 2. Logging Middleware â€” `src/backend/app/middleware/logging_middleware.py`
 
 ```python
 """
@@ -165,7 +167,7 @@ class RequestIDMiddleware(BaseHTTPMiddleware):
 
 ---
 
-## 3. Langfuse Verifier — `src/backend/app/services/langfuse_verifier.py`
+## 3. Langfuse Verifier â€” `src/backend/app/services/langfuse_verifier.py`
 
 ```python
 """
@@ -220,7 +222,7 @@ async def await_trace(
 
 ---
 
-## 4. Test: Structured Logging — `tests/integration/test_structured_logging.py`
+## 4. Test: Structured Logging â€” `tests/integration/test_structured_logging.py`
 
 ```python
 """
@@ -270,7 +272,7 @@ async def test_log_lines_are_valid_json(
     async_client: AsyncClient,
     log_capture: JsonLineCapture,
 ) -> None:
-    """GET /api/v1/health → at least one log line must be valid JSON."""
+    """GET /api/v1/health â†’ at least one log line must be valid JSON."""
     await async_client.get("/api/v1/health")
     assert log_capture.records, "No log records captured"
 
@@ -347,7 +349,7 @@ async def test_no_sensitive_data_in_logs(
 
 ---
 
-## 5. Test: X-Request-ID Correlation — `tests/integration/test_request_id_correlation.py`
+## 5. Test: X-Request-ID Correlation â€” `tests/integration/test_request_id_correlation.py`
 
 ```python
 """
@@ -479,7 +481,7 @@ async def test_request_id_isolation_per_request(
 
 ---
 
-## 6. Test: Langfuse Traces — `tests/integration/test_langfuse_traces.py`
+## 6. Test: Langfuse Traces â€” `tests/integration/test_langfuse_traces.py`
 
 ```python
 """
@@ -511,9 +513,9 @@ async def check_langfuse_reachable() -> None:
         async with httpx.AsyncClient(timeout=3) as c:
             r = await c.get(f"{LANGFUSE_HOST}/api/public/health")
             if r.status_code != 200:
-                pytest.skip("Langfuse not reachable — skipping trace tests")
+                pytest.skip("Langfuse not reachable â€” skipping trace tests")
     except (httpx.ConnectError, httpx.TimeoutException):
-        pytest.skip("Langfuse not reachable — skipping trace tests")
+        pytest.skip("Langfuse not reachable â€” skipping trace tests")
 
 
 @pytest.mark.asyncio
@@ -573,7 +575,7 @@ async def test_trace_has_non_zero_token_usage(
     body = r.json()
     trace_id = body.get("trace_id")
     if not trace_id:
-        pytest.skip("trace_id not in response — pipeline may not be wired to Langfuse")
+        pytest.skip("trace_id not in response â€” pipeline may not be wired to Langfuse")
 
     trace = await await_trace(trace_id, max_wait=30.0)
 

@@ -1,9 +1,11 @@
-# T-041 — Source Repository
+﻿# T-041 â€” Source Repository
+
+**Status:** Done
 
 ## Context
 ```
-Python 3.12 | FastAPI · SQLAlchemy 2.x async · dependency-injector
-PostgreSQL 16 · UUID PKs · soft-delete pattern
+Python 3.12 | FastAPI Â· SQLAlchemy 2.x async Â· dependency-injector
+PostgreSQL 16 Â· UUID PKs Â· soft-delete pattern
 ```
 
 ## Goal
@@ -11,7 +13,7 @@ Implement `SourceRepository` extending `BaseRepository[Source]` with all data-ac
 
 ---
 
-## File — `app/repositories/source_repository.py`
+## File â€” `app/repositories/source_repository.py`
 
 ```python
 from __future__ import annotations
@@ -144,7 +146,7 @@ class SourceRepository(BaseRepository[Source]):
 
 ## Integration Notes
 
-- `BaseRepository[T]` provides: `save(entity)`, `delete(entity)`, `flush()`, `refresh(entity)` — do NOT re-implement those here
+- `BaseRepository[T]` provides: `save(entity)`, `delete(entity)`, `flush()`, `refresh(entity)` â€” do NOT re-implement those here
 - `deactivate()` uses `UPDATE ... RETURNING` to detect missing rows in a single round-trip
 - `list_by_ids` is used by `SourcePermissionService` to materialise permission lists (T-054)
 

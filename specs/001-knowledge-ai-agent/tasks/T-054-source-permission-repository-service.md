@@ -1,9 +1,11 @@
-# T-054 — SourcePermission Repository & Service
+﻿# T-054 â€” SourcePermission Repository & Service
+
+**Status:** Done
 
 ## Context
 ```
-Python 3.12 | FastAPI · SQLAlchemy 2.x (async) · dependency-injector
-PostgreSQL 16 · UUID PKs
+Python 3.12 | FastAPI Â· SQLAlchemy 2.x (async) Â· dependency-injector
+PostgreSQL 16 Â· UUID PKs
 FR-019: source access is per-user per-source
 RBAC: admin role auto-passes access checks
 ```
@@ -16,7 +18,7 @@ bypass this.
 
 ---
 
-## File 1 — `app/repositories/source_permission_repository.py`
+## File 1 â€” `app/repositories/source_permission_repository.py`
 
 ```python
 """CRUD helpers for the source_permissions table."""
@@ -92,7 +94,7 @@ class SourcePermissionRepository:
 
 ---
 
-## File 2 — `app/services/source_permission_service.py`
+## File 2 â€” `app/services/source_permission_service.py`
 
 ```python
 """Business logic for source-level access control (FR-019)."""
@@ -202,8 +204,8 @@ class SourcePermissionService:
         Return True if the user may read chunks from source_id.
 
         Rules:
-        - Admin role → always True (FR-019 admin bypass).
-        - Otherwise → must have a row in source_permissions.
+        - Admin role â†’ always True (FR-019 admin bypass).
+        - Otherwise â†’ must have a row in source_permissions.
         """
         if user_role == UserRole.ADMIN:
             return True
@@ -215,7 +217,7 @@ class SourcePermissionService:
 
 ---
 
-## File 3 — `app/containers.py` (patch)
+## File 3 â€” `app/containers.py` (patch)
 
 ```python
 # After existing repository providers, add:

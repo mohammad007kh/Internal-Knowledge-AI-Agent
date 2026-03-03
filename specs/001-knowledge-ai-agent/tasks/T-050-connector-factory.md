@@ -1,12 +1,14 @@
-# T-050 — ConnectorFactory (DI-wired)
+﻿# T-050 â€” ConnectorFactory (DI-wired)
+
+**Status:** Done
 
 ## Context
 ```
-Python 3.12 | FastAPI · SQLAlchemy 2.x · Pydantic v2 · dependency-injector
-PostgreSQL 16 + pgvector · Celery + Redis · MinIO
-JWT 15-min access + 7-day rotating httpOnly refresh cookie · bcrypt · RBAC
+Python 3.12 | FastAPI Â· SQLAlchemy 2.x Â· Pydantic v2 Â· dependency-injector
+PostgreSQL 16 + pgvector Â· Celery + Redis Â· MinIO
+JWT 15-min access + 7-day rotating httpOnly refresh cookie Â· bcrypt Â· RBAC
 Fernet (connection configs at rest)
-RFC 7807 Problem Details — all non-2xx API responses
+RFC 7807 Problem Details â€” all non-2xx API responses
 Docker Compose 9 services
 ```
 
@@ -19,7 +21,7 @@ This isolates connector instantiation behind a seam that can be mocked in tests.
 
 ---
 
-## File 1 — `app/connectors/factory.py`
+## File 1 â€” `app/connectors/factory.py`
 
 ```python
 """Factory for instantiating connectors through the DI container."""
@@ -56,7 +58,7 @@ class ConnectorFactory:
         Args:
             source_type:      The SourceType enum value.
             source_id:        UUID string of the Source (for logging only).
-            decrypted_config: Plaintext config dict — NEVER logged or re-raised
+            decrypted_config: Plaintext config dict â€” NEVER logged or re-raised
                               in exception messages (FR-020).
 
         Returns:
@@ -69,13 +71,13 @@ class ConnectorFactory:
             "ConnectorFactory.build",
             extra={"source_id": source_id, "source_type": source_type.value},
         )
-        # get_connector raises ValueError for unregistered types — let it propagate.
+        # get_connector raises ValueError for unregistered types â€” let it propagate.
         return get_connector(source_type, decrypted_config)
 ```
 
 ---
 
-## File 2 — `app/containers.py` (patch)
+## File 2 â€” `app/containers.py` (patch)
 
 Add `connector_factory` singleton to the existing `DeclarativeContainer`:
 
@@ -110,7 +112,7 @@ from app.connectors.factory import ConnectorFactory
 
 ---
 
-## File 3 — `app/services/source_service.py` (patch)
+## File 3 â€” `app/services/source_service.py` (patch)
 
 Replace the direct `get_connector()` call in `test_connection()` with
 `ConnectorFactory.build()`.
@@ -157,7 +159,7 @@ async def test_connection(self, source_id: UUID) -> bool:
         )
         return False
 
-# AFTER — use factory; remove get_connector import
+# AFTER â€” use factory; remove get_connector import
 async def test_connection(self, source_id: UUID) -> bool:
     source = await self.get_source(source_id)
     decrypted = self._decrypt_config(source.config_encrypted)
@@ -181,7 +183,7 @@ Remove the `get_connector` import line from `source_service.py`.
 
 ---
 
-## File 4 — `app/api/v1/sources.py` (patch)
+## File 4 â€” `app/api/v1/sources.py` (patch)
 
 Update the DI `Depends` for the sources router so it receives `connector_factory`
 from the container:
@@ -189,7 +191,7 @@ from the container:
 ```python
 # The router already injects source_service via Depends.
 # source_service itself now requires connector_factory, which the DI container
-# resolves automatically — no change needed in the router if source_service is
+# resolves automatically â€” no change needed in the router if source_service is
 # injected as a Factory provider that wires its own dependencies.
 
 # Verify app/containers.py wires source_service with connector_factory:
@@ -210,7 +212,7 @@ source_service = providers.Factory(
 2. `ConnectorFactory.build(SourceType.WEB_URL, "some-id", {"url": "https://x.com"})`
    returns a `WebUrlConnector` instance.
 3. `ConnectorFactory.build(SourceType.DATABASE, "some-id", {})` raises `ValueError`
-   only when the type is unregistered — for a registered type it returns the connector.
+   only when the type is unregistered â€” for a registered type it returns the connector.
 4. `ApplicationContainer.connector_factory()` returns a `ConnectorFactory` singleton.
 5. `SourceService` no longer imports `get_connector` directly.
 6. `SourceService.test_connection()` delegates to `self._connector_factory.build()`.

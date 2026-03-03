@@ -1,14 +1,16 @@
-# T-071 — LangGraph Retrieval Node
+﻿# T-071 â€” LangGraph Retrieval Node
+
+**Status:** Done
 
 ## Context
 ```
-Python 3.12 | FastAPI · SQLAlchemy 2.x · Pydantic v2 · dependency-injector
-PostgreSQL 16 + pgvector · HNSW m=16 ef_construction=64 · UUID PKs
-LangGraph 8-node · interrupt() for clarification · SSE streaming
-Langfuse self-hosted · every pipeline run must emit a trace
-RFC 7807 Problem Details — all non-2xx API responses
-FR-019: source access per user per source — NEVER expose unapproved data
-snake_case vars/files/tables · PascalCase classes · SCREAMING_SNAKE_CASE constants
+Python 3.12 | FastAPI Â· SQLAlchemy 2.x Â· Pydantic v2 Â· dependency-injector
+PostgreSQL 16 + pgvector Â· HNSW m=16 ef_construction=64 Â· UUID PKs
+LangGraph 8-node Â· interrupt() for clarification Â· SSE streaming
+Langfuse self-hosted Â· every pipeline run must emit a trace
+RFC 7807 Problem Details â€” all non-2xx API responses
+FR-019: source access per user per source â€” NEVER expose unapproved data
+snake_case vars/files/tables Â· PascalCase classes Â· SCREAMING_SNAKE_CASE constants
 ```
 
 ## Goal
@@ -26,16 +28,16 @@ Key responsibilities:
 
 ## Acceptance Criteria
 
-- [ ] `retrieve_context` node returns `retrieved_chunks` populated with ≤10 items
+- [ ] `retrieve_context` node returns `retrieved_chunks` populated with â‰¤10 items
 - [ ] Each item has keys: `chunk_id`, `source_id`, `text`, `score`
 - [ ] When `source_ids` is empty, returns empty list immediately (no DB query)
 - [ ] `ChunkRepository.similarity_search()` uses `<->` cosine operator with HNSW hint
 - [ ] Langfuse span `"retrieve_context"` emitted with `input=query`, `output=chunk_count`
-- [ ] Unit test: mock `EmbeddingService` + `ChunkRepository`; assert `retrieved_chunks` length ≤ 10
+- [ ] Unit test: mock `EmbeddingService` + `ChunkRepository`; assert `retrieved_chunks` length â‰¤ 10
 
 ---
 
-## 1  `app/repositories/chunk_repository.py` — `similarity_search` method
+## 1  `app/repositories/chunk_repository.py` â€” `similarity_search` method
 
 Add to the existing `ChunkRepository` (T-052):
 
@@ -62,7 +64,7 @@ async def similarity_search(
     query_embedding:
         Float list of length 1536 produced by ``EmbeddingService``.
     source_ids:
-        Allowlist of source UUIDs (FR-019).  Must be non-empty — callers
+        Allowlist of source UUIDs (FR-019).  Must be non-empty â€” callers
         MUST validate before calling this method.
     limit:
         Maximum number of results (default 10).
@@ -127,7 +129,7 @@ async def similarity_search(
 
 ```python
 # app/agent/nodes/retrieve.py
-"""retrieve_context — LangGraph node."""
+"""retrieve_context â€” LangGraph node."""
 from __future__ import annotations
 
 import logging
@@ -163,10 +165,10 @@ async def retrieve_context(
     source_ids: list[str] = state.get("source_ids", [])
     query: str = state.get("query", "").strip()
 
-    # FR-019: empty allowlist → no results
+    # FR-019: empty allowlist â†’ no results
     if not source_ids:
         logger.warning(
-            "retrieve_context: empty source_ids for user=%s — returning empty",
+            "retrieve_context: empty source_ids for user=%s â€” returning empty",
             state.get("user_id"),
         )
         return {"retrieved_chunks": []}
@@ -181,11 +183,11 @@ async def retrieve_context(
     )
 
     try:
-        # Step 1 — embed query
+        # Step 1 â€” embed query
         embeddings = await embedding_service.embed_texts([query])
         query_embedding = embeddings[0]
 
-        # Step 2 — similarity search (source-filtered)
+        # Step 2 â€” similarity search (source-filtered)
         pairs = await chunk_repository.similarity_search(
             db_session,
             query_embedding=query_embedding,
@@ -231,7 +233,7 @@ from app.agent.nodes.retrieve import retrieve_context  # noqa: F401
 
 ---
 
-## 4  `app/agent/pipeline.py` — patch (replace stub)
+## 4  `app/agent/pipeline.py` â€” patch (replace stub)
 
 Replace the stub `retrieve_context` definition:
 
@@ -251,7 +253,7 @@ from app.agent.nodes.retrieve import retrieve_context  # noqa: F401
 
 ---
 
-## 5  Unit Tests — `tests/unit/agent/test_retrieve_node.py`
+## 5  Unit Tests â€” `tests/unit/agent/test_retrieve_node.py`
 
 ```python
 # tests/unit/agent/test_retrieve_node.py

@@ -1,11 +1,12 @@
-# T-028 — Users FastAPI Router (CRUD + Invitation)
+﻿# T-028 â€” Users FastAPI Router (CRUD + Invitation)
 
 ## Metadata
 | Field | Value |
 |---|---|
+| **Status** | Done |
 | **ID** | T-028 |
-| **Title** | Users FastAPI Router — list, invite, change role, deactivate |
-| **Phase** | 1 — Authentication & User Management |
+| **Title** | Users FastAPI Router â€” list, invite, change role, deactivate |
+| **Phase** | 1 â€” Authentication & User Management |
 | **Domain** | Backend / API |
 | **Depends on** | T-015, T-023, T-024, T-027, T-029 |
 | **Blocks** | T-030, T-036 |
@@ -14,7 +15,7 @@
 ---
 
 ## Goal
-Implement the 4-endpoint users router — all admin-only — plus the companion `UserService.invite_user()` that creates an `Invitation` record and returns the raw invitation token.
+Implement the 4-endpoint users router â€” all admin-only â€” plus the companion `UserService.invite_user()` that creates an `Invitation` record and returns the raw invitation token.
 
 ---
 
@@ -31,7 +32,7 @@ Implement the 4-endpoint users router — all admin-only — plus the companion 
 
 ## Deliverables
 
-### 1. `app/services/user_service.py` — additional methods
+### 1. `app/services/user_service.py` â€” additional methods
 Extend the existing `UserService` (T-023 established the repo-level):
 
 ```python
@@ -211,15 +212,15 @@ class InvitationCreateRequest(BaseModel):
 
 ## Acceptance Criteria
 - [ ] `GET /users` returns paginated list with `total`, `limit`, `offset`; requires admin token
-- [ ] `GET /users` with non-admin token → `403`
-- [ ] `POST /users/invitations` with valid email → `201 {"detail": "Invitation sent"}`; `EmailService.send_invitation` called with raw token
-- [ ] `POST /users/invitations` with duplicate email (existing user) → `409`
-- [ ] `POST /users/invitations` with duplicate pending invitation → revokes old, creates new (re-invite)
+- [ ] `GET /users` with non-admin token â†’ `403`
+- [ ] `POST /users/invitations` with valid email â†’ `201 {"detail": "Invitation sent"}`; `EmailService.send_invitation` called with raw token
+- [ ] `POST /users/invitations` with duplicate email (existing user) â†’ `409`
+- [ ] `POST /users/invitations` with duplicate pending invitation â†’ revokes old, creates new (re-invite)
 - [ ] `PATCH /users/{id}/role` updates role and returns updated `UserResponse`
-- [ ] `PATCH /users/{id}/role` with invalid role value → `422`
+- [ ] `PATCH /users/{id}/role` with invalid role value â†’ `422`
 - [ ] `DELETE /users/{id}` soft-deactivates user; revokes all active refresh tokens
-- [ ] `DELETE /users/{id}` where `id == acting_admin_id` → `403`
-- [ ] `DELETE /users/{id}` for non-existent id → `404`
+- [ ] `DELETE /users/{id}` where `id == acting_admin_id` â†’ `403`
+- [ ] `DELETE /users/{id}` for non-existent id â†’ `404`
 - [ ] Router registered in `api_v1_router`
 
 ---

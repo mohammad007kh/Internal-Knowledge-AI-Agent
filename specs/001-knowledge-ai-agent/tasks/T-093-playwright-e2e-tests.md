@@ -1,7 +1,9 @@
-# T-093 · Playwright E2E Tests
+﻿# T-093 Â· Playwright E2E Tests
 
-**Phase:** 9 — Testing, Polish & SC Verification  
-**Depends on:** T-091 (integration suite running), full frontend complete (T-080–T-089)  
+**Status:** Done
+
+**Phase:** 9 â€” Testing, Polish & SC Verification  
+**Depends on:** T-091 (integration suite running), full frontend complete (T-080â€“T-089)  
 **Blocks:** T-099
 
 ---
@@ -9,23 +11,23 @@
 ## Context
 
 ```
-Python 3.12 | FastAPI · SQLAlchemy 2.x · Pydantic v2 · dependency-injector
-Next.js 15 App Router · shadcn/ui · Tailwind CSS v4
-React Context · TanStack Query v5 · react-hook-form · Zod
-PostgreSQL 16 + pgvector · HNSW m=16 ef_construction=64 · UUID PKs · soft-delete + audit columns
+Python 3.12 | FastAPI Â· SQLAlchemy 2.x Â· Pydantic v2 Â· dependency-injector
+Next.js 15 App Router Â· shadcn/ui Â· Tailwind CSS v4
+React Context Â· TanStack Query v5 Â· react-hook-form Â· Zod
+PostgreSQL 16 + pgvector Â· HNSW m=16 ef_construction=64 Â· UUID PKs Â· soft-delete + audit columns
 Alembic versioned migrations
-Celery + Redis · Beat replicas=1 STRICT
-MinIO · presigned PUT pattern
-JWT 15-min access + 7-day rotating httpOnly refresh cookie · bcrypt · RBAC (admin/user)
+Celery + Redis Â· Beat replicas=1 STRICT
+MinIO Â· presigned PUT pattern
+JWT 15-min access + 7-day rotating httpOnly refresh cookie Â· bcrypt Â· RBAC (admin/user)
 Fernet (connection configs + LLM API keys at rest)
-LangGraph 8-node · interrupt() for clarification · SSE streaming
-Langfuse self-hosted · every pipeline run must emit a trace
-RFC 7807 Problem Details — all non-2xx API responses
-Structured logging · INFO level · X-Request-ID correlation
-CORS strict · CSRF SameSite=Strict httpOnly · CSP moderate · rate-limit IP
-Dark mode · responsive · WCAG-AA · no animations · Lucide icons · Sonner toasts
-snake_case vars/files/tables · PascalCase classes · SCREAMING_SNAKE_CASE constants
-pytest + httpx + Playwright · ≥80% coverage
+LangGraph 8-node Â· interrupt() for clarification Â· SSE streaming
+Langfuse self-hosted Â· every pipeline run must emit a trace
+RFC 7807 Problem Details â€” all non-2xx API responses
+Structured logging Â· INFO level Â· X-Request-ID correlation
+CORS strict Â· CSRF SameSite=Strict httpOnly Â· CSP moderate Â· rate-limit IP
+Dark mode Â· responsive Â· WCAG-AA Â· no animations Â· Lucide icons Â· Sonner toasts
+snake_case vars/files/tables Â· PascalCase classes Â· SCREAMING_SNAKE_CASE constants
+pytest + httpx + Playwright Â· â‰¥80% coverage
 Docker Compose 9 services: frontend, backend, worker, beat, db, redis, minio, langfuse, langfuse-db
 ```
 
@@ -36,10 +38,10 @@ Docker Compose 9 services: frontend, backend, worker, beat, db, redis, minio, la
 Playwright end-to-end tests exercise **real browser interactions** against the fully running stack
 (all 9 Docker Compose services). Four primary flows are covered:
 
-1. **Login flow** — valid login, forced password change, invalid credentials  
-2. **Chat flow** — create session, ask question, see streamed answer + citations  
-3. **Admin: invite user** — invite → setup complete → new user logs in  
-4. **Admin: register source + configure guardrail** — source wizard, guardrail rule creation  
+1. **Login flow** â€” valid login, forced password change, invalid credentials  
+2. **Chat flow** â€” create session, ask question, see streamed answer + citations  
+3. **Admin: invite user** â€” invite â†’ setup complete â†’ new user logs in  
+4. **Admin: register source + configure guardrail** â€” source wizard, guardrail rule creation  
 
 File locations:
 
@@ -53,7 +55,7 @@ File locations:
 
 ---
 
-## 1. Playwright Configuration — `tests/e2e/playwright.config.ts`
+## 1. Playwright Configuration â€” `tests/e2e/playwright.config.ts`
 
 ```typescript
 import { defineConfig, devices } from "@playwright/test";
@@ -89,7 +91,7 @@ export default defineConfig({
 
 ---
 
-## 2. Auth Fixture — `tests/e2e/fixtures/auth.fixture.ts`
+## 2. Auth Fixture â€” `tests/e2e/fixtures/auth.fixture.ts`
 
 ```typescript
 import { test as base, Page } from "@playwright/test";
@@ -142,13 +144,13 @@ export { expect } from "@playwright/test";
 
 ---
 
-## 3. Login Flow Tests — `tests/e2e/flows/login.spec.ts`
+## 3. Login Flow Tests â€” `tests/e2e/flows/login.spec.ts`
 
 ```typescript
 import { test, expect } from "@playwright/test";
 
 test.describe("Login flow", () => {
-  test("valid admin credentials → redirect to admin dashboard", async ({ page }) => {
+  test("valid admin credentials â†’ redirect to admin dashboard", async ({ page }) => {
     await page.goto("/login");
     await page.getByLabel("Email").fill("admin@example.com");
     await page.getByLabel("Password").fill("Bootstrap1!");
@@ -159,7 +161,7 @@ test.describe("Login flow", () => {
     expect(["/setup", "/admin"].some((p) => page.url().includes(p))).toBeTruthy();
   });
 
-  test("invalid credentials → shows error message", async ({ page }) => {
+  test("invalid credentials â†’ shows error message", async ({ page }) => {
     await page.goto("/login");
     await page.getByLabel("Email").fill("admin@example.com");
     await page.getByLabel("Password").fill("wrongpassword");
@@ -169,7 +171,7 @@ test.describe("Login flow", () => {
     expect(page.url()).toContain("/login");
   });
 
-  test("weak password rejected at setup — inline rule feedback (FR-034)", async ({ page }) => {
+  test("weak password rejected at setup â€” inline rule feedback (FR-034)", async ({ page }) => {
     // Navigate to an invitation setup page with a valid token
     await page.goto("/setup?token=test_token_for_e2e");
     const pwInput = page.getByLabel("New password");
@@ -193,13 +195,13 @@ test.describe("Login flow", () => {
 
 ---
 
-## 4. Chat Flow Tests — `tests/e2e/flows/chat.spec.ts`
+## 4. Chat Flow Tests â€” `tests/e2e/flows/chat.spec.ts`
 
 ```typescript
 import { test, expect } from "./auth.fixture";
 
 test.describe("Chat flow", () => {
-  test("create session and send message — tokens stream in", async ({ userPage: page }) => {
+  test("create session and send message â€” tokens stream in", async ({ userPage: page }) => {
     await page.goto("/chat");
 
     // Create new session
@@ -271,14 +273,14 @@ test.describe("Chat flow", () => {
 
 ---
 
-## 5. Admin Invite User — `tests/e2e/flows/admin-invite-user.spec.ts`
+## 5. Admin Invite User â€” `tests/e2e/flows/admin-invite-user.spec.ts`
 
 ```typescript
 import { test, expect } from "./auth.fixture";
 import { chromium } from "@playwright/test";
 
 test.describe("Admin: invite user flow", () => {
-  test("invite new user → user accepts → can log in", async ({ adminPage }) => {
+  test("invite new user â†’ user accepts â†’ can log in", async ({ adminPage }) => {
     await adminPage.goto("/admin/users");
     await adminPage.getByRole("button", { name: /invite user/i }).click();
 
@@ -310,13 +312,13 @@ test.describe("Admin: invite user flow", () => {
 
 ---
 
-## 6. Admin Register Source — `tests/e2e/flows/admin-register-source.spec.ts`
+## 6. Admin Register Source â€” `tests/e2e/flows/admin-register-source.spec.ts`
 
 ```typescript
 import { test, expect } from "./auth.fixture";
 
 test.describe("Admin: register document source", () => {
-  test("wizard — connection step → inspect → approve", async ({ adminPage }) => {
+  test("wizard â€” connection step â†’ inspect â†’ approve", async ({ adminPage }) => {
     await adminPage.goto("/admin/sources/new");
 
     // Step 1: name + type
@@ -324,7 +326,7 @@ test.describe("Admin: register document source", () => {
     await adminPage.getByLabel("Source type").selectOption("document");
     await adminPage.getByRole("button", { name: /next/i }).click();
 
-    // Step 2: upload (we skip actual file — just validate UI renders)
+    // Step 2: upload (we skip actual file â€” just validate UI renders)
     await expect(adminPage.getByTestId("file-upload-area")).toBeVisible();
 
     // File-size limit message visible
@@ -369,7 +371,7 @@ test.describe("Admin: register document source", () => {
 
 ---
 
-## 7. Admin Guardrail Tests — `tests/e2e/flows/admin-guardrail.spec.ts`
+## 7. Admin Guardrail Tests â€” `tests/e2e/flows/admin-guardrail.spec.ts`
 
 ```typescript
 import { test, expect } from "./auth.fixture";
@@ -418,7 +420,7 @@ test.describe("Admin: guardrail configuration", () => {
 
 ---
 
-## 8. CI Configuration Additions — `package.json` scripts
+## 8. CI Configuration Additions â€” `package.json` scripts
 
 ```json
 {
@@ -446,8 +448,8 @@ e2e:
 ## Definition of Done
 
 - [ ] `playwright test` runs without errors in CI (chromium + firefox)
-- [ ] Login flow: valid credentials → dashboard; invalid → error alert on `/login`
-- [ ] Weak password → inline rule messages rendered (FR-034)
+- [ ] Login flow: valid credentials â†’ dashboard; invalid â†’ error alert on `/login`
+- [ ] Weak password â†’ inline rule messages rendered (FR-034)
 - [ ] Shift+Enter produces newline in chat input; Enter sends
 - [ ] Chat message streams tokens; input re-enabled after `done` event
 - [ ] `[1]` citation marker present and clickable when pipeline returns citations
@@ -457,4 +459,4 @@ e2e:
 - [ ] `.exe` file rejected with unsupported-format message
 - [ ] Guardrail rule creation appears in rule list
 - [ ] Guardrail rule toggle switches to inactive
-- [ ] All tests retried up to 2× in CI before failing
+- [ ] All tests retried up to 2Ã— in CI before failing

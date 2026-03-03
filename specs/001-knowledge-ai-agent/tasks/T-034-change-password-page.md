@@ -1,11 +1,12 @@
-# T-034 — Change-Password Page (Frontend)
+﻿# T-034 â€” Change-Password Page (Frontend)
 
 ## Metadata
 | Field | Value |
 |---|---|
+| **Status** | Done |
 | **ID** | T-034 |
-| **Title** | Change-Password Page — forced and voluntary password change |
-| **Phase** | 1 — Authentication & User Management |
+| **Title** | Change-Password Page â€” forced and voluntary password change |
+| **Phase** | 1 â€” Authentication & User Management |
 | **Domain** | Frontend / Auth UI |
 | **Depends on** | T-030, T-031, T-032 |
 | **Blocks** | T-036 |
@@ -15,13 +16,13 @@
 | Standard | Value |
 |---|---|
 | Python | 3.12 |
-| Backend | FastAPI · SQLAlchemy 2.x · Pydantic v2 · dependency-injector |
-| Frontend | Next.js 15 App Router · shadcn/ui · Tailwind CSS v4 |
-| State | React Context · TanStack Query v5 · react-hook-form · Zod |
-| Auth | JWT 15-min access + 7-day rotating httpOnly refresh cookie · bcrypt · RBAC (admin/user) |
-| Error Format | RFC 7807 Problem Details — all non-2xx API responses |
-| UI | Dark mode · responsive · WCAG-AA · no animations · Lucide icons · Sonner toasts |
-| Testing | pytest + httpx + Playwright · ≥80% coverage |
+| Backend | FastAPI Â· SQLAlchemy 2.x Â· Pydantic v2 Â· dependency-injector |
+| Frontend | Next.js 15 App Router Â· shadcn/ui Â· Tailwind CSS v4 |
+| State | React Context Â· TanStack Query v5 Â· react-hook-form Â· Zod |
+| Auth | JWT 15-min access + 7-day rotating httpOnly refresh cookie Â· bcrypt Â· RBAC (admin/user) |
+| Error Format | RFC 7807 Problem Details â€” all non-2xx API responses |
+| UI | Dark mode Â· responsive Â· WCAG-AA Â· no animations Â· Lucide icons Â· Sonner toasts |
+| Testing | pytest + httpx + Playwright Â· â‰¥80% coverage |
 | Infrastructure | Docker Compose 9 services |
 
 ### Domain Rules
@@ -31,10 +32,10 @@
 ---
 
 ## Goal
-Create `/auth/change-password` — a protected page (requires auth) that handles both:
-- **Forced change**: `must_change_password === true` in JWT → `current_password` field is
+Create `/auth/change-password` â€” a protected page (requires auth) that handles both:
+- **Forced change**: `must_change_password === true` in JWT â†’ `current_password` field is
   hidden; user just sets new password
-- **Voluntary change**: Accessed from profile/settings → full form with `current_password`
+- **Voluntary change**: Accessed from profile/settings â†’ full form with `current_password`
 
 ---
 
@@ -192,7 +193,7 @@ export default function ChangePasswordPage() {
           </div>
 
           <Button type="submit" className="w-full" disabled={isSubmitting}>
-            {isSubmitting ? "Saving…" : "Change password"}
+            {isSubmitting ? "Savingâ€¦" : "Change password"}
           </Button>
         </form>
       </CardContent>

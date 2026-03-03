@@ -1,15 +1,17 @@
-# T-075 — Langfuse Trace Lifecycle + Pydantic Chat Schemas
+﻿# T-075 â€” Langfuse Trace Lifecycle + Pydantic Chat Schemas
+
+**Status:** Done
 
 ## Context
 ```
-Python 3.12 | FastAPI · Pydantic v2 · dependency-injector
-LangGraph 8-node · SSE streaming
-Langfuse self-hosted — traces include: session_id, user_id, query, node spans, tokens
-snake_case vars/files/tables · PascalCase classes · SCREAMING_SNAKE_CASE constants
+Python 3.12 | FastAPI Â· Pydantic v2 Â· dependency-injector
+LangGraph 8-node Â· SSE streaming
+Langfuse self-hosted â€” traces include: session_id, user_id, query, node spans, tokens
+snake_case vars/files/tables Â· PascalCase classes Â· SCREAMING_SNAKE_CASE constants
 ```
 
 ## Goal
-1. Implement `LangfuseTracingService` — creates a trace per pipeline run,
+1. Implement `LangfuseTracingService` â€” creates a trace per pipeline run,
    flushes on completion, and exposes a trace URL for debugging  
 2. Define all Pydantic v2 request/response schemas used by the Chat API  
 3. Register `LangfuseTracingService` in the DI container
@@ -53,7 +55,7 @@ class LangfuseTracingService:
     def __init__(self, langfuse: Langfuse) -> None:
         self._lf = langfuse
 
-    # ── Lifecycle ──────────────────────────────────────────────────────
+    # â”€â”€ Lifecycle â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     def start_trace(
         self,
@@ -112,7 +114,7 @@ from typing import Any, Literal, Optional
 from pydantic import BaseModel, Field, field_validator
 
 
-# ── Enums ────────────────────────────────────────────────────────────────
+# â”€â”€ Enums â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 class MessageRoleSchema(str, Enum):
     USER = "user"
@@ -120,7 +122,7 @@ class MessageRoleSchema(str, Enum):
     SYSTEM = "system"
 
 
-# ── Chat Session ─────────────────────────────────────────────────────────
+# â”€â”€ Chat Session â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 class ChatSessionCreate(BaseModel):
     """Request body to create a new chat session."""
@@ -157,7 +159,7 @@ class ChatSessionListResponse(BaseModel):
     offset: int
 
 
-# ── Chat Messages ─────────────────────────────────────────────────────────
+# â”€â”€ Chat Messages â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 class ChatMessageResponse(BaseModel):
     """API response for a single chat message."""
@@ -171,7 +173,7 @@ class ChatMessageResponse(BaseModel):
     model_config = {"from_attributes": True}
 
 
-# ── Chat Request / Response (non-streaming) ───────────────────────────────
+# â”€â”€ Chat Request / Response (non-streaming) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 class ChatRequest(BaseModel):
     """Body for POST /chat/sessions/{session_id}/messages."""
@@ -205,7 +207,7 @@ class ChatResponse(BaseModel):
     clarification_question: Optional[str] = None
 
 
-# ── SSE Streaming Events ──────────────────────────────────────────────────
+# â”€â”€ SSE Streaming Events â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 class StreamEventType(str, Enum):
     DELTA = "delta"            # Partial text token
@@ -245,7 +247,7 @@ class ChatStreamEvent(BaseModel):
 
 ---
 
-## 3  `app/schemas/__init__.py` — patch
+## 3  `app/schemas/__init__.py` â€” patch
 
 ```python
 # Append:
@@ -263,7 +265,7 @@ from app.schemas.chat import (  # noqa: F401
 
 ---
 
-## 4  `containers.py` — patch
+## 4  `containers.py` â€” patch
 
 ```python
 # Add after langfuse singleton:
@@ -278,7 +280,7 @@ langfuse_tracing_service = providers.Singleton(
 
 ---
 
-## 5  Unit Tests — `tests/unit/services/test_langfuse_tracing_service.py`
+## 5  Unit Tests â€” `tests/unit/services/test_langfuse_tracing_service.py`
 
 ```python
 # tests/unit/services/test_langfuse_tracing_service.py

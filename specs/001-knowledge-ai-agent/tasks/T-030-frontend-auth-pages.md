@@ -1,11 +1,12 @@
-# T-030 — Frontend Auth Pages (Login, Setup, Password Reset)
+﻿# T-030 â€” Frontend Auth Pages (Login, Setup, Password Reset)
 
 ## Metadata
 | Field | Value |
 |---|---|
+| **Status** | Done |
 | **ID** | T-030 |
-| **Title** | Frontend Auth Pages — login, invitation setup, password-reset request + confirm |
-| **Phase** | 1 — Authentication & User Management |
+| **Title** | Frontend Auth Pages â€” login, invitation setup, password-reset request + confirm |
+| **Phase** | 1 â€” Authentication & User Management |
 | **Domain** | Frontend / Auth UI |
 | **Depends on** | T-005, T-026, T-031, T-032 |
 | **Blocks** | T-036, T-038 |
@@ -15,32 +16,32 @@
 | Standard | Value |
 |---|---|
 | Python | 3.12 |
-| Backend | FastAPI · SQLAlchemy 2.x · Pydantic v2 · dependency-injector |
-| Frontend | Next.js 15 App Router · shadcn/ui · Tailwind CSS v4 |
-| State | React Context · TanStack Query v5 · react-hook-form · Zod |
-| Database | PostgreSQL 16 + pgvector · UUID PKs · soft-delete + audit columns |
+| Backend | FastAPI Â· SQLAlchemy 2.x Â· Pydantic v2 Â· dependency-injector |
+| Frontend | Next.js 15 App Router Â· shadcn/ui Â· Tailwind CSS v4 |
+| State | React Context Â· TanStack Query v5 Â· react-hook-form Â· Zod |
+| Database | PostgreSQL 16 + pgvector Â· UUID PKs Â· soft-delete + audit columns |
 | Migrations | Alembic versioned |
-| Background | Celery + Redis · Beat replicas=1 STRICT |
-| File Storage | MinIO · presigned PUT pattern |
-| Auth | JWT 15-min access + 7-day rotating httpOnly refresh cookie · bcrypt · RBAC (admin/user) |
+| Background | Celery + Redis Â· Beat replicas=1 STRICT |
+| File Storage | MinIO Â· presigned PUT pattern |
+| Auth | JWT 15-min access + 7-day rotating httpOnly refresh cookie Â· bcrypt Â· RBAC (admin/user) |
 | Encryption | Fernet (connection configs at rest) |
-| AI Pipeline | LangGraph 8-node · interrupt() for clarification · SSE streaming |
-| Tracing | Langfuse self-hosted · every pipeline run must emit a trace |
-| Error Format | RFC 7807 Problem Details — all non-2xx API responses |
-| UI | Dark mode · responsive · WCAG-AA · no animations · Lucide icons · Sonner toasts |
-| Naming | snake_case vars/files/tables · PascalCase classes · SCREAMING_SNAKE_CASE constants |
-| Testing | pytest + httpx + Playwright · ≥80% coverage |
+| AI Pipeline | LangGraph 8-node Â· interrupt() for clarification Â· SSE streaming |
+| Tracing | Langfuse self-hosted Â· every pipeline run must emit a trace |
+| Error Format | RFC 7807 Problem Details â€” all non-2xx API responses |
+| UI | Dark mode Â· responsive Â· WCAG-AA Â· no animations Â· Lucide icons Â· Sonner toasts |
+| Naming | snake_case vars/files/tables Â· PascalCase classes Â· SCREAMING_SNAKE_CASE constants |
+| Testing | pytest + httpx + Playwright Â· â‰¥80% coverage |
 | Infrastructure | Docker Compose 9 services |
 
 ### Domain Rules
 - Source access is per-user per-source; never expose unapproved source data (FR-019)
 - Connection strings and file paths MUST NEVER appear in user-facing output (FR-020)
 - Celery Beat MUST run with exactly 1 replica
-- File size limit is defined in app_config.yaml; default 50 MB — NOT in .env, NOT hardcoded (FR-035)
+- File size limit is defined in app_config.yaml; default 50 MB â€” NOT in .env, NOT hardcoded (FR-035)
 - bootstrap_admin executes once on startup only if zero users exist (FR-024)
 - Auto-restart is capped at 3 consecutive attempts (FR-033)
 - All passwords validated via validate_password_policy() (FR-034)
-- Invitations are the only path to new accounts — no self-registration (FR-021)
+- Invitations are the only path to new accounts â€” no self-registration (FR-021)
 
 ---
 
@@ -56,8 +57,8 @@ variables. WCAG-AA contrast minimum.
 
 | Route | Page file | Description |
 |---|---|---|
-| `/auth/login` | `app/(auth)/login/page.tsx` | Email + password form → issues token pair |
-| `/auth/setup` | `app/(auth)/setup/page.tsx` | Accept invitation (`?token=…`) + set password |
+| `/auth/login` | `app/(auth)/login/page.tsx` | Email + password form â†’ issues token pair |
+| `/auth/setup` | `app/(auth)/setup/page.tsx` | Accept invitation (`?token=â€¦`) + set password |
 | `/auth/password-reset` | `app/(auth)/password-reset/page.tsx` | Request reset link by email |
 | `/auth/password-reset/confirm` | `app/(auth)/password-reset/confirm/page.tsx` | Set new password via reset token |
 
@@ -202,7 +203,7 @@ export default function LoginPage() {
           </div>
 
           <Button type="submit" className="w-full" disabled={isSubmitting}>
-            {isSubmitting ? "Signing in…" : "Sign in"}
+            {isSubmitting ? "Signing inâ€¦" : "Sign in"}
           </Button>
         </form>
       </CardContent>
@@ -333,7 +334,7 @@ export default function SetupPage() {
           </div>
 
           <Button type="submit" className="w-full" disabled={isSubmitting}>
-            {isSubmitting ? "Creating account…" : "Create account"}
+            {isSubmitting ? "Creating accountâ€¦" : "Create account"}
           </Button>
         </form>
       </CardContent>
@@ -406,7 +407,7 @@ export default function PasswordResetPage() {
             href="/auth/login"
             className="text-sm text-muted-foreground hover:text-foreground underline-offset-4 hover:underline"
           >
-            ← Back to sign in
+            â† Back to sign in
           </a>
         </CardContent>
       </Card>
@@ -439,7 +440,7 @@ export default function PasswordResetPage() {
           </div>
 
           <Button type="submit" className="w-full" disabled={isSubmitting}>
-            {isSubmitting ? "Sending…" : "Send reset link"}
+            {isSubmitting ? "Sendingâ€¦" : "Send reset link"}
           </Button>
         </form>
       </CardContent>
@@ -511,7 +512,7 @@ export default function PasswordResetConfirmPage() {
         </CardHeader>
         <CardContent>
           <a href="/auth/password-reset" className="text-sm underline">
-            Request a new link →
+            Request a new link â†’
           </a>
         </CardContent>
       </Card>
@@ -576,7 +577,7 @@ export default function PasswordResetConfirmPage() {
           </div>
 
           <Button type="submit" className="w-full" disabled={isSubmitting}>
-            {isSubmitting ? "Resetting…" : "Reset password"}
+            {isSubmitting ? "Resettingâ€¦" : "Reset password"}
           </Button>
         </form>
       </CardContent>

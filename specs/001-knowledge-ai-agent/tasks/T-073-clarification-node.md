@@ -1,21 +1,23 @@
-# T-073 — LangGraph Clarification Node
+﻿# T-073 â€” LangGraph Clarification Node
+
+**Status:** Done
 
 ## Context
 ```
-Python 3.12 | FastAPI · SQLAlchemy 2.x · Pydantic v2 · dependency-injector
-LangGraph 8-node · interrupt() for clarification · SSE streaming
-Langfuse self-hosted · every pipeline run must emit a trace
-OpenAI API (gpt-4o-mini) · tenacity 3-retry
-snake_case vars/files/tables · PascalCase classes · SCREAMING_SNAKE_CASE constants
+Python 3.12 | FastAPI Â· SQLAlchemy 2.x Â· Pydantic v2 Â· dependency-injector
+LangGraph 8-node Â· interrupt() for clarification Â· SSE streaming
+Langfuse self-hosted Â· every pipeline run must emit a trace
+OpenAI API (gpt-4o-mini) Â· tenacity 3-retry
+snake_case vars/files/tables Â· PascalCase classes Â· SCREAMING_SNAKE_CASE constants
 ```
 
 ## Goal
 Implement the **`check_clarification` + `handle_clarification` LangGraph nodes**:
 
-1. `check_clarification` — heuristic + LLM-based check that sets
+1. `check_clarification` â€” heuristic + LLM-based check that sets
    `requires_clarification=True` when the query is too short, vague,
    or explicitly ambiguous  
-2. `handle_clarification` — calls `langgraph.interrupt()` to pause the
+2. `handle_clarification` â€” calls `langgraph.interrupt()` to pause the
    graph and surface a question to the user; the graph can be resumed
    by supplying the clarification answer  
 
@@ -23,7 +25,7 @@ Implement the **`check_clarification` + `handle_clarification` LangGraph nodes**
 
 ## Acceptance Criteria
 
-- [ ] `check_clarification` node returns `requires_clarification=True` for queries ≤ 5 chars
+- [ ] `check_clarification` node returns `requires_clarification=True` for queries â‰¤ 5 chars
 - [ ] `check_clarification` node returns `requires_clarification=False` for normal queries
 - [ ] `handle_clarification` calls `interrupt(clarification_question)` correctly
 - [ ] When resumed after `interrupt()`, the updated query is appended to `state["messages"]`
@@ -59,7 +61,7 @@ _AMBIGUOUS_PHRASES = frozenset({
 
 ```python
 # app/agent/nodes/clarify.py
-"""check_clarification and handle_clarification — LangGraph nodes."""
+"""check_clarification and handle_clarification â€” LangGraph nodes."""
 from __future__ import annotations
 
 import logging
@@ -75,7 +77,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# ── Heuristic thresholds ─────────────────────────────────────────────────
+# â”€â”€ Heuristic thresholds â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 _MIN_QUERY_LENGTH = 5
 _AMBIGUOUS_SINGLE_WORDS = frozenset({
@@ -103,7 +105,7 @@ def _is_ambiguous(query: str) -> tuple[bool, str]:
     return False, ""
 
 
-# ── check_clarification node ──────────────────────────────────────────────
+# â”€â”€ check_clarification node â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 
 async def check_clarification(
@@ -144,7 +146,7 @@ async def check_clarification(
         span.end()
 
 
-# ── handle_clarification node ─────────────────────────────────────────────
+# â”€â”€ handle_clarification node â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 
 async def handle_clarification(state: AgentState) -> dict:
@@ -162,7 +164,7 @@ async def handle_clarification(state: AgentState) -> dict:
 
     logger.info("handle_clarification: surfacing question to user")
 
-    # Suspend here — the UI receives the question via SSE and prompts the user.
+    # Suspend here â€” the UI receives the question via SSE and prompts the user.
     # ``interrupt()`` raises ``GraphInterrupt`` inside LangGraph; the caller
     # (API router) catches it and streams the question to the client.
     clarification_answer: str = interrupt(question)
@@ -179,7 +181,7 @@ async def handle_clarification(state: AgentState) -> dict:
 
 ---
 
-## 3  `app/agent/nodes/__init__.py` — patch
+## 3  `app/agent/nodes/__init__.py` â€” patch
 
 ```python
 # app/agent/nodes/__init__.py
@@ -191,7 +193,7 @@ from app.agent.nodes.retrieve import retrieve_context  # noqa: F401
 
 ---
 
-## 4  `app/agent/pipeline.py` — patch
+## 4  `app/agent/pipeline.py` â€” patch
 
 Replace the two stub functions and add imports at the top:
 
@@ -209,7 +211,7 @@ from app.agent.nodes.clarify import check_clarification, handle_clarification  #
 
 ---
 
-## 5  Unit Tests — `tests/unit/agent/test_clarify_node.py`
+## 5  Unit Tests â€” `tests/unit/agent/test_clarify_node.py`
 
 ```python
 # tests/unit/agent/test_clarify_node.py
@@ -306,7 +308,7 @@ When `handle_clarification` calls `interrupt(question)`:
 2. The API route (T-076) catches the interrupt during `astream_events()`  
 3. The route streams an SSE event of type `"clarification"` with the question text  
 4. The Next.js client renders an inline input  
-5. User submits → POST resumes the graph via `graph.ainvoke(resume_value, config)` 
+5. User submits â†’ POST resumes the graph via `graph.ainvoke(resume_value, config)` 
 
 ---
 

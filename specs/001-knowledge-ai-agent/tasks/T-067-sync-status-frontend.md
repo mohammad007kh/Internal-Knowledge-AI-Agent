@@ -1,26 +1,28 @@
-# T-067 — Sync Status Frontend Components
+﻿# T-067 â€” Sync Status Frontend Components
+
+**Status:** Done
 
 ## Context
 ```
-Next.js 15 App Router · shadcn/ui · Tailwind CSS v4
-React Context · TanStack Query v5 · react-hook-form · Zod
-Dark mode · responsive · WCAG-AA · no animations · Lucide icons · Sonner toasts
-snake_case vars/files/tables · PascalCase classes · SCREAMING_SNAKE_CASE constants
+Next.js 15 App Router Â· shadcn/ui Â· Tailwind CSS v4
+React Context Â· TanStack Query v5 Â· react-hook-form Â· Zod
+Dark mode Â· responsive Â· WCAG-AA Â· no animations Â· Lucide icons Â· Sonner toasts
+snake_case vars/files/tables Â· PascalCase classes Â· SCREAMING_SNAKE_CASE constants
 ```
 
 ## Goal
 Add three frontend artefacts to the Source Management UI:
 
-1. `SyncStatusBadge` — colour-coded status pill
-2. `TriggerSyncButton` — POST handler with polling trigger
-3. `useSyncJob` — TanStack Query hook that polls while PENDING|RUNNING
+1. `SyncStatusBadge` â€” colour-coded status pill
+2. `TriggerSyncButton` â€” POST handler with polling trigger
+3. `useSyncJob` â€” TanStack Query hook that polls while PENDING|RUNNING
 
 ---
 
 ## Acceptance Criteria
 
 - [ ] `SyncStatusBadge` renders correct icon + colour for each of the 4 states
-- [ ] RUNNING badge shows a spinning icon (CSS `animate-spin` only — no JS animation library)
+- [ ] RUNNING badge shows a spinning icon (CSS `animate-spin` only â€” no JS animation library)
 - [ ] `TriggerSyncButton` POSTs to `/api/v1/sources/{id}/sync`, shows success/error Sonner toast
 - [ ] Button is disabled while RUNNING or while the POST request is in-flight
 - [ ] `useSyncJob` polls every 3 s when status is `pending` or `running`; stops when terminal
@@ -28,7 +30,7 @@ Add three frontend artefacts to the Source Management UI:
 
 ---
 
-## 1  `SyncStatusBadge` — `src/components/sync/SyncStatusBadge.tsx`
+## 1  `SyncStatusBadge` â€” `src/components/sync/SyncStatusBadge.tsx`
 
 ```tsx
 "use client";
@@ -101,7 +103,7 @@ export function SyncStatusBadge({ status, className }: SyncStatusBadgeProps) {
 
 ---
 
-## 2  `useSyncJob` — `src/hooks/useSyncJob.ts`
+## 2  `useSyncJob` â€” `src/hooks/useSyncJob.ts`
 
 ```ts
 "use client";
@@ -151,7 +153,7 @@ export function useSyncJob(jobId: string | null) {
 
 ---
 
-## 3  `TriggerSyncButton` — `src/components/sync/TriggerSyncButton.tsx`
+## 3  `TriggerSyncButton` â€” `src/components/sync/TriggerSyncButton.tsx`
 
 ```tsx
 "use client";
@@ -204,7 +206,7 @@ export function TriggerSyncButton({
       const jobId = await postTriggerSync(sourceId);
       setActiveJobId(jobId);
       toast.success("Sync triggered", {
-        description: `Job ${jobId.slice(0, 8)}… is queued.`,
+        description: `Job ${jobId.slice(0, 8)}â€¦ is queued.`,
       });
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Unknown error";
@@ -227,7 +229,7 @@ export function TriggerSyncButton({
         aria-hidden="true"
         className={isRunning ? "animate-spin" : undefined}
       />
-      <span className="ml-1">{isRunning ? "Syncing…" : "Sync Now"}</span>
+      <span className="ml-1">{isRunning ? "Syncingâ€¦" : "Sync Now"}</span>
     </Button>
   );
 }
@@ -235,7 +237,7 @@ export function TriggerSyncButton({
 
 ---
 
-## 4  Integration in `SourceRow` — patch `src/components/sources/SourceRow.tsx`
+## 4  Integration in `SourceRow` â€” patch `src/components/sources/SourceRow.tsx`
 
 ```tsx
 // Add these imports:
@@ -260,12 +262,12 @@ import { TriggerSyncButton } from "@/components/sync/TriggerSyncButton";
 
 ---
 
-## 5  Backend schema extension — `GET /sources` list
+## 5  Backend schema extension â€” `GET /sources` list
 
 Ensure the `SourceListItem` schema returned by the backend includes:
 
 ```python
-# app/schemas/source.py — append field to SourceListItem
+# app/schemas/source.py â€” append field to SourceListItem
 from app.schemas.sync_job import SyncJobResponse
 
 class SourceListItem(BaseModel):
@@ -303,9 +305,9 @@ stmt = (
 | `src/components/sync/SyncStatusBadge.tsx` | **CREATE** |
 | `src/components/sync/TriggerSyncButton.tsx` | **CREATE** |
 | `src/hooks/useSyncJob.ts` | **CREATE** |
-| `src/components/sources/SourceRow.tsx` | **PATCH** — add badge + button cells |
-| `app/schemas/source.py` | **PATCH** — `latest_job` field on `SourceListItem` |
-| `app/services/source_service.py` | **PATCH** — join-load latest job |
+| `src/components/sources/SourceRow.tsx` | **PATCH** â€” add badge + button cells |
+| `app/schemas/source.py` | **PATCH** â€” `latest_job` field on `SourceListItem` |
+| `app/services/source_service.py` | **PATCH** â€” join-load latest job |
 
 ---
 
@@ -313,7 +315,7 @@ stmt = (
 
 | Requirement | Satisfied by |
 |---|---|
-| FR-030 — trigger sync from UI | `TriggerSyncButton` |
-| FR-033 — observe sync status | `SyncStatusBadge` + `useSyncJob` polling |
+| FR-030 â€” trigger sync from UI | `TriggerSyncButton` |
+| FR-033 â€” observe sync status | `SyncStatusBadge` + `useSyncJob` polling |
 | WCAG-AA | `role="status"`, `aria-label`, `aria-hidden` |
 | Dark mode | Tailwind dark: variants in `CONFIG` |

@@ -1,11 +1,13 @@
-# T-051 — Document + Chunk ORM Models & Migration
+﻿# T-051 â€” Document + Chunk ORM Models & Migration
+
+**Status:** Done
 
 ## Context
 ```
-Python 3.12 | FastAPI · SQLAlchemy 2.x · Pydantic v2 · dependency-injector
-PostgreSQL 16 + pgvector · HNSW m=16 ef_construction=64 · UUID PKs · soft-delete + audit columns
+Python 3.12 | FastAPI Â· SQLAlchemy 2.x Â· Pydantic v2 Â· dependency-injector
+PostgreSQL 16 + pgvector Â· HNSW m=16 ef_construction=64 Â· UUID PKs Â· soft-delete + audit columns
 Alembic versioned migrations
-RFC 7807 Problem Details — all non-2xx API responses
+RFC 7807 Problem Details â€” all non-2xx API responses
 Docker Compose 9 services
 ```
 
@@ -16,7 +18,7 @@ down both tables plus the HNSW vector index on `chunks.embedding`.
 
 ---
 
-## File 1 — `app/models/document.py`
+## File 1 â€” `app/models/document.py`
 
 ```python
 """ORM model for a Document extracted from a Source."""
@@ -48,7 +50,7 @@ class Document(UUIDMixin, TimestampMixin, Base):
 
     __tablename__ = "documents"
 
-    # FK → sources; cascade delete so removing a source removes its documents.
+    # FK â†’ sources; cascade delete so removing a source removes its documents.
     source_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("sources.id", ondelete="CASCADE"),
@@ -56,7 +58,7 @@ class Document(UUIDMixin, TimestampMixin, Base):
         index=True,
     )
 
-    # Raw extracted text (may be very large — stored as TEXT in PG).
+    # Raw extracted text (may be very large â€” stored as TEXT in PG).
     raw_text: Mapped[str] = mapped_column(Text, nullable=False)
 
     # Arbitrary connector-supplied metadata: page number, URL, etc.
@@ -72,7 +74,7 @@ class Document(UUIDMixin, TimestampMixin, Base):
         String(500), nullable=True
     )
 
-    # Soft-delete flag — keeps the row for audit; excludes from queries via filter.
+    # Soft-delete flag â€” keeps the row for audit; excludes from queries via filter.
     is_active: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=True, server_default="true"
     )
@@ -94,7 +96,7 @@ class Document(UUIDMixin, TimestampMixin, Base):
 
 ---
 
-## File 2 — `app/models/chunk.py`
+## File 2 â€” `app/models/chunk.py`
 
 ```python
 """ORM model for a text Chunk (with its vector embedding)."""
@@ -129,7 +131,7 @@ class Chunk(UUIDMixin, TimestampMixin, Base):
 
     __tablename__ = "chunks"
 
-    # FK → documents; cascade delete.
+    # FK â†’ documents; cascade delete.
     document_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("documents.id", ondelete="CASCADE"),
@@ -137,7 +139,7 @@ class Chunk(UUIDMixin, TimestampMixin, Base):
         index=True,
     )
 
-    # Denormalised FK → sources (avoids join in similarity search).
+    # Denormalised FK â†’ sources (avoids join in similarity search).
     source_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("sources.id", ondelete="CASCADE"),
@@ -181,7 +183,7 @@ class Chunk(UUIDMixin, TimestampMixin, Base):
 
 ---
 
-## File 3 — `app/models/source.py` (patch)
+## File 3 â€” `app/models/source.py` (patch)
 
 Add back-refs for the new relationships:
 
@@ -208,7 +210,7 @@ chunks: Mapped[list["Chunk"]] = relationship(
 
 ---
 
-## File 4 — `app/db/base.py` (patch)
+## File 4 â€” `app/db/base.py` (patch)
 
 Ensure both models are imported so Alembic autogenerate picks them up:
 
@@ -224,7 +226,7 @@ from app.models.chunk import Chunk        # noqa: F401
 
 ---
 
-## File 5 — `alembic/versions/0006_documents_chunks.py`
+## File 5 â€” `alembic/versions/0006_documents_chunks.py`
 
 ```python
 """create documents and chunks tables
@@ -327,7 +329,7 @@ def upgrade() -> None:
         # pgvector column (1536 dims)
         sa.Column(
             "embedding",
-            sa.Text,  # placeholder — replaced by raw SQL below
+            sa.Text,  # placeholder â€” replaced by raw SQL below
             nullable=False,
         ),
         sa.Column("chunk_index", sa.Integer, nullable=False),

@@ -1,30 +1,30 @@
----
+﻿---
 id: T-009
-title: GitHub Actions CI Pipeline — Playwright E2E Job
-status: Not Started
+title: GitHub Actions CI Pipeline â€” Playwright E2E Job
+status: Done
 created: 2026-02-25
-phase: Phase 0 — Foundation
+phase: Phase 0 â€” Foundation
 user_story: cross
 requirements: []
 priority: P2
 depends_on: [T-007, T-005]
 ---
 
-## 📋 Embedded Context
+## ðŸ“‹ Embedded Context
 
-**Stack**: Next.js 15 App Router · Playwright (E2E) · Docker Compose  
+**Stack**: Next.js 15 App Router Â· Playwright (E2E) Â· Docker Compose  
 **E2E framework**: Playwright (configured in `frontend/playwright.config.ts`)  
-**Test org**: `frontend/tests/e2e/` — full user-flow tests only (no unit tests in e2e folder)
+**Test org**: `frontend/tests/e2e/` â€” full user-flow tests only (no unit tests in e2e folder)
 
 ---
 
-## 🎯 Objective
+## ðŸŽ¯ Objective
 
 Install and configure Playwright in the frontend project, create the `playwright.config.ts` with correct base URL, browser targets, and retry settings. Add a GitHub Actions job that spins up the full stack and runs e2e tests. Create a stub e2e test to confirm the setup works.
 
 ---
 
-## 🛠️ Files to Create
+## ðŸ› ï¸ Files to Create
 
 | Path | Purpose |
 |------|---------|
@@ -124,7 +124,7 @@ jobs:
 
 ---
 
-## 🔌 Wiring Checklist
+## ðŸ”Œ Wiring Checklist
 
 - [ ] `playwright.config.ts` sets `baseURL` from `BASE_URL` env var (defaults to localhost:3000)
 - [ ] Smoke test verifies login page renders and `/chat` redirects
@@ -133,7 +133,7 @@ jobs:
 
 ---
 
-## ✅ Verification
+## âœ… Verification
 
 ```bash
 cd frontend
@@ -145,7 +145,7 @@ npx playwright test --reporter=list
 
 ---
 
-## 📝 Completion Log
+## ðŸ“ Completion Log
 
 - [ ] Code implemented
 - [ ] Tests passed

@@ -1,25 +1,27 @@
-# T-064 — Celery Sync-Source Task
+﻿# T-064 â€” Celery Sync-Source Task
+
+**Status:** Done
 
 ## Context
 ```
 Python 3.12 | Celery + Redis | SQLAlchemy 2.x async | dependency-injector
-LangGraph pipeline stages: fetch → chunk → embed → persist
-Langfuse self-hosted — every task run MUST emit one root trace + per-stage spans
+LangGraph pipeline stages: fetch â†’ chunk â†’ embed â†’ persist
+Langfuse self-hosted â€” every task run MUST emit one root trace + per-stage spans
 FR-019 source access control | FR-020 no plaintext conn strings in logs
 FR-033 max_retries=3, exponential backoff | FR-035 file size limit 50 MB
 ```
 
 ## Goal
 Implement the Celery task `tasks.sync_source` that runs the full ingestion pipeline
-for a single source: create sync job → fetch documents → chunk → embed → persist
-Document + Chunk rows → mark success/failure.
+for a single source: create sync job â†’ fetch documents â†’ chunk â†’ embed â†’ persist
+Document + Chunk rows â†’ mark success/failure.
 
 ---
 
 ## Acceptance Criteria
 
-- [ ] Task name: `"tasks.sync_source"` — `bind=True`, `max_retries=3`
-- [ ] Full pipeline: fetch → chunk → embed → bulk-insert Documents + Chunks
+- [ ] Task name: `"tasks.sync_source"` â€” `bind=True`, `max_retries=3`
+- [ ] Full pipeline: fetch â†’ chunk â†’ embed â†’ bulk-insert Documents + Chunks
 - [ ] Every run emits one Langfuse root trace; per-stage spans (fetch / chunk / embed / persist)
 - [ ] ALL exceptions trigger `mark_failed` + `self.retry(countdown=2**retries)` up to max
 - [ ] After max retries exhausted: final `mark_failed`, no further retry
@@ -27,7 +29,7 @@ Document + Chunk rows → mark success/failure.
 
 ---
 
-## 1  Celery Application — `app/tasks/__init__.py`
+## 1  Celery Application â€” `app/tasks/__init__.py`
 
 ```python
 # app/tasks/__init__.py
@@ -52,7 +54,7 @@ celery_app.autodiscover_tasks(["app.tasks"])
 
 ---
 
-## 2  Celery Config — `app/tasks/celeryconfig.py`
+## 2  Celery Config â€” `app/tasks/celeryconfig.py`
 
 ```python
 # app/tasks/celeryconfig.py
@@ -72,8 +74,8 @@ worker_prefetch_multiplier     = 1         # one task at a time per worker
 worker_max_tasks_per_child     = 50        # recycle workers to prevent memory leaks
 
 # Timeouts
-task_soft_time_limit = 600   # 10 min — SIGTERM
-task_time_limit      = 660   # 11 min — SIGKILL
+task_soft_time_limit = 600   # 10 min â€” SIGTERM
+task_time_limit      = 660   # 11 min â€” SIGKILL
 
 # Result backend
 result_expires = 86_400      # 24 h
@@ -84,7 +86,7 @@ task_default_queue = "default"
 
 ---
 
-## 3  Sync-Source Task — `app/tasks/sync_source.py`
+## 3  Sync-Source Task â€” `app/tasks/sync_source.py`
 
 ```python
 # app/tasks/sync_source.py
@@ -133,7 +135,7 @@ def sync_source(self: Task, source_id: str) -> dict:
     return asyncio.run(_sync_source_async(self, source_id))
 
 
-# ─────────────────────────────────────────────────────────────── async core
+# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ async core
 
 
 async def _sync_source_async(task: Task, source_id: str) -> dict:
@@ -160,14 +162,14 @@ async def _sync_source_async(task: Task, source_id: str) -> dict:
     try:
         await sync_job_svc.mark_running(job_id)
 
-        # ── Stage 1: fetch ────────────────────────────────────────────────
+        # â”€â”€ Stage 1: fetch â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         span_fetch = trace.span(name="fetch")
         source = await source_svc.get_source(UUID(source_id))
         connector = connector_fac.build(source)
         raw_docs = await connector.fetch_documents()  # list[RawDocument]
         span_fetch.end(output={"document_count": len(raw_docs)})
 
-        # ── Stage 2: chunk ────────────────────────────────────────────────
+        # â”€â”€ Stage 2: chunk â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         span_chunk = trace.span(name="chunk")
         all_chunks: list[tuple[int, "ChunkData"]] = []  # (doc_idx, chunk)
         doc_chunk_counts: list[int] = []
@@ -182,13 +184,13 @@ async def _sync_source_async(task: Task, source_id: str) -> dict:
         total_chunks = len(all_chunks)
         span_chunk.end(output={"total_chunks": total_chunks})
 
-        # ── Stage 3: embed ────────────────────────────────────────────────
+        # â”€â”€ Stage 3: embed â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         span_embed = trace.span(name="embed")
         texts = [c.text for _, c in all_chunks]
         vectors = await embedding_svc.embed_texts(texts)
         span_embed.end(output={"vectors_created": len(vectors)})
 
-        # ── Stage 4: persist ─────────────────────────────────────────────
+        # â”€â”€ Stage 4: persist â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         span_persist = trace.span(name="persist")
         async with session_factory() as session:
             doc_ids: list[UUID] = []
@@ -234,7 +236,7 @@ async def _sync_source_async(task: Task, source_id: str) -> dict:
         }
 
     except Exception as exc:  # noqa: BLE001
-        _err_msg = _sanitise(str(exc))  # FR-020 — strip conn strings
+        _err_msg = _sanitise(str(exc))  # FR-020 â€” strip conn strings
         logger.exception("sync_source failed for source=%s: %s", source_id, _err_msg)
 
         await sync_job_svc.mark_failed(job_id, error_message=_err_msg)
@@ -244,11 +246,11 @@ async def _sync_source_async(task: Task, source_id: str) -> dict:
         retries = task.request.retries
         if retries < task.max_retries:
             raise task.retry(exc=exc, countdown=2**retries)
-        # max retries exhausted — raise to move task to FAILURE state
+        # max retries exhausted â€” raise to move task to FAILURE state
         raise
 
 
-# ─────────────────────────────────────────────────────────────── helpers
+# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ helpers
 
 
 def _sanitise(message: str) -> str:
@@ -264,7 +266,7 @@ def _sanitise(message: str) -> str:
 
 ---
 
-## 4  `RawDocument` dataclass — `app/schemas/raw_document.py`
+## 4  `RawDocument` dataclass â€” `app/schemas/raw_document.py`
 
 ```python
 # app/schemas/raw_document.py
@@ -285,7 +287,7 @@ class RawDocument:
 
 ---
 
-## 5  Update `BaseConnector` — `app/connectors/base.py` patch
+## 5  Update `BaseConnector` â€” `app/connectors/base.py` patch
 
 ```python
 # -- patch abstract method signature --
@@ -318,7 +320,7 @@ class ApplicationContainer(DeclarativeContainer):
 
 ---
 
-## 7  Dependencies — `requirements.txt` additions
+## 7  Dependencies â€” `requirements.txt` additions
 
 ```
 celery>=5.4.0
@@ -327,7 +329,7 @@ langfuse>=2.34.0
 
 ---
 
-## 8  Unit Tests — `tests/unit/test_sync_source_task.py`
+## 8  Unit Tests â€” `tests/unit/test_sync_source_task.py`
 
 ```python
 # tests/unit/test_sync_source_task.py
@@ -378,9 +380,9 @@ celery -A app.tasks.celery_app inspect registered
 
 | Requirement | Satisfied by |
 |---|---|
-| FR-030 — document ingestion pipeline | full fetch→chunk→embed→persist pipeline |
-| FR-031 — vector embeddings persisted | `embed_texts()` → `chunk_repo.create(embedding=…)` |
-| FR-033 — max retries 3, backoff | `max_retries=3`, `countdown=2**retries` |
-| FR-019 — source access | pipeline processes only the requested `source_id` |
-| FR-020 — no plaintext conn strings | `_sanitise()` applied to all error messages |
+| FR-030 â€” document ingestion pipeline | full fetchâ†’chunkâ†’embedâ†’persist pipeline |
+| FR-031 â€” vector embeddings persisted | `embed_texts()` â†’ `chunk_repo.create(embedding=â€¦)` |
+| FR-033 â€” max retries 3, backoff | `max_retries=3`, `countdown=2**retries` |
+| FR-019 â€” source access | pipeline processes only the requested `source_id` |
+| FR-020 â€” no plaintext conn strings | `_sanitise()` applied to all error messages |
 | Langfuse tracing | root trace + fetch/chunk/embed/persist spans |

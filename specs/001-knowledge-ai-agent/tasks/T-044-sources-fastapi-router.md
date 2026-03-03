@@ -1,17 +1,19 @@
-# T-044 — Sources FastAPI Router
+﻿# T-044 â€” Sources FastAPI Router
+
+**Status:** Done
 
 ## Context
 ```
-Python 3.12 | FastAPI · dependency-injector · JWT RBAC
+Python 3.12 | FastAPI Â· dependency-injector Â· JWT RBAC
 RFC 7807 error responses | FR-019: per-user source isolation | FR-020: config never in response
 ```
 
 ## Goal
-Implement the `/api/v1/sources` REST router with full CRUD + test-connection endpoint. Admin users see all sources; regular users see only their own. All responses use `SourceResponse` / `PaginatedSources` — never `config_encrypted`.
+Implement the `/api/v1/sources` REST router with full CRUD + test-connection endpoint. Admin users see all sources; regular users see only their own. All responses use `SourceResponse` / `PaginatedSources` â€” never `config_encrypted`.
 
 ---
 
-## File — `app/api/v1/sources.py`
+## File â€” `app/api/v1/sources.py`
 
 ```python
 from __future__ import annotations
@@ -111,7 +113,7 @@ async def get_source(
     Returns the source if the caller is its owner or an admin.
     Raises 404 if the source does not exist, 403 if unauthorized.
     """
-    source = await service.get_source(source_id)  # raises NotFoundError → 404
+    source = await service.get_source(source_id)  # raises NotFoundError â†’ 404
     _assert_ownership_or_admin(source.owner_id, current_user)
     return SourceResponse.model_validate(source)
 
@@ -181,14 +183,14 @@ async def test_connection(
 ) -> TestConnectionResponse:
     """
     Attempts a live connection using the stored (decrypted) config.
-    Always returns `{"success": bool}` — never raises 5xx for connectivity failures.
+    Always returns `{"success": bool}` â€” never raises 5xx for connectivity failures.
     """
     source = await service.get_source(source_id)
     _assert_ownership_or_admin(source.owner_id, current_user)
     ok = await service.test_connection(source_id)
     return TestConnectionResponse(
         success=ok,
-        message="" if ok else "Connection attempt failed — check credentials and network.",
+        message="" if ok else "Connection attempt failed â€” check credentials and network.",
     )
 
 
@@ -211,7 +213,7 @@ def _assert_ownership_or_admin(owner_id: uuid.UUID, user: User) -> None:
 
 ---
 
-## Wire Router — `app/api/v1/__init__.py` (or `app/api/v1/router.py`)
+## Wire Router â€” `app/api/v1/__init__.py` (or `app/api/v1/router.py`)
 
 ```python
 # append to existing api_v1_router includes:
@@ -222,7 +224,7 @@ api_v1_router.include_router(sources_router)
 
 ---
 
-## DI Provider — `app/api/dependencies/services.py`
+## DI Provider â€” `app/api/dependencies/services.py`
 
 ```python
 # append:
@@ -235,7 +237,7 @@ def get_source_service() -> SourceService:
 
 ---
 
-## DI Container — `app/containers.py`
+## DI Container â€” `app/containers.py`
 
 ```python
 # Inside ApplicationContainer, add:
@@ -254,7 +256,7 @@ source_service: providers.Factory = providers.Factory(
 
 ## Acceptance Criteria
 
-- [ ] `POST /api/v1/sources` → 201 with `SourceResponse` (no `config`/`config_encrypted`)
+- [ ] `POST /api/v1/sources` â†’ 201 with `SourceResponse` (no `config`/`config_encrypted`)
 - [ ] `GET /api/v1/sources` admin call returns all active sources; user call returns own only
 - [ ] `GET /api/v1/sources/{id}` raises 403 when non-owner non-admin requests another user's source
 - [ ] `DELETE /api/v1/sources/{id}` returns 204, source `is_active` becomes `False`

@@ -1,9 +1,11 @@
-# T-057 — Connector Unit Tests
+﻿# T-057 â€” Connector Unit Tests
+
+**Status:** Done
 
 ## Context
 ```
-Python 3.12 · pytest · pytest-asyncio · asyncio_mode=auto
-httpx AsyncClient (mock transport) · unittest.mock · pytest-mock
+Python 3.12 Â· pytest Â· pytest-asyncio Â· asyncio_mode=auto
+httpx AsyncClient (mock transport) Â· unittest.mock Â· pytest-mock
 FR-020: connection strings must NEVER appear in logged output
 ```
 
@@ -12,7 +14,7 @@ Full unit-test coverage for all four connector implementations and the connector
 
 ---
 
-## File 1 — `tests/unit/connectors/test_web_url_connector.py`
+## File 1 â€” `tests/unit/connectors/test_web_url_connector.py`
 
 ```python
 """Unit tests for WebUrlConnector."""
@@ -151,7 +153,7 @@ class TestHtmlExtraction:
 
 ---
 
-## File 2 — `tests/unit/connectors/test_file_upload_connector.py`
+## File 2 â€” `tests/unit/connectors/test_file_upload_connector.py`
 
 ```python
 """Unit tests for FileUploadConnector."""
@@ -224,7 +226,7 @@ class TestTextExtraction:
 
     async def test_latin1_fallback(self) -> None:
         conn = _make_connector("uploads/doc.txt")
-        content = "caf\xe9"  # café in latin-1
+        content = "caf\xe9"  # cafÃ© in latin-1
         with patch("app.connectors.file_upload.FileUploadConnector._read_minio",
                    return_value=io.BytesIO(content.encode("latin-1"))):
             docs = await conn.extract()
@@ -241,7 +243,7 @@ class TestSizeLimitEnforcement:
 
 ---
 
-## File 3 — `tests/unit/connectors/test_database_connector.py`
+## File 3 â€” `tests/unit/connectors/test_database_connector.py`
 
 ```python
 """Unit tests for DatabaseConnector (FR-020 log-safety included)."""
@@ -342,7 +344,7 @@ class TestPagination:
 
 ---
 
-## File 4 — `tests/unit/connectors/test_connector_factory.py`
+## File 4 â€” `tests/unit/connectors/test_connector_factory.py`
 
 ```python
 """Unit tests for ConnectorFactory (FR-020 log-safety)."""
@@ -398,10 +400,10 @@ class TestFactoryFR020:
 
 ## Acceptance Criteria
 
-1. `test_web_url_connector.py` — 9 test cases pass; robots.txt allow/disallow paths covered.
-2. `test_file_upload_connector.py` — PDF, DOCX, UTF-8 text, latin-1 fallback, size-limit rejection.
-3. `test_database_connector.py` — FR-020 log-safety assertion explicitly verifies `connection_string` absent; pagination (100+50+0 batches) verified.
-4. `test_connector_factory.py` — `WEB_URL`, `FILE_UPLOAD`, `DATABASE` build correctly; unknown type raises `KeyError`; FR-020 log check passes.
+1. `test_web_url_connector.py` â€” 9 test cases pass; robots.txt allow/disallow paths covered.
+2. `test_file_upload_connector.py` â€” PDF, DOCX, UTF-8 text, latin-1 fallback, size-limit rejection.
+3. `test_database_connector.py` â€” FR-020 log-safety assertion explicitly verifies `connection_string` absent; pagination (100+50+0 batches) verified.
+4. `test_connector_factory.py` â€” `WEB_URL`, `FILE_UPLOAD`, `DATABASE` build correctly; unknown type raises `KeyError`; FR-020 log check passes.
 5. All tests use `asyncio_mode=auto` (no explicit `@pytest.mark.asyncio`).
 6. All tests run without real HTTP, DB, or MinIO connections (fully mocked).
-7. Coverage for `app/connectors/` ≥ 80 % after this task.
+7. Coverage for `app/connectors/` â‰¥ 80 % after this task.

@@ -1,11 +1,12 @@
-# T-032 — Frontend Auth React Context (`useAuth`)
+﻿# T-032 â€” Frontend Auth React Context (`useAuth`)
 
 ## Metadata
 | Field | Value |
 |---|---|
+| **Status** | Done |
 | **ID** | T-032 |
-| **Title** | Frontend Auth Context — in-memory token store, `useAuth` hook, JWT decode |
-| **Phase** | 1 — Authentication & User Management |
+| **Title** | Frontend Auth Context â€” in-memory token store, `useAuth` hook, JWT decode |
+| **Phase** | 1 â€” Authentication & User Management |
 | **Domain** | Frontend / State |
 | **Depends on** | T-005, T-031 |
 | **Blocks** | T-030, T-033, T-038 |
@@ -15,13 +16,13 @@
 | Standard | Value |
 |---|---|
 | Python | 3.12 |
-| Backend | FastAPI · SQLAlchemy 2.x · Pydantic v2 · dependency-injector |
-| Frontend | Next.js 15 App Router · shadcn/ui · Tailwind CSS v4 |
-| State | React Context · TanStack Query v5 · react-hook-form · Zod |
-| Auth | JWT 15-min access + 7-day rotating httpOnly refresh cookie · bcrypt · RBAC (admin/user) |
-| Error Format | RFC 7807 Problem Details — all non-2xx API responses |
-| UI | Dark mode · responsive · WCAG-AA · no animations · Lucide icons · Sonner toasts |
-| Testing | pytest + httpx + Playwright · ≥80% coverage |
+| Backend | FastAPI Â· SQLAlchemy 2.x Â· Pydantic v2 Â· dependency-injector |
+| Frontend | Next.js 15 App Router Â· shadcn/ui Â· Tailwind CSS v4 |
+| State | React Context Â· TanStack Query v5 Â· react-hook-form Â· Zod |
+| Auth | JWT 15-min access + 7-day rotating httpOnly refresh cookie Â· bcrypt Â· RBAC (admin/user) |
+| Error Format | RFC 7807 Problem Details â€” all non-2xx API responses |
+| UI | Dark mode Â· responsive Â· WCAG-AA Â· no animations Â· Lucide icons Â· Sonner toasts |
+| Testing | pytest + httpx + Playwright Â· â‰¥80% coverage |
 | Infrastructure | Docker Compose 9 services |
 
 ### Domain Rules
@@ -32,7 +33,7 @@
 
 ## Goal
 Implement the `AuthContext` + `AuthProvider` that manages the **in-memory** access token.
-The token is decoded client-side (JWT claims, no verification — verification is done server-
+The token is decoded client-side (JWT claims, no verification â€” verification is done server-
 side on every request) to extract `user_id`, `email`, and `role`. The httpOnly refresh
 cookie is managed server-side; the frontend never touches it directly.
 
@@ -87,7 +88,7 @@ import {
 import { refreshTokenApi } from "@/lib/api/auth";
 import type { AuthContextValue, AuthUser } from "../types";
 
-// ── JWT decode (no signature verification) ──────────────────────────────────
+// â”€â”€ JWT decode (no signature verification) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 interface JwtPayload {
   sub: string;
   email: string;
@@ -117,7 +118,7 @@ function jwtToUser(token: string): AuthUser | null {
   };
 }
 
-// ── Context ──────────────────────────────────────────────────────────────────
+// â”€â”€ Context â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 const AuthContext = createContext<AuthContextValue | null>(null);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
@@ -127,7 +128,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // Derived user from in-memory token
   const user: AuthUser | null = accessToken ? jwtToUser(accessToken) : null;
 
-  // ── Proactive token refresh ──────────────────────────────────────────────
+  // â”€â”€ Proactive token refresh â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   // Schedule a refresh 60 s before the token expires.
   const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -145,13 +146,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setAccessTokenState(data.access_token);
         scheduleRefresh(data.access_token);
       } catch {
-        // Session expired — clear silently; middleware will redirect to /auth/login
+        // Session expired â€” clear silently; middleware will redirect to /auth/login
         setAccessTokenState(null);
       }
     }, refreshIn);
   }, []);
 
-  // ── Initial session restore ───────────────────────────────────────────────
+  // â”€â”€ Initial session restore â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   useEffect(() => {
     (async () => {
       try {
@@ -159,7 +160,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setAccessTokenState(data.access_token);
         scheduleRefresh(data.access_token);
       } catch {
-        // No valid session — remain unauthenticated
+        // No valid session â€” remain unauthenticated
       } finally {
         setIsLoading(false);
       }
@@ -170,7 +171,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
   }, [scheduleRefresh]);
 
-  // ── Public API ───────────────────────────────────────────────────────────
+  // â”€â”€ Public API â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const setAccessToken = useCallback(
     (token: string) => {
       setAccessTokenState(token);
@@ -193,7 +194,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   );
 }
 
-// ── Hook ──────────────────────────────────────────────────────────────────────
+// â”€â”€ Hook â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 export function useAuth(): AuthContextValue {
   const ctx = useContext(AuthContext);
   if (!ctx) {
@@ -205,7 +206,7 @@ export function useAuth(): AuthContextValue {
 
 ---
 
-### 3. `src/frontend/lib/api-client.ts` — inject Bearer from AuthContext
+### 3. `src/frontend/lib/api-client.ts` â€” inject Bearer from AuthContext
 The `apiClient` helper (T-005, extended in T-031) must include the access token on every
 authenticated request. Because the token lives in React context (not a module-level
 variable), we use a simple module-level **token store** proxy:
@@ -269,7 +270,7 @@ if (token) {
 
 ---
 
-## `app/providers.tsx` — updated
+## `app/providers.tsx` â€” updated
 ```tsx
 "use client";
 
@@ -301,7 +302,7 @@ export function Providers({ children }: { children: ReactNode }) {
 ## Gate Criteria
 - `make lint` passes; no TypeScript errors
 - On page load, `AuthProvider` calls `POST /api/v1/auth/refresh`; if it returns 200, `useAuth().user` is non-null
-- If refresh returns 401, `useAuth().user` is null and `isLoading` transitions `true → false`
+- If refresh returns 401, `useAuth().user` is null and `isLoading` transitions `true â†’ false`
 - `setAccessToken` updates `user` immediately without a round-trip
 - `clearAccessToken` sets `user` to null
 - The proactive refresh timer fires 60 s before `exp`

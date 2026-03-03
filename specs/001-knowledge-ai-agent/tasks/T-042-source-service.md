@@ -1,17 +1,19 @@
-# T-042 — Source Service
+﻿# T-042 â€” Source Service
+
+**Status:** Done
 
 ## Context
 ```
-Python 3.12 | FastAPI · SQLAlchemy 2.x async · dependency-injector
-Fernet symmetric encryption · pydantic_settings · RFC 7807 errors
+Python 3.12 | FastAPI Â· SQLAlchemy 2.x async Â· dependency-injector
+Fernet symmetric encryption Â· pydantic_settings Â· RFC 7807 errors
 ```
 
 ## Goal
-Implement `SourceService` — the business-logic layer for source management. Handles Fernet encrypt/decrypt of connection configs and CRUD orchestration. Connection configs must **never** appear in API responses (FR-020).
+Implement `SourceService` â€” the business-logic layer for source management. Handles Fernet encrypt/decrypt of connection configs and CRUD orchestration. Connection configs must **never** appear in API responses (FR-020).
 
 ---
 
-## File — `app/services/source_service.py`
+## File â€” `app/services/source_service.py`
 
 ```python
 from __future__ import annotations
@@ -42,7 +44,7 @@ class SourceService:
         self._fernet = Fernet(settings.fernet_key.encode())
 
     # ------------------------------------------------------------------ #
-    # Encryption helpers — PRIVATE, never exposed via API
+    # Encryption helpers â€” PRIVATE, never exposed via API
     # ------------------------------------------------------------------ #
 
     def _encrypt_config(self, config: dict[str, Any]) -> bytes:
@@ -137,13 +139,13 @@ class SourceService:
             raise NotFoundError(detail=f"Source '{source_id}' not found.")
 
     # ------------------------------------------------------------------ #
-    # Config access — only for internal services, NEVER for API responses
+    # Config access â€” only for internal services, NEVER for API responses
     # ------------------------------------------------------------------ #
 
     async def get_source_config(self, source_id: uuid.UUID) -> dict[str, Any]:
         """
         Decrypt and return the connection config for internal use.
-        MUST NOT be called from any HTTP handler — use connector/sync services only.
+        MUST NOT be called from any HTTP handler â€” use connector/sync services only.
         """
         source = await self.get_source(source_id)
         return self._decrypt_config(source.config_encrypted)
@@ -177,7 +179,7 @@ class SourceService:
         """
         Decrypt config and invoke the connector's test_connection.
         Returns True on success; False on any connector error.
-        Always catches exceptions — never exposes raw error to API layer.
+        Always catches exceptions â€” never exposes raw error to API layer.
         """
         import logging
 
@@ -202,17 +204,17 @@ class SourceService:
 
 | Rule | Enforcement |
 |---|---|
-| FR-020 — config never in API | `config_encrypted` stored only; `get_source_config()` is internal only |
-| FR-019 — per-user isolation | `create_source` takes `owner_id` from JWT, not request body |
+| FR-020 â€” config never in API | `config_encrypted` stored only; `get_source_config()` is internal only |
+| FR-019 â€” per-user isolation | `create_source` takes `owner_id` from JWT, not request body |
 | Duplicate name guard | `ConflictError` raised before INSERT |
-| Soft-delete | `deactivate()` — no hard DELETE |
+| Soft-delete | `deactivate()` â€” no hard DELETE |
 
 ---
 
 ## Error Classes (must already exist from T-016)
 
 ```python
-# app/core/errors.py  (excerpt — verify before implementing)
+# app/core/errors.py  (excerpt â€” verify before implementing)
 class ConflictError(AppError):
     status_code: int = 409
 

@@ -1,20 +1,22 @@
-# T-060 — SyncJob ORM Model & Migration
+﻿# T-060 â€” SyncJob ORM Model & Migration
+
+**Status:** Done
 
 ## Context
 ```
-Python 3.12 | FastAPI · SQLAlchemy 2.x · Pydantic v2 · dependency-injector
-PostgreSQL 16 + pgvector · UUID PKs · soft-delete + audit columns
+Python 3.12 | FastAPI Â· SQLAlchemy 2.x Â· Pydantic v2 Â· dependency-injector
+PostgreSQL 16 + pgvector Â· UUID PKs Â· soft-delete + audit columns
 Alembic versioned migrations
-Celery + Redis · Beat replicas=1 STRICT
-RFC 7807 Problem Details — all non-2xx API responses
-snake_case vars/files/tables · PascalCase classes · SCREAMING_SNAKE_CASE constants
+Celery + Redis Â· Beat replicas=1 STRICT
+RFC 7807 Problem Details â€” all non-2xx API responses
+snake_case vars/files/tables Â· PascalCase classes Â· SCREAMING_SNAKE_CASE constants
 Docker Compose 9 services: frontend, backend, worker, beat, db, redis, minio, langfuse, langfuse-db
 ```
 
 ## Goal
 Define the `SyncJob` SQLAlchemy ORM model, add `SyncStatus` enum, and create the
 Alembic migration `0008_sync_jobs`.  The model tracks the lifecycle of every
-connector fetch run: PENDING → RUNNING → SUCCESS | FAILED.
+connector fetch run: PENDING â†’ RUNNING â†’ SUCCESS | FAILED.
 
 ---
 
@@ -30,9 +32,9 @@ connector fetch run: PENDING → RUNNING → SUCCESS | FAILED.
 
 ---
 
-## 1  Enum — `app/models/enums.py`
+## 1  Enum â€” `app/models/enums.py`
 
-**Patch** — add `SyncStatus` alongside any existing enums:
+**Patch** â€” add `SyncStatus` alongside any existing enums:
 
 ```python
 # app/models/enums.py
@@ -60,11 +62,11 @@ class SyncStatus(str, enum.Enum):
 
 ---
 
-## 2  ORM Model — `app/models/sync_job.py`
+## 2  ORM Model â€” `app/models/sync_job.py`
 
 ```python
 # app/models/sync_job.py
-"""SyncJob — tracks a single connector ingestion run."""
+"""SyncJob â€” tracks a single connector ingestion run."""
 from __future__ import annotations
 
 import uuid
@@ -153,10 +155,10 @@ class SyncJob(UUIDMixin, TimestampMixin, Base):
 
 ---
 
-## 3  Patch `app/models/source.py` — add `sync_jobs` back-ref
+## 3  Patch `app/models/source.py` â€” add `sync_jobs` back-ref
 
 ```python
-# Inside class Source — add after existing relationships:
+# Inside class Source â€” add after existing relationships:
 
     sync_jobs: orm.Mapped[list["SyncJob"]] = orm.relationship(
         "SyncJob",
@@ -184,10 +186,10 @@ from app.models.enums import SourceType, SyncStatus       # noqa: F401
 
 ---
 
-## 5  Alembic Migration — `alembic/versions/0008_sync_jobs.py`
+## 5  Alembic Migration â€” `alembic/versions/0008_sync_jobs.py`
 
 ```python
-"""0008 — sync_jobs table
+"""0008 â€” sync_jobs table
 
 Revision ID: 00000000000008
 Revises:     00000000000007
@@ -245,7 +247,7 @@ def downgrade() -> None:
 ```
 
 **Assumption:** `update_updated_at_column()` PL/pgSQL function was created in an
-earlier migration (consistent with pattern in 0002–0007).
+earlier migration (consistent with pattern in 0002â€“0007).
 
 ---
 
@@ -271,6 +273,6 @@ assert SyncStatus.PENDING.value == "pending"
 
 | Requirement | Satisfied by |
 |---|---|
-| FR-033 — sync job tracking | `SyncJob` rows track every run |
-| FR-033 — status transitions | PENDING→RUNNING→SUCCESS\|FAILED columns |
-| FR-033 — error capture | `error_message` TEXT column |
+| FR-033 â€” sync job tracking | `SyncJob` rows track every run |
+| FR-033 â€” status transitions | PENDINGâ†’RUNNINGâ†’SUCCESS\|FAILED columns |
+| FR-033 â€” error capture | `error_message` TEXT column |

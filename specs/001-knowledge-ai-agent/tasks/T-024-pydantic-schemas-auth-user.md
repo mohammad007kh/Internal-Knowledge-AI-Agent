@@ -1,9 +1,9 @@
----
+﻿---
 id: T-024
 title: Pydantic v2 Request/Response Schemas for Auth & User Endpoints
-status: Not Started
+status: Done
 created: 2026-02-25
-phase: Phase 1 — Auth & User Management
+phase: Phase 1 â€” Auth & User Management
 user_story: US3, US4, US5, US6
 requirements: [FR-AUTH-1, FR-AUTH-2, FR-AUTH-3, FR-USER-1, FR-USER-2]
 priority: P1
@@ -14,7 +14,7 @@ estimated_effort: 1.5h
 
 ## Goal
 
-Define all Pydantic v2 request and response schemas for the auth and user-management domain. Schemas are the API contract — they are the only place where JSON serialization/deserialization logic lives. No ORM model is ever returned directly from an endpoint.
+Define all Pydantic v2 request and response schemas for the auth and user-management domain. Schemas are the API contract â€” they are the only place where JSON serialization/deserialization logic lives. No ORM model is ever returned directly from an endpoint.
 
 ---
 
@@ -24,7 +24,7 @@ Define all Pydantic v2 request and response schemas for the auth and user-manage
 - [ ] Response schemas exclude `hashed_password`, `deleted_at` by default
 - [ ] `password` fields always have `@field_validator` calling `validate_password_policy`
 - [ ] All email fields are lowercased and stripped via `@field_validator`
-- [ ] `UserResponse` does NOT expose `hashed_password` — validator test enforces this
+- [ ] `UserResponse` does NOT expose `hashed_password` â€” validator test enforces this
 - [ ] Unit tests: schema validation + `model_validate` from ORM objects
 
 ---
@@ -154,16 +154,16 @@ Every endpoint handler must call `UserResponse.model_validate(orm_obj)` before r
 Returning an ORM object directly bypasses the schema and may leak `hashed_password`.
 
 ```python
-# ✅ Correct
+# âœ… Correct
 return UserResponse.model_validate(user)
 
-# ❌ Never
+# âŒ Never
 return user
 ```
 
 ---
 
-## 📝 Completion Log
+## ðŸ“ Completion Log
 
 - [ ] Schemas implemented
 - [ ] `UserResponse` cannot be constructed with `hashed_password` field

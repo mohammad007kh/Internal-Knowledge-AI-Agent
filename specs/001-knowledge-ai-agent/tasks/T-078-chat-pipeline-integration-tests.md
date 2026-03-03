@@ -1,37 +1,39 @@
-# T-078 — Chat Pipeline Integration Tests
+﻿# T-078 â€” Chat Pipeline Integration Tests
+
+**Status:** Done
 
 ## Context
 ```
-Python 3.12 | pytest-asyncio · httpx AsyncClient · SQLAlchemy 2.x async
-LangGraph compiled graph · interrupt() for clarification · SSE streaming
+Python 3.12 | pytest-asyncio Â· httpx AsyncClient Â· SQLAlchemy 2.x async
+LangGraph compiled graph Â· interrupt() for clarification Â· SSE streaming
 Langfuse self-hosted (mocked in tests)
-pgvector HNSW · FR-019 source permissions
-JWT 15-min access · RBAC (admin/user)
+pgvector HNSW Â· FR-019 source permissions
+JWT 15-min access Â· RBAC (admin/user)
 coverage target: 80% on app/agent/** and app/api/v1/chat.py
 ```
 
 ## Goal
 Write **integration tests** covering the full chat pipeline:
 
-1. Happy path — user sends a query, receives SSE stream with `done` event  
-2. FR-019 enforcement — user cannot retrieve chunks from unapproved sources  
-3. Clarification path — short query triggers `clarification` SSE event  
-4. Session CRUD — create, list, get, delete  
-5. Ownership enforcement — user cannot access another user's session  
+1. Happy path â€” user sends a query, receives SSE stream with `done` event  
+2. FR-019 enforcement â€” user cannot retrieve chunks from unapproved sources  
+3. Clarification path â€” short query triggers `clarification` SSE event  
+4. Session CRUD â€” create, list, get, delete  
+5. Ownership enforcement â€” user cannot access another user's session  
 
 ---
 
 ## Acceptance Criteria
 
 - [ ] All 5 test groups pass with `pytest -x`
-- [ ] Line coverage ≥ 80% for `app/agent/**`
-- [ ] Line coverage ≥ 80% for `app/api/v1/chat.py`
+- [ ] Line coverage â‰¥ 80% for `app/agent/**`
+- [ ] Line coverage â‰¥ 80% for `app/api/v1/chat.py`
 - [ ] Tests use the standard `async_client` + `db_session` fixtures
 - [ ] No real OpenAI, Langfuse, or pgvector calls in any test
 
 ---
 
-## 1  Fixtures — `tests/integration/conftest_chat.py`
+## 1  Fixtures â€” `tests/integration/conftest_chat.py`
 
 ```python
 # tests/integration/conftest_chat.py
@@ -75,7 +77,7 @@ def mock_embedding_service():
 
 ---
 
-## 2  Session CRUD Tests — `tests/integration/test_chat_sessions_api.py`
+## 2  Session CRUD Tests â€” `tests/integration/test_chat_sessions_api.py`
 
 ```python
 # tests/integration/test_chat_sessions_api.py
@@ -137,7 +139,7 @@ async def test_delete_session(async_client: AsyncClient, user_token: str):
         f"/api/v1/chat/sessions/{session_id}",
         headers={"Authorization": f"Bearer {user_token}"},
     )
-    # Soft-deleted → 403 (owned check fails)
+    # Soft-deleted â†’ 403 (owned check fails)
     assert get_resp.status_code == 403
 
 
@@ -162,7 +164,7 @@ async def test_cannot_access_other_users_session(
 
 ---
 
-## 3  Pipeline SSE Tests — `tests/integration/test_chat_pipeline.py`
+## 3  Pipeline SSE Tests â€” `tests/integration/test_chat_pipeline.py`
 
 ```python
 # tests/integration/test_chat_pipeline.py

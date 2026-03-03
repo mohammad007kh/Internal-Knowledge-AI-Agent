@@ -1,19 +1,21 @@
-# T-079 — Phase 4 LangGraph Sign-Off
+﻿# T-079 â€” Phase 4 LangGraph Sign-Off
+
+**Status:** Done
 
 ## Context
 ```
-Phase 4 deliverables: T-070–T-078
+Phase 4 deliverables: T-070â€“T-078
 Docker Compose 9 services
 GitHub Actions CI
-coverage ≥ 80% on app/agent/** and app/api/v1/chat.py
-All FR-020–FR-026 acceptance criteria
-LangGraph 8-node pipeline · interrupt() for clarification · SSE streaming
+coverage â‰¥ 80% on app/agent/** and app/api/v1/chat.py
+All FR-020â€“FR-026 acceptance criteria
+LangGraph 8-node pipeline Â· interrupt() for clarification Â· SSE streaming
 Langfuse traces visible in self-hosted Langfuse UI
 ```
 
 ## Goal
-Final acceptance checklist for **Phase 4 — LangGraph RAG Pipeline & Chat**.  
-All items must be ✅ before work on Phase 5 (Chat UI) begins.
+Final acceptance checklist for **Phase 4 â€” LangGraph RAG Pipeline & Chat**.  
+All items must be âœ… before work on Phase 5 (Chat UI) begins.
 
 ---
 
@@ -22,54 +24,54 @@ All items must be ✅ before work on Phase 5 (Chat UI) begins.
 | Task | Deliverable |
 |---|---|
 | T-070 | `AgentState`, `ChatSession`/`ChatMessage` ORM, migration `0009`, pipeline scaffold |
-| T-071 | `retrieve_context` node — pgvector HNSW search, FR-019 source filter |
-| T-072 | `generate_response` node — OpenAI gpt-4o-mini, tenacity retry, Langfuse span |
-| T-073 | `check_clarification` + `handle_clarification` — heuristic + `interrupt()` |
-| T-074 | Full pipeline wiring — `MemorySaver`, `run_pipeline()`, DI `pipeline` Factory |
+| T-071 | `retrieve_context` node â€” pgvector HNSW search, FR-019 source filter |
+| T-072 | `generate_response` node â€” OpenAI gpt-4o-mini, tenacity retry, Langfuse span |
+| T-073 | `check_clarification` + `handle_clarification` â€” heuristic + `interrupt()` |
+| T-074 | Full pipeline wiring â€” `MemorySaver`, `run_pipeline()`, DI `pipeline` Factory |
 | T-075 | `LangfuseTracingService`, `ChatStreamEvent` SSE schema |
-| T-076 | Chat API router — 5 endpoints, SSE streaming with `astream_events()` |
+| T-076 | Chat API router â€” 5 endpoints, SSE streaming with `astream_events()` |
 | T-077 | `ChatSessionService`, FR-019 source resolution, migration `0010` |
-| T-078 | Integration tests — happy path, FR-019, clarification, session CRUD |
+| T-078 | Integration tests â€” happy path, FR-019, clarification, session CRUD |
 
 ---
 
 ## 1  FR Acceptance Checklist
 
-### FR-020 — Semantic search (retrieve_context)
+### FR-020 â€” Semantic search (retrieve_context)
 
 - [ ] `retrieve_context` node returns chunks sorted by cosine distance (ascending)
 - [ ] Only chunks from `state["source_ids"]` are returned (FR-019 enforced)
 - [ ] Unit test passes with mocked embedding + chunk repo
 - [ ] `HNSW` index on `chunks.embedding` verified via `EXPLAIN ANALYZE`
 
-### FR-021 — LLM generation (generate_response)
+### FR-021 â€” LLM generation (generate_response)
 
 - [ ] `generate_response` calls `gpt-4o-mini` with `temperature=0.2`, `max_tokens=1024`
 - [ ] System prompt contains retrieved chunk texts
 - [ ] On 3 consecutive OpenAI failures, node sets `state["error"]="generation_failed"`
 - [ ] Token usage recorded in Langfuse span
 
-### FR-022 — Clarification (check_clarification + handle_clarification)
+### FR-022 â€” Clarification (check_clarification + handle_clarification)
 
-- [ ] Query ≤ 5 chars sets `requires_clarification=True`
+- [ ] Query â‰¤ 5 chars sets `requires_clarification=True`
 - [ ] `handle_clarification` calls `interrupt(question)` correctly
 - [ ] `clarification` SSE event received by client from the API
 - [ ] After user provides answer, pipeline resumes and routes to `retrieve_context`
 
-### FR-023 — Conversation memory (load_history)
+### FR-023 â€” Conversation memory (load_history)
 
 - [ ] `load_history` loads last 20 messages for the session
 - [ ] Messages appear in `state["messages"]` as `HumanMessage` / `AIMessage`
-- [ ] Session ownership validated (wrong user → empty history returned)
+- [ ] Session ownership validated (wrong user â†’ empty history returned)
 
-### FR-024 & FR-025 — Session CRUD
+### FR-024 & FR-025 â€” Session CRUD
 
 - [ ] `POST /chat/sessions` creates session, returns 201
 - [ ] `GET /chat/sessions` returns paginated list sorted by `updated_at DESC`
 - [ ] `DELETE /chat/sessions/{id}` soft-deletes (is_deleted=true)
 - [ ] User cannot access another user's session (403 RFC 7807)
 
-### FR-026 — SSE streaming
+### FR-026 â€” SSE streaming
 
 - [ ] `POST /chat/sessions/{id}/messages` returns `Content-Type: text/event-stream`
 - [ ] SSE stream contains `delta` events for partial tokens
@@ -142,10 +144,10 @@ All items must be ✅ before work on Phase 5 (Chat UI) begins.
 
 Phase 4 is **complete** when:
 
-1. All FR-020–FR-026 checkboxes are ✅  
+1. All FR-020â€“FR-026 checkboxes are âœ…  
 2. CI green  
 3. Langfuse traces visible for a manually triggered query  
 4. No source-permission leaks found in FR-019 audit  
 5. Signed off by a second reviewer  
 
-**Next phase:** T-080 — Chat UI (Next.js streaming frontend)
+**Next phase:** T-080 â€” Chat UI (Next.js streaming frontend)

@@ -1,8 +1,10 @@
-# T-055 — Source Permissions FastAPI Router
+﻿# T-055 â€” Source Permissions FastAPI Router
+
+**Status:** Done
 
 ## Context
 ```
-Python 3.12 | FastAPI · dependency-injector
+Python 3.12 | FastAPI Â· dependency-injector
 RBAC: admin-only grant/revoke/list; any authenticated user for /users/me/sources
 RFC 7807 error responses
 FR-019: enforce permission checks at API boundary
@@ -16,7 +18,7 @@ Expose the `SourcePermissionService` over HTTP.  Four endpoints:
 
 ---
 
-## File 1 — `app/api/v1/source_permissions.py`
+## File 1 â€” `app/api/v1/source_permissions.py`
 
 ```python
 """Source permission endpoints (FR-019 access-control API)."""
@@ -37,7 +39,7 @@ router = APIRouter(prefix="/sources", tags=["source-permissions"])
 
 
 # ------------------------------------------------------------------
-# Schemas (local — small enough to keep inline)
+# Schemas (local â€” small enough to keep inline)
 # ------------------------------------------------------------------
 class GrantPermissionRequest(BaseModel):
     user_id: uuid.UUID
@@ -110,7 +112,7 @@ async def list_permissions_for_source(
 
 ---
 
-## File 2 — `app/api/v1/users.py` (patch — add me/sources endpoint)
+## File 2 â€” `app/api/v1/users.py` (patch â€” add me/sources endpoint)
 
 ```python
 # Add this endpoint to the existing users router:
@@ -131,7 +133,7 @@ async def list_my_sources(
 
 ---
 
-## File 3 — `app/api/v1/__init__.py` (patch)
+## File 3 â€” `app/api/v1/__init__.py` (patch)
 
 ```python
 # Add after sources router include:

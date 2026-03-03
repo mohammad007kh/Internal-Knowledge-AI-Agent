@@ -1,8 +1,10 @@
-# T-043 — Source Pydantic Schemas
+﻿# T-043 â€” Source Pydantic Schemas
+
+**Status:** Done
 
 ## Context
 ```
-Python 3.12 | Pydantic v2 · FastAPI · RFC 7807
+Python 3.12 | Pydantic v2 Â· FastAPI Â· RFC 7807
 FR-020: config_encrypted MUST NOT appear in any API response schema
 ```
 
@@ -11,7 +13,7 @@ Define all Pydantic v2 schemas for the Source domain: create, update, and respon
 
 ---
 
-## File — `app/schemas/source.py`
+## File â€” `app/schemas/source.py`
 
 ```python
 from __future__ import annotations
@@ -32,7 +34,7 @@ from app.models.enums import SourceType
 class SourceCreate(BaseModel):
     """
     Payload for POST /sources.
-    `config` holds credentials/URLs — service will Fernet-encrypt before persist.
+    `config` holds credentials/URLs â€” service will Fernet-encrypt before persist.
     """
 
     model_config = ConfigDict(str_strip_whitespace=True)
@@ -84,7 +86,7 @@ class SourceUpdate(BaseModel):
 
 
 # ------------------------------------------------------------------ #
-# Response schemas — NO config_encrypted field intentionally
+# Response schemas â€” NO config_encrypted field intentionally
 # ------------------------------------------------------------------ #
 
 class SourceResponse(BaseModel):
@@ -134,7 +136,7 @@ class TestConnectionResponse(BaseModel):
 
 ---
 
-## Enum Reference (`app/models/enums.py` — defined in T-040)
+## Enum Reference (`app/models/enums.py` â€” defined in T-040)
 
 ```python
 class SourceType(str, Enum):
@@ -147,7 +149,7 @@ class SourceType(str, Enum):
 
 ---
 
-## Export — `app/schemas/__init__.py`
+## Export â€” `app/schemas/__init__.py`
 
 ```python
 # append:
@@ -167,7 +169,7 @@ from app.schemas.source import (
 
 - [ ] `SourceResponse` has **no** `config`, `config_encrypted`, or credential-like field
 - [ ] `SourceCreate` validates `name` contains no `/`
-- [ ] `SourceUpdate` is fully optional (all fields `None` → no-op in service)
+- [ ] `SourceUpdate` is fully optional (all fields `None` â†’ no-op in service)
 - [ ] `PaginatedSources` serialises correctly with `model_validate` on a list of `Source` ORM instances
 - [ ] `TestConnectionResponse` can be returned directly from the router handler
 - [ ] All schemas importable from `app.schemas.source`

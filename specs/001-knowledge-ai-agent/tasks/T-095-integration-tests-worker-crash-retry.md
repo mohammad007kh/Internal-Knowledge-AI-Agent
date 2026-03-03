@@ -1,6 +1,8 @@
-# T-095 · Integration Tests — Worker Crash & Retry (FR-033)
+﻿# T-095 Â· Integration Tests â€” Worker Crash & Retry (FR-033)
 
-**Phase:** 9 — Testing, Polish & SC Verification
+**Status:** Done
+
+**Phase:** 9 â€” Testing, Polish & SC Verification
 **Depends on:** T-092
 **Blocks:** T-099
 
@@ -9,23 +11,23 @@
 ## Context
 
 ```
-Python 3.12 | FastAPI · SQLAlchemy 2.x · Pydantic v2 · dependency-injector
-Next.js 15 App Router · shadcn/ui · Tailwind CSS v4
-React Context · TanStack Query v5 · react-hook-form · Zod
-PostgreSQL 16 + pgvector · HNSW m=16 ef_construction=64 · UUID PKs · soft-delete + audit columns
+Python 3.12 | FastAPI Â· SQLAlchemy 2.x Â· Pydantic v2 Â· dependency-injector
+Next.js 15 App Router Â· shadcn/ui Â· Tailwind CSS v4
+React Context Â· TanStack Query v5 Â· react-hook-form Â· Zod
+PostgreSQL 16 + pgvector Â· HNSW m=16 ef_construction=64 Â· UUID PKs Â· soft-delete + audit columns
 Alembic versioned migrations
-Celery + Redis · Beat replicas=1 STRICT
-MinIO · presigned PUT pattern
-JWT 15-min access + 7-day rotating httpOnly refresh cookie · bcrypt · RBAC (admin/user)
+Celery + Redis Â· Beat replicas=1 STRICT
+MinIO Â· presigned PUT pattern
+JWT 15-min access + 7-day rotating httpOnly refresh cookie Â· bcrypt Â· RBAC (admin/user)
 Fernet (connection configs at rest)
-LangGraph 8-node · interrupt() for clarification · SSE streaming
-Langfuse self-hosted · every pipeline run must emit a trace
-RFC 7807 Problem Details — all non-2xx API responses
-Structured logging · INFO level · X-Request-ID correlation
-CORS strict · CSRF SameSite=Strict httpOnly · CSP moderate · rate-limit IP
-Dark mode · responsive · WCAG-AA · no animations · Lucide icons · Sonner toasts
-snake_case vars/files/tables · PascalCase classes · SCREAMING_SNAKE_CASE constants
-pytest + httpx + Playwright · ≥80% coverage
+LangGraph 8-node Â· interrupt() for clarification Â· SSE streaming
+Langfuse self-hosted Â· every pipeline run must emit a trace
+RFC 7807 Problem Details â€” all non-2xx API responses
+Structured logging Â· INFO level Â· X-Request-ID correlation
+CORS strict Â· CSRF SameSite=Strict httpOnly Â· CSP moderate Â· rate-limit IP
+Dark mode Â· responsive Â· WCAG-AA Â· no animations Â· Lucide icons Â· Sonner toasts
+snake_case vars/files/tables Â· PascalCase classes Â· SCREAMING_SNAKE_CASE constants
+pytest + httpx + Playwright Â· â‰¥80% coverage
 Docker Compose 9 services: frontend, backend, worker, beat, db, redis, minio, langfuse, langfuse-db
 ```
 
@@ -45,18 +47,18 @@ writes a `system_health_events` row for each restart attempt. After 3 failed res
 src/backend/
   app/
     services/
-      worker_health_service.py          ← supervisor logic (crash detection + retry)
+      worker_health_service.py          â† supervisor logic (crash detection + retry)
     models/
-      system_health_event.py            ← (already exists from T-065; shown for reference)
+      system_health_event.py            â† (already exists from T-065; shown for reference)
     routers/
-      health.py                         ← GET /api/v1/health/workers (admin-only)
+      health.py                         â† GET /api/v1/health/workers (admin-only)
 
 tests/
   integration/
-    test_worker_crash_retry.py          ← main test file (FR-033)
-    conftest_celery.py                  ← Celery fixtures isolated from main conftest
+    test_worker_crash_retry.py          â† main test file (FR-033)
+    conftest_celery.py                  â† Celery fixtures isolated from main conftest
 
-pyproject.toml                          ← ensure celery[pytest] extra present
+pyproject.toml                          â† ensure celery[pytest] extra present
 ```
 
 ---
@@ -67,7 +69,7 @@ pyproject.toml                          ← ensure celery[pytest] extra present
 
 ```python
 """
-Worker health supervisor — FR-033.
+Worker health supervisor â€” FR-033.
 Detects Celery worker heartbeat loss and records restart events in
 system_health_events.  Max 3 restart attempts per component per window.
 """
@@ -89,7 +91,7 @@ if TYPE_CHECKING:
 log = logging.getLogger(__name__)
 
 MAX_RESTART_ATTEMPTS: int = 3
-_COMPONENT_ATTEMPT_CACHE: dict[str, int] = {}  # component_name → attempt count
+_COMPONENT_ATTEMPT_CACHE: dict[str, int] = {}  # component_name â†’ attempt count
 
 
 async def record_crash(
@@ -158,7 +160,7 @@ async def _record_restart_failed(
     )
     db.add(failed_event)
     log.error(
-        "Max restart attempts exhausted — no further retries",
+        "Max restart attempts exhausted â€” no further retries",
         extra={"component": component_name},
     )
 
@@ -182,7 +184,7 @@ async def record_restart_ok(
 
 
 def reset_attempt_counter(component_name: str) -> None:
-    """Test helper — reset in-memory attempt cache for a component."""
+    """Test helper â€” reset in-memory attempt cache for a component."""
     _COMPONENT_ATTEMPT_CACHE.pop(component_name, None)
 ```
 
@@ -191,7 +193,7 @@ def reset_attempt_counter(component_name: str) -> None:
 ### `src/backend/app/models/system_health_event.py`
 
 ```python
-"""SQLAlchemy model for system_health_events (reference — created in T-065)."""
+"""SQLAlchemy model for system_health_events (reference â€” created in T-065)."""
 import uuid
 from datetime import datetime, timezone
 
@@ -226,7 +228,7 @@ class SystemHealthEvent(Base):
 ### `src/backend/app/routers/health.py` (addition)
 
 ```python
-"""Health endpoints — add workers status to existing health router."""
+"""Health endpoints â€” add workers status to existing health router."""
 from fastapi import APIRouter, Depends, status
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -298,7 +300,7 @@ from __future__ import annotations
 import pytest
 import pytest_asyncio
 from celery import Celery
-from celery.contrib.pytest import celery_app, celery_worker  # noqa: F401 – re-export
+from celery.contrib.pytest import celery_app, celery_worker  # noqa: F401 â€“ re-export
 
 CELERY_TEST_CONFIG = {
     "broker_url": "memory://",
@@ -324,14 +326,14 @@ def celery_parameters():
 
 ```python
 """
-FR-033 — Worker crash detection and retry integration tests.
+FR-033 â€” Worker crash detection and retry integration tests.
 
 Scenarios
 ---------
-1. Single crash  → one 'crash' row + one 'restart_attempt' row (attempt=1)
-2. Three crashes → three 'crash' rows + three 'restart_attempt' rows
-3. Fourth crash  → 'crash' row + 'restart_failed' row; NO new 'restart_attempt'
-4. Successful restart after single crash → 'restart_ok' clears counter
+1. Single crash  â†’ one 'crash' row + one 'restart_attempt' row (attempt=1)
+2. Three crashes â†’ three 'crash' rows + three 'restart_attempt' rows
+3. Fourth crash  â†’ 'crash' row + 'restart_failed' row; NO new 'restart_attempt'
+4. Successful restart after single crash â†’ 'restart_ok' clears counter
 5. GET /api/v1/health/workers (admin) returns event summary
 
 All DB operations use the async test session; in-memory attempt cache
@@ -391,7 +393,7 @@ async def reset_counter():
 
 
 # ---------------------------------------------------------------------------
-# Tests — crash event logging
+# Tests â€” crash event logging
 # ---------------------------------------------------------------------------
 
 
@@ -399,7 +401,7 @@ async def reset_counter():
 async def test_single_crash_writes_crash_and_attempt_rows(
     db_session: AsyncSession,
 ) -> None:
-    """First crash → 'crash' + 'restart_attempt(1)' rows written."""
+    """First crash â†’ 'crash' + 'restart_attempt(1)' rows written."""
     await record_crash(db_session, COMPONENT, ERROR_MSG)
 
     crashes = await _get_events(db_session, COMPONENT, "crash")
@@ -414,7 +416,7 @@ async def test_single_crash_writes_crash_and_attempt_rows(
 async def test_second_crash_increments_attempt_number(
     db_session: AsyncSession,
 ) -> None:
-    """Second crash → attempt_number=2."""
+    """Second crash â†’ attempt_number=2."""
     await record_crash(db_session, COMPONENT, ERROR_MSG)
     await record_crash(db_session, COMPONENT, ERROR_MSG)
 
@@ -428,7 +430,7 @@ async def test_second_crash_increments_attempt_number(
 async def test_third_crash_writes_third_attempt(
     db_session: AsyncSession,
 ) -> None:
-    """Third crash (= MAX_RESTART_ATTEMPTS) → attempt_number=3; no restart_failed yet."""
+    """Third crash (= MAX_RESTART_ATTEMPTS) â†’ attempt_number=3; no restart_failed yet."""
     for _ in range(MAX_RESTART_ATTEMPTS):
         await record_crash(db_session, COMPONENT, ERROR_MSG)
 
@@ -440,7 +442,7 @@ async def test_third_crash_writes_third_attempt(
 
 
 # ---------------------------------------------------------------------------
-# Tests — max attempts exhausted
+# Tests â€” max attempts exhausted
 # ---------------------------------------------------------------------------
 
 
@@ -490,7 +492,7 @@ async def test_fifth_crash_writes_no_new_attempt_or_failed(
 
 
 # ---------------------------------------------------------------------------
-# Tests — successful restart resets counter
+# Tests â€” successful restart resets counter
 # ---------------------------------------------------------------------------
 
 
@@ -517,7 +519,7 @@ async def test_restart_ok_resets_counter(
 
 
 # ---------------------------------------------------------------------------
-# Tests — API endpoint
+# Tests â€” API endpoint
 # ---------------------------------------------------------------------------
 
 
@@ -527,7 +529,7 @@ async def test_worker_health_endpoint_returns_summary(
     admin_token: str,
     db_session: AsyncSession,
 ) -> None:
-    """GET /api/v1/health/workers (admin) — returns event counts."""
+    """GET /api/v1/health/workers (admin) â€” returns event counts."""
     await record_crash(db_session, COMPONENT, ERROR_MSG)
     await record_crash(db_session, COMPONENT, ERROR_MSG)
 
@@ -565,7 +567,7 @@ async def test_worker_health_endpoint_401_unauthenticated(
 
 
 # ---------------------------------------------------------------------------
-# Tests — event_type constraint enforcement
+# Tests â€” event_type constraint enforcement
 # ---------------------------------------------------------------------------
 
 
@@ -627,7 +629,7 @@ async def test_multiple_components_tracked_independently(
 
 ---
 
-## `pyproject.toml` — Ensure Celery pytest extra
+## `pyproject.toml` â€” Ensure Celery pytest extra
 
 ```toml
 [project.optional-dependencies]
@@ -636,7 +638,7 @@ test = [
     "pytest-asyncio>=0.23",
     "httpx>=0.27",
     "pytest-cov>=5.0",
-    "celery[pytest]>=5.3",     # ← required for celery.contrib.pytest
+    "celery[pytest]>=5.3",     # â† required for celery.contrib.pytest
     "factory-boy>=3.3",
     "faker>=25.0",
 ]
@@ -659,7 +661,7 @@ addopts = --strict-markers -q
 
 - [ ] `worker_health_service.py` created; `MAX_RESTART_ATTEMPTS = 3` constant enforced
 - [ ] `system_health_events` rows written for every crash, attempt, ok, and failed event
-- [ ] Fourth crash triggers `restart_failed` — not a fourth `restart_attempt`
+- [ ] Fourth crash triggers `restart_failed` â€” not a fourth `restart_attempt`
 - [ ] `record_restart_ok` clears in-memory counter; subsequent crash restarts count from 1
 - [ ] Multiple components tracked independently via `_COMPONENT_ATTEMPT_CACHE`
 - [ ] `GET /api/v1/health/workers` returns `WorkerHealthSummary`; 403 for non-admin; 401 unauthenticated

@@ -1,36 +1,38 @@
-# T-068 — Sync Pipeline Integration Tests
+﻿# T-068 â€” Sync Pipeline Integration Tests
+
+**Status:** Done
 
 ## Context
 ```
-Python 3.12 | FastAPI · SQLAlchemy 2.x async · pytest + httpx · asyncio_mode=auto
+Python 3.12 | FastAPI Â· SQLAlchemy 2.x async Â· pytest + httpx Â· asyncio_mode=auto
 PostgreSQL 16 + pgvector
 Celery + Redis
 Langfuse self-hosted
-coverage ≥ 80%
+coverage â‰¥ 80%
 ```
 
 ## Goal
-Write integration tests for the end-to-end sync pipeline (T-061–T-064, T-066):
+Write integration tests for the end-to-end sync pipeline (T-061â€“T-064, T-066):
 
-1. **Happy path** — connector returns 2 docs → SUCCESS, rows created, counters correct
-2. **Connector failure** — connector raises → FAILED, no orphaned rows
-3. **Retry path** — fails twice, succeeds on third attempt → SUCCESS
-4. **API trigger** — `POST /sources/{id}/sync` 202, `GET /sync-jobs/{id}` 200
+1. **Happy path** â€” connector returns 2 docs â†’ SUCCESS, rows created, counters correct
+2. **Connector failure** â€” connector raises â†’ FAILED, no orphaned rows
+3. **Retry path** â€” fails twice, succeeds on third attempt â†’ SUCCESS
+4. **API trigger** â€” `POST /sources/{id}/sync` 202, `GET /sync-jobs/{id}` 200
 
 ---
 
 ## Acceptance Criteria
 
-- [ ] Happy-path test verifies: PENDING→RUNNING→SUCCESS transition; `documents_synced==2`; `chunks_created >= 2`; embeddings stored in `chunk.embedding` column; no test leaves orphan rows
-- [ ] Failure test verifies: PENDING→RUNNING→FAILED; `error_message != None`; no `Document`/`Chunk` rows created
-- [ ] Retry test verifies: task retries exactly 2×, then succeeds; final status == SUCCESS
+- [ ] Happy-path test verifies: PENDINGâ†’RUNNINGâ†’SUCCESS transition; `documents_synced==2`; `chunks_created >= 2`; embeddings stored in `chunk.embedding` column; no test leaves orphan rows
+- [ ] Failure test verifies: PENDINGâ†’RUNNINGâ†’FAILED; `error_message != None`; no `Document`/`Chunk` rows created
+- [ ] Retry test verifies: task retries exactly 2Ã—, then succeeds; final status == SUCCESS
 - [ ] API tests verify: 202 returns `status="pending"` body; 403 for non-admin; 404 for bad source_id
-- [ ] Langfuse SDK is fully mocked — no real HTTP calls in tests
+- [ ] Langfuse SDK is fully mocked â€” no real HTTP calls in tests
 - [ ] Celery task runs synchronously via `task.apply()` (no broker needed)
 
 ---
 
-## 1  Fixtures — `tests/integration/conftest.py` additions
+## 1  Fixtures â€” `tests/integration/conftest.py` additions
 
 ```python
 # tests/integration/conftest.py
@@ -102,7 +104,7 @@ def two_raw_docs():
 
 ---
 
-## 2  Happy-Path Test — `tests/integration/test_sync_pipeline.py`
+## 2  Happy-Path Test â€” `tests/integration/test_sync_pipeline.py`
 
 ```python
 # tests/integration/test_sync_pipeline.py
@@ -130,7 +132,7 @@ async def test_happy_path_creates_docs_and_chunks(
     mock_langfuse,
     two_raw_docs,
 ):
-    """SUCCESS path: 2 docs → RUNNING → SUCCESS; counters correct."""
+    """SUCCESS path: 2 docs â†’ RUNNING â†’ SUCCESS; counters correct."""
     fake_vector = [0.1] * 1536
 
     with (
@@ -185,9 +187,9 @@ async def test_connector_failure_marks_job_failed(
     db_source,
     mock_langfuse,
 ):
-    """FAILED path: connector raises → job.status==FAILED, no orphan rows."""
+    """FAILED path: connector raises â†’ job.status==FAILED, no orphan rows."""
     self_mock = MagicMock()
-    self_mock.request.retries = 3          # max retries exceeded → no retry
+    self_mock.request.retries = 3          # max retries exceeded â†’ no retry
     self_mock.max_retries = 3
 
     with patch(
@@ -228,7 +230,7 @@ async def test_retry_path_succeeds_on_third_attempt(
     mock_langfuse,
     two_raw_docs,
 ):
-    """RETRY path: fails 2×, succeeds 3rd → final status SUCCESS."""
+    """RETRY path: fails 2Ã—, succeeds 3rd â†’ final status SUCCESS."""
     fake_vector = [0.1] * 1536
     attempt = {"count": 0}
 
@@ -280,7 +282,7 @@ async def test_retry_path_succeeds_on_third_attempt(
 
 ---
 
-## 3  API Integration Tests — `tests/integration/test_sync_jobs_api.py`
+## 3  API Integration Tests â€” `tests/integration/test_sync_jobs_api.py`
 
 ```python
 # tests/integration/test_sync_jobs_api.py
@@ -366,9 +368,9 @@ async def test_get_sync_job_not_found_404(
 
 | File | Action |
 |---|---|
-| `tests/integration/conftest.py` | **PATCH** — add `db_source`, `mock_langfuse`, `two_raw_docs` fixtures |
-| `tests/integration/test_sync_pipeline.py` | **CREATE** — 3 pipeline tests |
-| `tests/integration/test_sync_jobs_api.py` | **CREATE** — 5 API tests |
+| `tests/integration/conftest.py` | **PATCH** â€” add `db_source`, `mock_langfuse`, `two_raw_docs` fixtures |
+| `tests/integration/test_sync_pipeline.py` | **CREATE** â€” 3 pipeline tests |
+| `tests/integration/test_sync_jobs_api.py` | **CREATE** â€” 5 API tests |
 
 ---
 
@@ -376,9 +378,9 @@ async def test_get_sync_job_not_found_404(
 
 | Module | Target |
 |---|---|
-| `app/tasks/sync_source.py` | ≥ 85% |
-| `app/services/sync_job_service.py` | ≥ 90% |
-| `app/api/v1/sync_jobs.py` | ≥ 85% |
+| `app/tasks/sync_source.py` | â‰¥ 85% |
+| `app/services/sync_job_service.py` | â‰¥ 90% |
+| `app/api/v1/sync_jobs.py` | â‰¥ 85% |
 
 ---
 
@@ -386,8 +388,8 @@ async def test_get_sync_job_not_found_404(
 
 | Requirement | Satisfied by |
 |---|---|
-| FR-030 — ingestion pipeline | happy-path test |
-| FR-031 — vectors persisted | embedding assertion in happy-path |
-| FR-033 — retry with backoff | retry-path test |
-| FR-019 — access control | 403 API test |
-| FR-020 — no plaintext creds in error | failure test `error_message` assertion |
+| FR-030 â€” ingestion pipeline | happy-path test |
+| FR-031 â€” vectors persisted | embedding assertion in happy-path |
+| FR-033 â€” retry with backoff | retry-path test |
+| FR-019 â€” access control | 403 API test |
+| FR-020 â€” no plaintext creds in error | failure test `error_message` assertion |

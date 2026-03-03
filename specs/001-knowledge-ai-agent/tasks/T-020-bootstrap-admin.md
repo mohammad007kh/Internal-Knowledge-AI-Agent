@@ -1,11 +1,11 @@
-# T-020 — Bootstrap First Admin (FR-024)
+﻿# T-020 â€” Bootstrap First Admin (FR-024)
 
 ---
 id: T-020
 title: Bootstrap First Admin Account from Environment Variables (FR-024)
-status: Not Started
+status: Done
 created: 2026-02-26
-phase: Phase 0 — Foundation
+phase: Phase 0 â€” Foundation
 user_story: US3
 requirements: [FR-024, FR-034]
 priority: P1
@@ -18,7 +18,7 @@ estimated_effort: 1.5h
 
 On every application startup, check if the `users` table is empty. If it is, create the first admin account using credentials sourced from environment variables (`BOOTSTRAP_ADMIN_EMAIL` + `BOOTSTRAP_ADMIN_PASSWORD`). The bootstrapped admin must have `must_change_password=True` so they are forced to set a new password on first login (FR-024).
 
-If any users already exist, the bootstrap silently skips — it is idempotent and must never create duplicate accounts.
+If any users already exist, the bootstrap silently skips â€” it is idempotent and must never create duplicate accounts.
 
 ---
 
@@ -26,13 +26,13 @@ If any users already exist, the bootstrap silently skips — it is idempotent an
 
 - [ ] `bootstrap_admin()` is an `async` function called in the FastAPI `lifespan` startup after migrations run
 - [ ] Reads `BOOTSTRAP_ADMIN_EMAIL` and `BOOTSTRAP_ADMIN_PASSWORD` from `settings`; both must be non-empty strings
-- [ ] If `BOOTSTRAP_ADMIN_EMAIL` or `BOOTSTRAP_ADMIN_PASSWORD` is not set, logs a warning and skips — does NOT raise an exception (allows running without bootstrap in test environments)
-- [ ] Checks `SELECT COUNT(*) FROM users` — if ≥ 1, logs "Admin already exists, skipping bootstrap" and returns
+- [ ] If `BOOTSTRAP_ADMIN_EMAIL` or `BOOTSTRAP_ADMIN_PASSWORD` is not set, logs a warning and skips â€” does NOT raise an exception (allows running without bootstrap in test environments)
+- [ ] Checks `SELECT COUNT(*) FROM users` â€” if â‰¥ 1, logs "Admin already exists, skipping bootstrap" and returns
 - [ ] Creates a `User` with `role=UserRole.admin`, `is_active=True`, `must_change_password=True`
 - [ ] Password is hashed via `PasswordService.hash_password()` and validated via `validate_password_policy()`
 - [ ] If bootstrap password fails policy, logs an error and raises `ValueError` at startup (prevents silent misconfiguration)
 - [ ] On success, logs `"Bootstrap admin created: {email}"` at INFO level
-- [ ] Entire function is wrapped in a database transaction — rollback on any error
+- [ ] Entire function is wrapped in a database transaction â€” rollback on any error
 - [ ] Unit tests: first-run creates admin, second-run skips, missing env vars skip, weak password raises
 
 ---
@@ -41,9 +41,9 @@ If any users already exist, the bootstrap silently skips — it is idempotent an
 
 | Path | Action |
 |------|---------|
-| `backend/src/core/bootstrap.py` | Create — `bootstrap_admin()` function |
-| `backend/src/core/config.py` | Update — add `BOOTSTRAP_ADMIN_EMAIL`, `BOOTSTRAP_ADMIN_PASSWORD` optional fields |
-| `backend/src/main.py` | Update — call `bootstrap_admin()` in lifespan after migrations |
+| `backend/src/core/bootstrap.py` | Create â€” `bootstrap_admin()` function |
+| `backend/src/core/config.py` | Update â€” add `BOOTSTRAP_ADMIN_EMAIL`, `BOOTSTRAP_ADMIN_PASSWORD` optional fields |
+| `backend/src/main.py` | Update â€” call `bootstrap_admin()` in lifespan after migrations |
 | `backend/tests/unit/test_bootstrap.py` | Create |
 
 ---
@@ -56,7 +56,7 @@ If any users already exist, the bootstrap silently skips — it is idempotent an
 class Settings(BaseSettings):
     # ... existing fields ...
 
-    # Bootstrap — optional; only used on first startup
+    # Bootstrap â€” optional; only used on first startup
     BOOTSTRAP_ADMIN_EMAIL: str | None = None
     BOOTSTRAP_ADMIN_PASSWORD: str | None = None
 ```
@@ -78,7 +78,7 @@ logger = logging.getLogger(__name__)
 async def bootstrap_admin() -> None:
     """
     Create the first admin account from environment variables.
-    Idempotent — silently skips if any user already exists.
+    Idempotent â€” silently skips if any user already exists.
 
     Called once in the FastAPI lifespan startup, after Alembic migrations.
     """
@@ -87,12 +87,12 @@ async def bootstrap_admin() -> None:
 
     if not email or not password:
         logger.warning(
-            "BOOTSTRAP_ADMIN_EMAIL or BOOTSTRAP_ADMIN_PASSWORD not set — "
+            "BOOTSTRAP_ADMIN_EMAIL or BOOTSTRAP_ADMIN_PASSWORD not set â€” "
             "skipping bootstrap. Set both to create the first admin account."
         )
         return
 
-    # Validate password policy early — fail loudly at startup, not silently
+    # Validate password policy early â€” fail loudly at startup, not silently
     try:
         PasswordService.validate_password_policy(password)
     except ValueError as exc:
@@ -113,7 +113,7 @@ async def bootstrap_admin() -> None:
 
             if user_count > 0:
                 logger.info(
-                    "Bootstrap skipped — %d user(s) already exist.", user_count
+                    "Bootstrap skipped â€” %d user(s) already exist.", user_count
                 )
                 return
 
@@ -138,7 +138,7 @@ from src.core.bootstrap import bootstrap_admin
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Startup — ORDER IS IMPORTANT
+    # Startup â€” ORDER IS IMPORTANT
     await run_migrations()       # T-014: schema must exist before bootstrap
     await init_redis()           # T-018: Redis ready
     await bootstrap_admin()      # T-020: create first admin if needed
@@ -162,7 +162,7 @@ pytestmark = pytest.mark.asyncio
 
 
 async def test_bootstrap_creates_admin_when_no_users(mock_db_session):
-    """First run: no users → admin is created."""
+    """First run: no users â†’ admin is created."""
     from src.core.bootstrap import bootstrap_admin
 
     mock_db_session.execute = AsyncMock(
@@ -188,7 +188,7 @@ async def test_bootstrap_creates_admin_when_no_users(mock_db_session):
 
 
 async def test_bootstrap_skips_when_users_exist(mock_db_session):
-    """Second run: users exist → skip without creating."""
+    """Second run: users exist â†’ skip without creating."""
     from src.core.bootstrap import bootstrap_admin
 
     mock_db_session.execute = AsyncMock(
@@ -212,7 +212,7 @@ async def test_bootstrap_skips_when_users_exist(mock_db_session):
 
 
 async def test_bootstrap_skips_when_env_vars_missing():
-    """No env vars set → skip without error."""
+    """No env vars set â†’ skip without error."""
     from src.core.bootstrap import bootstrap_admin
     with patch("src.core.bootstrap.settings") as mock_settings:
         mock_settings.BOOTSTRAP_ADMIN_EMAIL = None
@@ -221,7 +221,7 @@ async def test_bootstrap_skips_when_env_vars_missing():
 
 
 async def test_bootstrap_raises_on_weak_password():
-    """Weak password → raise ValueError at startup."""
+    """Weak password â†’ raise ValueError at startup."""
     from src.core.bootstrap import bootstrap_admin
     with patch("src.core.bootstrap.settings") as mock_settings:
         mock_settings.BOOTSTRAP_ADMIN_EMAIL = "admin@test.com"
@@ -236,14 +236,14 @@ async def test_bootstrap_raises_on_weak_password():
 | Standard | Value |
 |---|---|
 | Python | 3.12 |
-| Backend | FastAPI · SQLAlchemy 2.x · Pydantic v2 · dependency-injector |
-| Auth | JWT 15-min access + 7-day rotating httpOnly refresh cookie · bcrypt · RBAC (admin/user) |
-| Logging | Structured · INFO level · X-Request-ID correlation |
-| Testing | pytest + httpx + Playwright · ≥80% coverage |
+| Backend | FastAPI Â· SQLAlchemy 2.x Â· Pydantic v2 Â· dependency-injector |
+| Auth | JWT 15-min access + 7-day rotating httpOnly refresh cookie Â· bcrypt Â· RBAC (admin/user) |
+| Logging | Structured Â· INFO level Â· X-Request-ID correlation |
+| Testing | pytest + httpx + Playwright Â· â‰¥80% coverage |
 
 ### Domain Rules
-- `bootstrap_admin` executes **once on startup** and only if zero users exist (FR-024) — never expose this via API
+- `bootstrap_admin` executes **once on startup** and only if zero users exist (FR-024) â€” never expose this via API
 - `must_change_password=True` is NON-NEGOTIABLE for the bootstrap admin (FR-024)
 - Password policy is enforced on the bootstrap password too (FR-034)
 - Bootstrap env vars (`BOOTSTRAP_ADMIN_EMAIL`, `BOOTSTRAP_ADMIN_PASSWORD`) are only used for initial setup; after the admin logs in and changes their password, these env vars can be removed
-- This function MUST be called AFTER `run_migrations()` — the `users` table must exist
+- This function MUST be called AFTER `run_migrations()` â€” the `users` table must exist

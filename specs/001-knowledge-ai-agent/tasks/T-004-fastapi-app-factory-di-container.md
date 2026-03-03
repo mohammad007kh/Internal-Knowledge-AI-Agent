@@ -1,27 +1,27 @@
----
+﻿---
 id: T-004
 title: FastAPI Application Factory, Dependency Injection Container, and Core Settings
-status: Not Started
+status: Done
 created: 2026-02-25
-phase: Phase 0 — Foundation
+phase: Phase 0 â€” Foundation
 user_story: cross
 requirements: []
 ---
 
-## 📋 Embedded Context (READ THIS FIRST)
+## ðŸ“‹ Embedded Context (READ THIS FIRST)
 
 ### Project Standards
 | Standard | Value |
 |---|---|
 | Python | 3.12 |
-| Backend | FastAPI · SQLAlchemy 2.x · Pydantic v2 · dependency-injector |
+| Backend | FastAPI Â· SQLAlchemy 2.x Â· Pydantic v2 Â· dependency-injector |
 | DI | dependency-injector IoC container (constructor injection) |
-| Error Format | RFC 7807 Problem Details — all non-2xx API responses |
-| Logging | Structured · INFO level · X-Request-ID correlation |
+| Error Format | RFC 7807 Problem Details â€” all non-2xx API responses |
+| Logging | Structured Â· INFO level Â· X-Request-ID correlation |
 | Config | Pydantic Settings reads from .env + app_config.yaml |
 
 ### Domain Rules
-- All services are wired via the IoC container — never instantiate services directly in routes
+- All services are wired via the IoC container â€” never instantiate services directly in routes
 - `app_config.yaml` holds `file_upload.max_size_bytes`; Settings reads it via `pydantic_settings`
 - `/health` endpoint must respond before any database is needed (liveness check)
 
@@ -36,13 +36,13 @@ FastAPI application factory with lifespan context manager, dependency-injector I
 
 ---
 
-## 🎯 Objective
+## ðŸŽ¯ Objective
 
 Create the FastAPI `create_app()` factory, wire the dependency-injector container with all service/repository bindings, define Pydantic Settings that read from both `.env` and `app_config.yaml`, and expose the `/health` liveness endpoint.
 
 ---
 
-## 🛠️ Implementation Details
+## ðŸ› ï¸ Implementation Details
 
 ### Files to Create
 
@@ -55,8 +55,8 @@ Create the FastAPI `create_app()` factory, wire the dependency-injector containe
 | `backend/src/api/v1/health.py` | `GET /health` endpoint |
 
 ### Files to Update
-- `backend/src/core/__init__.py` — export `settings`, `container`
-- `backend/src/api/__init__.py` — export `create_api_router()`
+- `backend/src/core/__init__.py` â€” export `settings`, `container`
+- `backend/src/api/__init__.py` â€” export `create_api_router()`
 
 ### Code / Logic Requirements
 
@@ -159,17 +159,17 @@ async def health_check():
 
 ---
 
-## 🔌 Wiring Checklist
+## ðŸ”Œ Wiring Checklist
 
 - [ ] `settings` singleton exported from `src.core.config`
 - [ ] `container` singleton exported from `src.core.container`
-- [ ] `app = create_app()` in `src/main.py` — entry point for uvicorn
+- [ ] `app = create_app()` in `src/main.py` â€” entry point for uvicorn
 - [ ] `/health` route registered before any database dependency
 - [ ] `lifespan` context manager runs `container.wire()` on startup
 
 ---
 
-## ✅ Verification
+## âœ… Verification
 
 ```bash
 # Start backend in dev mode
@@ -190,14 +190,14 @@ cd backend && mypy src/core/ --strict
 ```
 
 **Success Criteria:**
-- `GET /health` → HTTP 200 with `{"status": "ok", "version": "0.1.0"}`
-- `mypy src/core/` → zero errors
-- `ruff check src/core/` → zero errors
+- `GET /health` â†’ HTTP 200 with `{"status": "ok", "version": "0.1.0"}`
+- `mypy src/core/` â†’ zero errors
+- `ruff check src/core/` â†’ zero errors
 - Container instantiates without import errors
 
 ---
 
-## 📝 Completion Log
+## ðŸ“ Completion Log
 
 - [ ] Code implemented
 - [ ] Tests passed

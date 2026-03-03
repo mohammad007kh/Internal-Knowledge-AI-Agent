@@ -1,8 +1,9 @@
-# T-011 — RFC 7807 Error Handler + FastAPI Exception Hierarchy
+﻿# T-011 â€” RFC 7807 Error Handler + FastAPI Exception Hierarchy
 
 ## Metadata
 | Field | Value |
 |---|---|
+| **Status** | Done |
 | **ID** | T-011 |
 | **Title** | RFC 7807 Error Handler + FastAPI Exception Hierarchy |
 | **Phase** | Foundation |
@@ -31,14 +32,14 @@ Every error the frontend or API client will ever receive must follow the same sh
 3. FastAPI's built-in `RequestValidationError` is also caught and mapped to a 422 RFC
    7807 response.
 4. A smoke test confirms that hitting an unknown route returns 404 in RFC 7807 format.
-5. No route handler ever calls `raise HTTPException` directly — it raises an `AppError`
+5. No route handler ever calls `raise HTTPException` directly â€” it raises an `AppError`
    sub-class instead.
 
 ---
 
 ## Implementation
 
-### 1. Exception hierarchy — `backend/src/core/exceptions.py`
+### 1. Exception hierarchy â€” `backend/src/core/exceptions.py`
 
 ```python
 from __future__ import annotations
@@ -63,7 +64,7 @@ class AppError(Exception):
         self.extra = extra or {}
 
 
-# ── 4xx ──────────────────────────────────────────────────────────────────────
+# â”€â”€ 4xx â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 class BadRequestError(AppError):
     status_code = 400
@@ -102,7 +103,7 @@ class UnprocessableError(AppError):
     title = "Unprocessable Entity"
 
 
-# ── 5xx ──────────────────────────────────────────────────────────────────────
+# â”€â”€ 5xx â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 class InternalError(AppError):
     status_code = 500
@@ -118,7 +119,7 @@ class ServiceUnavailableError(AppError):
 
 ---
 
-### 2. Error handler middleware — `backend/src/api/middleware/error_handler.py`
+### 2. Error handler middleware â€” `backend/src/api/middleware/error_handler.py`
 
 ```python
 from __future__ import annotations
@@ -224,7 +225,7 @@ def register_exception_handlers(app: "FastAPI") -> None:
 
 ---
 
-### 3. Wire into `create_app()` — `backend/src/app.py`
+### 3. Wire into `create_app()` â€” `backend/src/app.py`
 
 Add a single import and call **before** routers are registered and **after** the app
 instance is created:
@@ -235,14 +236,14 @@ from src.api.middleware.error_handler import register_exception_handlers
 def create_app() -> FastAPI:
     app = FastAPI(...)
 
-    # ── Exception handlers (FIRST — before anything else) ──
+    # â”€â”€ Exception handlers (FIRST â€” before anything else) â”€â”€
     register_exception_handlers(app)
 
-    # ── Middleware ──
+    # â”€â”€ Middleware â”€â”€
     app.add_middleware(LoggingMiddleware)   # from T-010
-    # … other middleware …
+    # â€¦ other middleware â€¦
 
-    # ── Routers ──
+    # â”€â”€ Routers â”€â”€
     # app.include_router(...)
 
     return app
@@ -253,7 +254,7 @@ def create_app() -> FastAPI:
 
 ---
 
-### 4. Unit / integration test — `backend/tests/unit/test_error_handler.py`
+### 4. Unit / integration test â€” `backend/tests/unit/test_error_handler.py`
 
 ```python
 import pytest
@@ -302,7 +303,7 @@ async def test_validation_error_returns_422_problem_json(client: AsyncClient) ->
 
 - [ ] `backend/src/core/exceptions.py`
 - [ ] `backend/src/api/middleware/error_handler.py`
-- [ ] `backend/src/app.py` — updated `create_app()` to call `register_exception_handlers`
+- [ ] `backend/src/app.py` â€” updated `create_app()` to call `register_exception_handlers`
 - [ ] `backend/tests/unit/test_error_handler.py`
 
 ---
@@ -311,33 +312,33 @@ async def test_validation_error_returns_422_problem_json(client: AsyncClient) ->
 | Standard | Value |
 |---|---|
 | Python | 3.12 |
-| Backend | FastAPI · SQLAlchemy 2.x · Pydantic v2 · dependency-injector |
-| Frontend | Next.js 15 App Router · shadcn/ui · Tailwind CSS |
-| State | React Context · TanStack Query · react-hook-form · Zod |
-| Database | PostgreSQL 16 + pgvector · HNSW m=16 ef_construction=64 · UUID PKs · soft-delete + audit columns |
+| Backend | FastAPI Â· SQLAlchemy 2.x Â· Pydantic v2 Â· dependency-injector |
+| Frontend | Next.js 15 App Router Â· shadcn/ui Â· Tailwind CSS |
+| State | React Context Â· TanStack Query Â· react-hook-form Â· Zod |
+| Database | PostgreSQL 16 + pgvector Â· HNSW m=16 ef_construction=64 Â· UUID PKs Â· soft-delete + audit columns |
 | Migrations | Alembic versioned |
-| Background | Celery + Redis · Beat replicas=1 STRICT |
-| File Storage | MinIO · presigned PUT pattern |
-| Auth | JWT 15-min access + 7-day rotating httpOnly refresh cookie · bcrypt · RBAC (admin/user) |
+| Background | Celery + Redis Â· Beat replicas=1 STRICT |
+| File Storage | MinIO Â· presigned PUT pattern |
+| Auth | JWT 15-min access + 7-day rotating httpOnly refresh cookie Â· bcrypt Â· RBAC (admin/user) |
 | Encryption | Fernet (connection configs at rest) |
-| AI Pipeline | LangGraph 8-node · interrupt() for clarification · SSE streaming |
-| Tracing | Langfuse self-hosted · every pipeline run must emit a trace |
-| Error Format | RFC 7807 Problem Details — all non-2xx API responses |
-| Logging | Structured · INFO level · X-Request-ID correlation |
-| Security | CORS strict · CSRF SameSite=Strict httpOnly · CSP moderate · rate-limit IP |
-| UI | Dark mode · responsive · WCAG-AA · no animations · Lucide icons · Sonner toasts |
-| Naming | snake_case vars/files/tables · PascalCase classes · SCREAMING_SNAKE_CASE constants |
-| Commits | Conventional commits · branch pattern: NNN-description |
-| Testing | pytest + httpx + Playwright · ≥80% coverage |
+| AI Pipeline | LangGraph 8-node Â· interrupt() for clarification Â· SSE streaming |
+| Tracing | Langfuse self-hosted Â· every pipeline run must emit a trace |
+| Error Format | RFC 7807 Problem Details â€” all non-2xx API responses |
+| Logging | Structured Â· INFO level Â· X-Request-ID correlation |
+| Security | CORS strict Â· CSRF SameSite=Strict httpOnly Â· CSP moderate Â· rate-limit IP |
+| UI | Dark mode Â· responsive Â· WCAG-AA Â· no animations Â· Lucide icons Â· Sonner toasts |
+| Naming | snake_case vars/files/tables Â· PascalCase classes Â· SCREAMING_SNAKE_CASE constants |
+| Commits | Conventional commits Â· branch pattern: NNN-description |
+| Testing | pytest + httpx + Playwright Â· â‰¥80% coverage |
 | Infrastructure | Docker Compose 9 services: frontend, backend, worker, beat, db, redis, minio, langfuse, langfuse-db |
 
 ### Domain Rules
 - Source access is per-user per-source; never expose unapproved source data (FR-019)
 - Connection strings and file paths MUST NEVER appear in user-facing output, API responses, or AI content (FR-020)
-- Celery Beat MUST run with exactly 1 replica — duplicate-schedule prevention is critical
-- File size limit is defined in `app_config.yaml`; default 50 MB — NOT in .env, NOT hardcoded (FR-035)
+- Celery Beat MUST run with exactly 1 replica â€” duplicate-schedule prevention is critical
+- File size limit is defined in `app_config.yaml`; default 50 MB â€” NOT in .env, NOT hardcoded (FR-035)
 - `bootstrap_admin` executes once on startup only if zero users exist (FR-024)
 - Auto-restart is capped at 3 consecutive attempts with increasing wait; stop and alert admins on failure (FR-033)
-- All passwords validated via `validate_password_policy()` — min 8 chars, ≥1 uppercase, ≥1 lowercase, ≥1 number (FR-034)
-- Invitations are the only path to new accounts — no self-registration endpoint exists (FR-021)
+- All passwords validated via `validate_password_policy()` â€” min 8 chars, â‰¥1 uppercase, â‰¥1 lowercase, â‰¥1 number (FR-034)
+- Invitations are the only path to new accounts â€” no self-registration endpoint exists (FR-021)
 - Every LangGraph pipeline run MUST emit a Langfuse trace with spans per node

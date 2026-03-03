@@ -1,9 +1,11 @@
-# T-040 — Source ORM Models + Migration 0005
+﻿# T-040 â€” Source ORM Models + Migration 0005
+
+**Status:** Done
 
 ## Context
 ```
-Python 3.12 | FastAPI · SQLAlchemy 2.x · Pydantic v2 · dependency-injector
-PostgreSQL 16 + pgvector · UUID PKs · soft-delete + audit columns · Alembic versioned migrations
+Python 3.12 | FastAPI Â· SQLAlchemy 2.x Â· Pydantic v2 Â· dependency-injector
+PostgreSQL 16 + pgvector Â· UUID PKs Â· soft-delete + audit columns Â· Alembic versioned migrations
 Fernet (connection configs at rest)
 ```
 
@@ -12,7 +14,7 @@ Define the `Source` ORM model and `SourceType` enum, then generate Alembic migra
 
 ---
 
-## File 1 — `app/models/enums.py` (extend existing or create)
+## File 1 â€” `app/models/enums.py` (extend existing or create)
 
 ```python
 import enum
@@ -33,7 +35,7 @@ class SourceType(str, enum.Enum):
 
 ---
 
-## File 2 — `app/models/source.py`
+## File 2 â€” `app/models/source.py`
 
 ```python
 from __future__ import annotations
@@ -86,7 +88,7 @@ class Source(UUIDMixin, TimestampMixin, Base):
 
 ---
 
-## File 3 — `app/models/user.py` (add back-ref relationship)
+## File 3 â€” `app/models/user.py` (add back-ref relationship)
 
 Append to the `User` model class body (after existing relationships):
 
@@ -101,7 +103,7 @@ Append to the `User` model class body (after existing relationships):
 
 ---
 
-## File 4 — `app/db/base.py` — register models import
+## File 4 â€” `app/db/base.py` â€” register models import
 
 Ensure `Source` is imported inside `app/db/base.py` (or wherever all models are imported for Alembic to discover):
 
@@ -112,7 +114,7 @@ from app.models.source import Source  # noqa: F401  # register with metadata
 
 ---
 
-## File 5 — `alembic/versions/0005_sources.py`
+## File 5 â€” `alembic/versions/0005_sources.py`
 
 ```python
 """0005 sources
@@ -199,7 +201,7 @@ def downgrade() -> None:
 
 - [ ] `Source` model imports cleanly with no circular imports
 - [ ] `SourceType` enum values match connector registry keys (T-045)
-- [ ] `config_encrypted` is BYTEA (not TEXT or JSON) — Fernet output is bytes
+- [ ] `config_encrypted` is BYTEA (not TEXT or JSON) â€” Fernet output is bytes
 - [ ] `alembic upgrade head` applies migration without error
 - [ ] `alembic downgrade -1` rolls back cleanly
 - [ ] `User.sources` back-ref resolves in pytest

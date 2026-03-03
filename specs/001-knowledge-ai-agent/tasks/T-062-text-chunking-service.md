@@ -1,10 +1,12 @@
-# T-062 — Text Chunking Service
+﻿# T-062 â€” Text Chunking Service
+
+**Status:** Done
 
 ## Context
 ```
-Python 3.12 | FastAPI · dependency-injector
+Python 3.12 | FastAPI Â· dependency-injector
 langchain-text-splitters
-snake_case vars/files/tables · PascalCase classes · SCREAMING_SNAKE_CASE constants
+snake_case vars/files/tables Â· PascalCase classes Â· SCREAMING_SNAKE_CASE constants
 ```
 
 ## Goal
@@ -19,12 +21,12 @@ Returns typed `ChunkData` objects ready for embedding and database persistence.
 - [ ] Whitespace pre-processing: strip excess whitespace, normalize newlines
 - [ ] Returns `list[ChunkData]` with sequential `chunk_index` starting at 0
 - [ ] `metadata` dict is merged with chunk-level keys (`chunk_index`, `char_start`, `char_end`)
-- [ ] `chunk_text("")` returns `[]` — no error on empty input
+- [ ] `chunk_text("")` returns `[]` â€” no error on empty input
 - [ ] Service is container-registered as Singleton
 
 ---
 
-## 1  Data Contract — `app/schemas/chunk_data.py`
+## 1  Data Contract â€” `app/schemas/chunk_data.py`
 
 ```python
 # app/schemas/chunk_data.py
@@ -44,7 +46,7 @@ class ChunkData:
 
 ---
 
-## 2  Service — `app/services/chunking_service.py`
+## 2  Service â€” `app/services/chunking_service.py`
 
 ```python
 # app/services/chunking_service.py
@@ -132,12 +134,12 @@ class ChunkingService:
 
 ---
 
-## 3  DI Container — `app/containers.py` patch
+## 3  DI Container â€” `app/containers.py` patch
 
 ```python
 # -- inside ApplicationContainer -- add after sync_job_service:
 
-    # ── Chunking ─────────────────────────────────────────────────────────────
+    # â”€â”€ Chunking â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     chunking_service: providers.Singleton[ChunkingService] = providers.Singleton(
         ChunkingService
     )
@@ -151,7 +153,7 @@ from app.services.chunking_service import ChunkingService
 
 ---
 
-## 4  Dependency — `requirements.txt` addition
+## 4  Dependency â€” `requirements.txt` addition
 
 ```
 langchain-text-splitters>=0.2.0
@@ -159,7 +161,7 @@ langchain-text-splitters>=0.2.0
 
 ---
 
-## 5  Unit Tests — `tests/unit/test_chunking_service.py`
+## 5  Unit Tests â€” `tests/unit/test_chunking_service.py`
 
 ```python
 # tests/unit/test_chunking_service.py
@@ -235,5 +237,5 @@ print('chunking_service OK')
 
 | Requirement | Satisfied by |
 |---|---|
-| FR-030 — document chunking | `chunk_text()` with configurable size/overlap |
-| FR-030 — sequential indices | `chunk_index` auto-assigned from 0 |
+| FR-030 â€” document chunking | `chunk_text()` with configurable size/overlap |
+| FR-030 â€” sequential indices | `chunk_index` auto-assigned from 0 |

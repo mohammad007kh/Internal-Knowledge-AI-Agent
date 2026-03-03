@@ -1,9 +1,9 @@
----
+﻿---
 id: T-012
-title: JWT Utility — 15-min Access Token + 7-day Rotating httpOnly Refresh Cookie
-status: Not Started
+title: JWT Utility â€” 15-min Access Token + 7-day Rotating httpOnly Refresh Cookie
+status: Done
 created: 2026-02-25
-phase: Phase 0 — Foundation
+phase: Phase 0 â€” Foundation
 user_story: US3, US6
 requirements: []
 priority: P1
@@ -14,19 +14,19 @@ estimated_effort: 2h
 
 ## Goal
 
-Create a standalone JWT utility module that issues, validates, and rotates access tokens (15 min) and refresh tokens (7 days). Refresh tokens are stored in httpOnly, SameSite=Strict cookies and persisted in the database (so they can be revoked). All token operations go through this single utility — no ad-hoc JWT calls anywhere else.
+Create a standalone JWT utility module that issues, validates, and rotates access tokens (15 min) and refresh tokens (7 days). Refresh tokens are stored in httpOnly, SameSite=Strict cookies and persisted in the database (so they can be revoked). All token operations go through this single utility â€” no ad-hoc JWT calls anywhere else.
 
 ---
 
 ## Acceptance Criteria
 
-- [ ] `create_access_token(payload)` → signed JWT valid for `ACCESS_TOKEN_EXPIRE_MINUTES`
-- [ ] `create_refresh_token(user_id)` → opaque UUID stored in DB, returned as httpOnly cookie
-- [ ] `verify_access_token(token)` → decoded payload or raises `UnauthorizedError`
-- [ ] `verify_refresh_token(token, db)` → valid `UserRefreshToken` row or raises `UnauthorizedError`
-- [ ] `revoke_refresh_token(token, db)` → marks token as revoked (deleted_at set)
-- [ ] `set_refresh_cookie(response, token)` → sets `refresh_token` cookie with correct flags
-- [ ] `clear_refresh_cookie(response)` → clears cookie on logout
+- [ ] `create_access_token(payload)` â†’ signed JWT valid for `ACCESS_TOKEN_EXPIRE_MINUTES`
+- [ ] `create_refresh_token(user_id)` â†’ opaque UUID stored in DB, returned as httpOnly cookie
+- [ ] `verify_access_token(token)` â†’ decoded payload or raises `UnauthorizedError`
+- [ ] `verify_refresh_token(token, db)` â†’ valid `UserRefreshToken` row or raises `UnauthorizedError`
+- [ ] `revoke_refresh_token(token, db)` â†’ marks token as revoked (deleted_at set)
+- [ ] `set_refresh_cookie(response, token)` â†’ sets `refresh_token` cookie with correct flags
+- [ ] `clear_refresh_cookie(response)` â†’ clears cookie on logout
 - [ ] Unit tests cover: expired access token, tampered access token, revoked refresh token, unknown refresh token
 
 ---
@@ -112,7 +112,7 @@ class UserRefreshToken(Base, UUIDMixin, TimestampMixin):
 ### Known edge cases
 
 - Refresh tokens are single-use (rotate on each use): old token revoked, new token issued
-- On refresh, if `revoked_at` is set → the account may be compromised → revoke **all** tokens for that user
+- On refresh, if `revoked_at` is set â†’ the account may be compromised â†’ revoke **all** tokens for that user
 - Expired refresh tokens (past `expires_at`) are cleaned up by a periodic Celery task (T-061)
 
 ---
@@ -121,18 +121,18 @@ class UserRefreshToken(Base, UUIDMixin, TimestampMixin):
 | Standard | Value |
 |---|---|
 | Python | 3.12 |
-| Backend | FastAPI · SQLAlchemy 2.x · Pydantic v2 · dependency-injector |
-| Auth | JWT 15-min access + 7-day rotating httpOnly refresh cookie · bcrypt · RBAC (admin/user) |
-| Error Format | RFC 7807 Problem Details — all non-2xx API responses |
-| Testing | pytest + httpx · ≥80% coverage |
-| Domain Rule | All passwords validated via validate_password_policy() — not relevant here, but token policy is equally strict |
+| Backend | FastAPI Â· SQLAlchemy 2.x Â· Pydantic v2 Â· dependency-injector |
+| Auth | JWT 15-min access + 7-day rotating httpOnly refresh cookie Â· bcrypt Â· RBAC (admin/user) |
+| Error Format | RFC 7807 Problem Details â€” all non-2xx API responses |
+| Testing | pytest + httpx Â· â‰¥80% coverage |
+| Domain Rule | All passwords validated via validate_password_policy() â€” not relevant here, but token policy is equally strict |
 
 ---
 
-## 📝 Completion Log
+## ðŸ“ Completion Log
 
 - [ ] Code implemented
 - [ ] Alembic migration generated and applied
-- [ ] Unit tests pass (≥90% coverage on security.py)
+- [ ] Unit tests pass (â‰¥90% coverage on security.py)
 - [ ] Linter passed
-- [ ] Integration verified: login → access token in body, refresh token in cookie
+- [ ] Integration verified: login â†’ access token in body, refresh token in cookie

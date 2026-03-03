@@ -1,11 +1,12 @@
-# T-038 — Next.js Middleware for Auth Route Protection
+﻿# T-038 â€” Next.js Middleware for Auth Route Protection
 
 ## Metadata
 | Field | Value |
 |---|---|
+| **Status** | Done |
 | **ID** | T-038 |
-| **Title** | Next.js Middleware — auth-route protection, role guard, must_change_password redirect |
-| **Phase** | 1 — Authentication & User Management |
+| **Title** | Next.js Middleware â€” auth-route protection, role guard, must_change_password redirect |
+| **Phase** | 1 â€” Authentication & User Management |
 | **Domain** | Frontend / Middleware |
 | **Depends on** | T-005, T-032 |
 | **Blocks** | T-033, T-039 |
@@ -15,10 +16,10 @@
 | Standard | Value |
 |---|---|
 | Python | 3.12 |
-| Backend | FastAPI · SQLAlchemy 2.x · Pydantic v2 · dependency-injector |
-| Frontend | Next.js 15 App Router · shadcn/ui · Tailwind CSS v4 |
-| Auth | JWT 15-min access + 7-day rotating httpOnly refresh cookie · bcrypt · RBAC (admin/user) |
-| UI | Dark mode · responsive · WCAG-AA · no animations · Lucide icons · Sonner toasts |
+| Backend | FastAPI Â· SQLAlchemy 2.x Â· Pydantic v2 Â· dependency-injector |
+| Frontend | Next.js 15 App Router Â· shadcn/ui Â· Tailwind CSS v4 |
+| Auth | JWT 15-min access + 7-day rotating httpOnly refresh cookie Â· bcrypt Â· RBAC (admin/user) |
+| UI | Dark mode Â· responsive Â· WCAG-AA Â· no animations Â· Lucide icons Â· Sonner toasts |
 | Infrastructure | Docker Compose 9 services |
 
 ### Domain Rules
@@ -29,11 +30,11 @@
 
 ## Goal
 Implement `src/middleware.ts` (Next.js Edge middleware) that:
-1. **Protects `(dashboard)` routes** — redirects to `/auth/login` if the httpOnly refresh
+1. **Protects `(dashboard)` routes** â€” redirects to `/auth/login` if the httpOnly refresh
    cookie is absent
-2. **Blocks admin routes** — redirects non-admins away from `/admin/*`; uses the JWT
-   `role` claim (decoded in middleware without crypto verify — verification happens server-side)
-3. **Intercepts `must_change_password`** — if the JWT `must_change_password` claim is `true`,
+2. **Blocks admin routes** â€” redirects non-admins away from `/admin/*`; uses the JWT
+   `role` claim (decoded in middleware without crypto verify â€” verification happens server-side)
+3. **Intercepts `must_change_password`** â€” if the JWT `must_change_password` claim is `true`,
    redirects every `(dashboard)` request to `/auth/change-password`
 4. **Redirects authenticated users** away from `(auth)` pages (except `/auth/change-password`)
 
@@ -45,13 +46,13 @@ Implement `src/middleware.ts` (Next.js Edge middleware) that:
 ```typescript
 import { type NextRequest, NextResponse } from "next/server";
 
-// ── Route groups ──────────────────────────────────────────────────────────────
+// â”€â”€ Route groups â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 const AUTH_ROUTES = /^\/auth(\/|$)/;
 const DASHBOARD_ROUTES = /^\/(chat|admin|sources|profile)(\/|$)/;
 const ADMIN_ROUTES = /^\/admin(\/|$)/;
 const CHANGE_PASSWORD_ROUTE = "/auth/change-password";
 
-// ── JWT decode (Edge-safe, no crypto library) ────────────────────────────────
+// â”€â”€ JWT decode (Edge-safe, no crypto library) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 interface EdgeJwtPayload {
   sub?: string;
   email?: string;
@@ -77,7 +78,7 @@ function isTokenExpired(payload: EdgeJwtPayload): boolean {
   return payload.exp * 1000 < Date.now();
 }
 
-// ── Middleware ────────────────────────────────────────────────────────────────
+// â”€â”€ Middleware â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
@@ -87,7 +88,7 @@ export function middleware(request: NextRequest) {
   const accessTokenCookie = request.cookies.get("__access")?.value;
   const refreshCookie = request.cookies.get("refresh_token")?.value;
 
-  // ── Determine auth state ─────────────────────────────────────────────────
+  // â”€â”€ Determine auth state â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   let payload: EdgeJwtPayload | null = null;
   let isAuthenticated = false;
 
@@ -99,10 +100,10 @@ export function middleware(request: NextRequest) {
   }
 
   // If access token is expired/absent but refresh cookie exists,
-  // let the request through to dashboard — AuthProvider will trigger a refresh.
+  // let the request through to dashboard â€” AuthProvider will trigger a refresh.
   const hasRefreshCookie = !!refreshCookie;
 
-  // ── Auth pages: redirect authenticated users away ─────────────────────────
+  // â”€â”€ Auth pages: redirect authenticated users away â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   if (AUTH_ROUTES.test(pathname) && pathname !== CHANGE_PASSWORD_ROUTE) {
     if (isAuthenticated) {
       return NextResponse.redirect(new URL("/chat", request.url));
@@ -110,16 +111,16 @@ export function middleware(request: NextRequest) {
     return NextResponse.next();
   }
 
-  // ── Dashboard pages: protect ──────────────────────────────────────────────
+  // â”€â”€ Dashboard pages: protect â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   if (DASHBOARD_ROUTES.test(pathname)) {
-    // No credentials at all → redirect to login
+    // No credentials at all â†’ redirect to login
     if (!isAuthenticated && !hasRefreshCookie) {
       const loginUrl = new URL("/auth/login", request.url);
       loginUrl.searchParams.set("next", pathname);
       return NextResponse.redirect(loginUrl);
     }
 
-    // Authenticated but must change password → redirect to change-password
+    // Authenticated but must change password â†’ redirect to change-password
     if (isAuthenticated && payload?.must_change_password) {
       if (pathname !== CHANGE_PASSWORD_ROUTE) {
         return NextResponse.redirect(new URL(CHANGE_PASSWORD_ROUTE, request.url));
@@ -137,7 +138,7 @@ export function middleware(request: NextRequest) {
   return NextResponse.next();
 }
 
-// ── Matcher: skip static assets, API routes, Next.js internals ───────────────
+// â”€â”€ Matcher: skip static assets, API routes, Next.js internals â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 export const config = {
   matcher: [
     "/((?!_next/static|_next/image|favicon.ico|api/).*)",
@@ -149,7 +150,7 @@ export const config = {
 
 ### Cookie management update in `AuthContext`
 When the access token is set, also write the readable `__access` cookie so that the
-middleware can inspect it. **The `__access` cookie must NOT be httpOnly** — it's for
+middleware can inspect it. **The `__access` cookie must NOT be httpOnly** â€” it's for
 middleware route-guard use only (not a security credential).
 
 ```typescript
@@ -167,7 +168,7 @@ const setAccessToken = useCallback(
         expires: new Date(payload.exp * 1000),
         sameSite: "strict",
         secure: process.env.NODE_ENV === "production",
-        // NOT httpOnly — must be readable from middleware
+        // NOT httpOnly â€” must be readable from middleware
       });
     }
   },

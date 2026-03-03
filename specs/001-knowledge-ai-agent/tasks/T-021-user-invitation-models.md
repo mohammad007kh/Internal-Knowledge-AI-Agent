@@ -1,9 +1,9 @@
----
+﻿---
 id: T-021
 title: User & Invitation ORM Models + Alembic Migration
-status: Not Started
+status: Done
 created: 2026-02-25
-phase: Phase 1 — Auth & User Management
+phase: Phase 1 â€” Auth & User Management
 user_story: US1, US3
 requirements: [FR-AUTH-1, FR-AUTH-2, FR-AUTH-3]
 priority: P1
@@ -21,11 +21,11 @@ Define `User` and `Invitation` SQLAlchemy ORM models and generate the Alembic mi
 ## Acceptance Criteria
 
 - [ ] `User` model has: `id`, `email` (unique, indexed), `hashed_password`, `full_name`, `role` (enum: admin/user), `is_active`, `created_at`, `updated_at`, `deleted_at`
-- [ ] `Invitation` model has: `id`, `email`, `token` (unique UUID), `invited_by` (FK → users.id), `role`, `expires_at`, `accepted_at`, `created_at`
+- [ ] `Invitation` model has: `id`, `email`, `token` (unique UUID), `invited_by` (FK â†’ users.id), `role`, `expires_at`, `accepted_at`, `created_at`
 - [ ] `UserRole` Python Enum exists at `src.models.user.UserRole`
 - [ ] Migration file: `0003_add_users_invitations.py` (uses file template from T-014)
 - [ ] `User` extends `UUIDMixin`, `TimestampMixin`, `SoftDeleteMixin`
-- [ ] `Invitation` extends `UUIDMixin`, `TimestampMixin` only (no soft delete—accepted/expired tokens are kept for audit)
+- [ ] `Invitation` extends `UUIDMixin`, `TimestampMixin` only (no soft deleteâ€”accepted/expired tokens are kept for audit)
 - [ ] Unit tests assert round-trip insert + soft delete works
 
 ---
@@ -126,7 +126,7 @@ CREATE TABLE invitations (
 
 ---
 
-## 📝 Completion Log
+## ðŸ“ Completion Log
 
 - [ ] Models implemented
 - [ ] Migration generated (`alembic revision --autogenerate -m "add_users_invitations"`)

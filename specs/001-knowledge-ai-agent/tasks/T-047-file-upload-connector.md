@@ -1,9 +1,11 @@
-# T-047 — File Upload Connector
+﻿# T-047 â€” File Upload Connector
+
+**Status:** Done
 
 ## Context
 ```
-Python 3.12 | MinIO · PyPDF2 · python-docx · pydantic_settings
-SourceType.FILE_UPLOAD · @register decorator · BaseConnector ABC
+Python 3.12 | MinIO Â· PyPDF2 Â· python-docx Â· pydantic_settings
+SourceType.FILE_UPLOAD Â· @register decorator Â· BaseConnector ABC
 FR-035: file size limit from app_config.yaml (default 50 MB)
 FR-020: connection strings/keys must never appear in user-facing output
 ```
@@ -13,7 +15,7 @@ Implement `FileUploadConnector`: retrieve a file already uploaded to MinIO, vali
 
 ---
 
-## File — `app/connectors/file_upload_connector.py`
+## File â€” `app/connectors/file_upload_connector.py`
 
 ```python
 from __future__ import annotations
@@ -41,9 +43,9 @@ class FileUploadConnector(BaseConnector):
     Connector for files already stored in MinIO.
 
     Expected *config* keys:
-        minio_bucket (str, required)  — MinIO bucket name
-        object_key   (str, required)  — full object path inside the bucket
-        file_type    (str, required)  — one of: pdf | docx | txt
+        minio_bucket (str, required)  â€” MinIO bucket name
+        object_key   (str, required)  â€” full object path inside the bucket
+        file_type    (str, required)  â€” one of: pdf | docx | txt
 
     source_id must also be present in config (injected by ConnectorFactory in T-050).
     """
@@ -196,7 +198,7 @@ class FileUploadConnector(BaseConnector):
 
 ---
 
-## `app/services/storage_service.py` — additions required
+## `app/services/storage_service.py` â€” additions required
 
 Add `download_bytes` and `object_exists` if not already present:
 
@@ -222,7 +224,7 @@ async def object_exists(self, bucket: str, object_key: str) -> bool:
 
 ---
 
-## `app/core/app_config.py` — relevant section
+## `app/core/app_config.py` â€” relevant section
 
 ```python
 # app_config.yaml structure (relevant excerpt):

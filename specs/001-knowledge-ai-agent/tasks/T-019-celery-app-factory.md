@@ -1,11 +1,11 @@
-# T-019 — Celery App Factory + Worker + Beat Configuration
+﻿# T-019 â€” Celery App Factory + Worker + Beat Configuration
 
 ---
 id: T-019
 title: Celery Application Factory, Worker Dockerfile CMD, and Beat Scheduler
-status: Not Started
+status: Done
 created: 2026-02-26
-phase: Phase 0 — Foundation
+phase: Phase 0 â€” Foundation
 user_story: cross
 requirements: [FR-016, FR-033]
 priority: P1
@@ -23,13 +23,13 @@ Set up the Celery application factory so that background tasks (file ingestion, 
 ## Acceptance Criteria
 
 - [ ] `celery_app` is importable from `src.core.celery` with broker and backend pointing to `settings.REDIS_URL`
-- [ ] `@shared_task` imports from `celery` (standard pattern — no direct `celery_app` reference in task files)
+- [ ] `@shared_task` imports from `celery` (standard pattern â€” no direct `celery_app` reference in task files)
 - [ ] Beat scheduler uses `celery_app.conf.beat_schedule` dict (not `django-celery-beat` database scheduler)
-- [ ] Beat schedule is initially empty — populated in T-061
+- [ ] Beat schedule is initially empty â€” populated in T-061
 - [ ] Worker `CMD` in Dockerfile: `celery -A src.core.celery:celery_app worker --loglevel=info --concurrency=4`
 - [ ] Beat `CMD` in Dockerfile: `celery -A src.core.celery:celery_app beat --loglevel=info --scheduler celery.beat:PersistentScheduler`
-- [ ] Beat `replicas: 1` is enforced in `docker-compose.yml` — task documents the constraint (already in T-002, confirmed here)
-- [ ] Task serializer: `json`; result serializer: `json`; accept content: `json` — no `pickle`
+- [ ] Beat `replicas: 1` is enforced in `docker-compose.yml` â€” task documents the constraint (already in T-002, confirmed here)
+- [ ] Task serializer: `json`; result serializer: `json`; accept content: `json` â€” no `pickle`
 - [ ] Task auto-discovery scans `src.tasks.*` package
 - [ ] `celery_app.conf.task_soft_time_limit = 300` and `task_time_limit = 360` (FR-033: auto-restart capped)
 - [ ] Unit test: `celery_app` imports successfully; `celery_app.tasks` list does not raise
@@ -41,10 +41,10 @@ Set up the Celery application factory so that background tasks (file ingestion, 
 
 | Path | Action |
 |------|---------|
-| `backend/src/core/celery.py` | Create — Celery app factory |
-| `backend/src/tasks/__init__.py` | Create — empty package |
-| `backend/src/tasks/base.py` | Create — `BaseTask` with retry + Sentry logging |
-| `backend/Dockerfile.worker` | Create — worker + beat image (or document CMD override in docker-compose) |
+| `backend/src/core/celery.py` | Create â€” Celery app factory |
+| `backend/src/tasks/__init__.py` | Create â€” empty package |
+| `backend/src/tasks/base.py` | Create â€” `BaseTask` with retry + Sentry logging |
+| `backend/Dockerfile.worker` | Create â€” worker + beat image (or document CMD override in docker-compose) |
 | `backend/tests/unit/test_celery_app.py` | Create |
 
 ---
@@ -65,7 +65,7 @@ celery_app = Celery(
 )
 
 celery_app.conf.update(
-    # Serialization — never use pickle (security)
+    # Serialization â€” never use pickle (security)
     task_serializer="json",
     result_serializer="json",
     accept_content=["json"],
@@ -80,7 +80,7 @@ celery_app.conf.update(
     # Worker
     worker_prefetch_multiplier=1,
     task_acks_late=True,         # ack after completion, not on receive
-    # Beat — schedule populated in T-061
+    # Beat â€” schedule populated in T-061
     beat_schedule={},
     beat_max_loop_interval=5,
 )
@@ -115,7 +115,7 @@ class BaseTask(Task):
             task_name=self.name,
             exc=str(exc),
         )
-        # Sentry capture (only if SDK is initialised — safe to call always)
+        # Sentry capture (only if SDK is initialised â€” safe to call always)
         try:
             import sentry_sdk
             sentry_sdk.capture_exception(exc)
@@ -168,7 +168,7 @@ def run_source_sync(self, source_id: str) -> dict:
 ### Docker Compose CMD overrides (already in T-002, confirmed here)
 
 ```yaml
-# docker-compose.yml — worker service
+# docker-compose.yml â€” worker service
 worker:
   build:
     context: ./backend
@@ -179,13 +179,13 @@ worker:
     db:
       condition: service_healthy
 
-# docker-compose.yml — beat service
+# docker-compose.yml â€” beat service
 beat:
   build:
     context: ./backend
   command: celery -A src.core.celery:celery_app beat --loglevel=info
   deploy:
-    replicas: 1  # CRITICAL — duplicate beat schedules cause duplicate task execution
+    replicas: 1  # CRITICAL â€” duplicate beat schedules cause duplicate task execution
   depends_on:
     redis:
       condition: service_healthy
@@ -240,14 +240,14 @@ def test_base_task_on_failure_calls_sentry(caplog):
 | Standard | Value |
 |---|---|
 | Python | 3.12 |
-| Background | Celery + Redis · Beat replicas=1 STRICT |
-| Error Format | RFC 7807 Problem Details — all non-2xx API responses |
-| Logging | Structured · INFO level · X-Request-ID correlation |
+| Background | Celery + Redis Â· Beat replicas=1 STRICT |
+| Error Format | RFC 7807 Problem Details â€” all non-2xx API responses |
+| Logging | Structured Â· INFO level Â· X-Request-ID correlation |
 | Infrastructure | Docker Compose 9 services |
 
 ### Domain Rules
-- **Beat MUST run with `replicas: 1`** — this is a hard rule; duplicate beat instances cause tasks to fire multiple times
-- Never use `pickle` serialization — json only
+- **Beat MUST run with `replicas: 1`** â€” this is a hard rule; duplicate beat instances cause tasks to fire multiple times
+- Never use `pickle` serialization â€” json only
 - `task_acks_late=True` + `worker_prefetch_multiplier=1` ensures tasks are not lost on worker crash
 - `FR-033`: Auto-restart is capped at 3 attempts (`max_retries=3` in `BaseTask`); on final failure alert via Sentry
-- The beat schedule dict lives in `celery_app.conf.beat_schedule` — not in a database scheduler
+- The beat schedule dict lives in `celery_app.conf.beat_schedule` â€” not in a database scheduler

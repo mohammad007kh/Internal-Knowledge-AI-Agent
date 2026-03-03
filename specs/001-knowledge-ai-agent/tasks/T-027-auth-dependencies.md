@@ -1,11 +1,12 @@
-# T-027 — FastAPI Auth Dependencies (`get_current_user`, `require_role`)
+﻿# T-027 â€” FastAPI Auth Dependencies (`get_current_user`, `require_role`)
 
 ## Metadata
 | Field | Value |
 |---|---|
+| **Status** | Done |
 | **ID** | T-027 |
-| **Title** | FastAPI Auth Dependencies — `get_current_user` and `require_role` |
-| **Phase** | 1 — Authentication & User Management |
+| **Title** | FastAPI Auth Dependencies â€” `get_current_user` and `require_role` |
+| **Phase** | 1 â€” Authentication & User Management |
 | **Domain** | Backend / Auth |
 | **Depends on** | T-012, T-023, T-025 |
 | **Blocks** | T-026, T-028, T-030, T-053, T-064, T-070 |
@@ -15,8 +16,8 @@
 
 ## Goal
 Create the two reusable FastAPI dependency functions that every protected route uses:
-- `get_current_user(token) -> User` — validates the Bearer access token; raises `401` if invalid/expired
-- `require_role(*roles) -> Callable[..., User]` — factory that wraps `get_current_user`; raises `403` if role not in `roles`
+- `get_current_user(token) -> User` â€” validates the Bearer access token; raises `401` if invalid/expired
+- `require_role(*roles) -> Callable[..., User]` â€” factory that wraps `get_current_user`; raises `403` if role not in `roles`
 
 These are the **only** places where access tokens are decoded outside of tests.
 
@@ -73,7 +74,7 @@ async def get_current_user(
     return user
 
 
-# Alias — use when you just need "any authenticated user"
+# Alias â€” use when you just need "any authenticated user"
 require_authenticated = get_current_user
 
 
@@ -100,7 +101,7 @@ def require_role(*roles: UserRole):
 
 ---
 
-### 2. `UserRole` enum — must exist in `app/models/user.py` (from T-021)
+### 2. `UserRole` enum â€” must exist in `app/models/user.py` (from T-021)
 ```python
 import enum
 
@@ -108,7 +109,7 @@ class UserRole(str, enum.Enum):
     admin = "admin"
     user = "user"
 ```
-If not already present — add in T-021 model.
+If not already present â€” add in T-021 model.
 
 ---
 
@@ -125,7 +126,7 @@ async def list_sources(...): ...
 @router.delete("/users/{user_id}", dependencies=[Depends(require_role(UserRole.admin))])
 async def deactivate_user(...): ...
 
-# Admin only — also capture user object
+# Admin only â€” also capture user object
 @router.post("/sources", ...)
 async def create_source(
     ...,
@@ -141,13 +142,13 @@ async def create_source(
 - [ ] `get_current_user` raises `403` for a deactivated user with a valid token
 - [ ] `require_role(UserRole.admin)` raises `403` when called by a `user`-role account
 - [ ] `require_role(UserRole.admin)` passes when called by an `admin`-role account
-- [ ] `require_authenticated` is just an alias for `get_current_user` — no additional logic
+- [ ] `require_authenticated` is just an alias for `get_current_user` â€” no additional logic
 - [ ] Unit tests cover all raise paths (missing token, expired, deactivated, wrong role)
-- [ ] No inline JWT logic — all decoding delegated to `verify_access_token` from T-012
+- [ ] No inline JWT logic â€” all decoding delegated to `verify_access_token` from T-012
 
 ---
 
 ## Notes
 - `auto_error=False` on `HTTPBearer` allows a custom 401 rather than FastAPI's default 403
 - The DB load ensures the user still exists and hasn't been deactivated after the token was issued
-- `require_role` is a **factory** that returns a dependency callable — not a dependency itself
+- `require_role` is a **factory** that returns a dependency callable â€” not a dependency itself

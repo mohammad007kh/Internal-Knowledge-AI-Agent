@@ -1,6 +1,8 @@
-# T-096 · Security Hardening — Headers, Rate Limiting & RBAC Smoke Tests
+﻿# T-096 Â· Security Hardening â€” Headers, Rate Limiting & RBAC Smoke Tests
 
-**Phase:** 9 — Testing, Polish & SC Verification  
+**Status:** Done
+
+**Phase:** 9 â€” Testing, Polish & SC Verification  
 **Depends on:** T-091 (integration test stack running)  
 **Blocks:** T-099
 
@@ -9,23 +11,23 @@
 ## Context
 
 ```
-Python 3.12 | FastAPI · SQLAlchemy 2.x · Pydantic v2 · dependency-injector
-Next.js 15 App Router · shadcn/ui · Tailwind CSS v4
-React Context · TanStack Query v5 · react-hook-form · Zod
-PostgreSQL 16 + pgvector · HNSW m=16 ef_construction=64 · UUID PKs · soft-delete + audit columns
+Python 3.12 | FastAPI Â· SQLAlchemy 2.x Â· Pydantic v2 Â· dependency-injector
+Next.js 15 App Router Â· shadcn/ui Â· Tailwind CSS v4
+React Context Â· TanStack Query v5 Â· react-hook-form Â· Zod
+PostgreSQL 16 + pgvector Â· HNSW m=16 ef_construction=64 Â· UUID PKs Â· soft-delete + audit columns
 Alembic versioned migrations
-Celery + Redis · Beat replicas=1 STRICT
-MinIO · presigned PUT pattern
-JWT 15-min access + 7-day rotating httpOnly refresh cookie · bcrypt · RBAC (admin/user)
+Celery + Redis Â· Beat replicas=1 STRICT
+MinIO Â· presigned PUT pattern
+JWT 15-min access + 7-day rotating httpOnly refresh cookie Â· bcrypt Â· RBAC (admin/user)
 Fernet (connection configs + LLM API keys at rest)
-LangGraph 8-node · interrupt() for clarification · SSE streaming
-Langfuse self-hosted · every pipeline run must emit a trace
-RFC 7807 Problem Details — all non-2xx API responses
-Structured logging · INFO level · X-Request-ID correlation
-CORS strict · CSRF SameSite=Strict httpOnly · CSP moderate · rate-limit IP
-Dark mode · responsive · WCAG-AA · no animations · Lucide icons · Sonner toasts
-snake_case vars/files/tables · PascalCase classes · SCREAMING_SNAKE_CASE constants
-pytest + httpx + Playwright · ≥80% coverage
+LangGraph 8-node Â· interrupt() for clarification Â· SSE streaming
+Langfuse self-hosted Â· every pipeline run must emit a trace
+RFC 7807 Problem Details â€” all non-2xx API responses
+Structured logging Â· INFO level Â· X-Request-ID correlation
+CORS strict Â· CSRF SameSite=Strict httpOnly Â· CSP moderate Â· rate-limit IP
+Dark mode Â· responsive Â· WCAG-AA Â· no animations Â· Lucide icons Â· Sonner toasts
+snake_case vars/files/tables Â· PascalCase classes Â· SCREAMING_SNAKE_CASE constants
+pytest + httpx + Playwright Â· â‰¥80% coverage
 Docker Compose 9 services: frontend, backend, worker, beat, db, redis, minio, langfuse, langfuse-db
 ```
 
@@ -35,9 +37,9 @@ Docker Compose 9 services: frontend, backend, worker, beat, db, redis, minio, la
 
 Verify the security posture across three categories:
 
-1. **HTTP security headers** — CSP, HSTS, X-Content-Type-Options, X-Frame-Options, etc.  
-2. **Rate limiting** — IP-based 429 responses after threshold exceeded  
-3. **RBAC smoke tests** — every protected endpoint correctly rejects `user` role / unauthenticated callers
+1. **HTTP security headers** â€” CSP, HSTS, X-Content-Type-Options, X-Frame-Options, etc.  
+2. **Rate limiting** â€” IP-based 429 responses after threshold exceeded  
+3. **RBAC smoke tests** â€” every protected endpoint correctly rejects `user` role / unauthenticated callers
 
 File location:
 
@@ -47,7 +49,7 @@ File location:
 
 ---
 
-## 1. Security Headers Tests — `tests/integration/security/test_security_headers.py`
+## 1. Security Headers Tests â€” `tests/integration/security/test_security_headers.py`
 
 ```python
 """
@@ -78,7 +80,7 @@ async def test_x_frame_options_header(async_client: AsyncClient) -> None:
 
 @pytest.mark.asyncio
 async def test_strict_transport_security_header(async_client: AsyncClient) -> None:
-    """HSTS must be present with max-age ≥ one year (31 536 000 s)."""
+    """HSTS must be present with max-age â‰¥ one year (31 536 000 s)."""
     r = await async_client.get(PROBE_URL)
     hsts = r.headers.get("strict-transport-security", "")
     assert hsts, "HSTS header missing"
@@ -163,7 +165,7 @@ async def test_x_request_id_present_in_response(async_client: AsyncClient) -> No
 
 ---
 
-## 2. Rate Limiting Tests — `tests/integration/security/test_rate_limiting.py`
+## 2. Rate Limiting Tests â€” `tests/integration/security/test_rate_limiting.py`
 
 ```python
 """
@@ -176,7 +178,7 @@ import asyncio
 import pytest
 from httpx import AsyncClient
 
-# How many requests trigger the 429 — read from app settings or default
+# How many requests trigger the 429 â€” read from app settings or default
 LOGIN_RATE_LIMIT = 5
 LOGIN_URL = "/api/v1/auth/login"
 BAD_CREDENTIALS = {"email": "nobody@example.com", "password": "wrong"}
@@ -184,7 +186,7 @@ BAD_CREDENTIALS = {"email": "nobody@example.com", "password": "wrong"}
 
 @pytest.mark.asyncio
 async def test_login_rate_limit_returns_429(async_client: AsyncClient) -> None:
-    """Exceed LOGIN_RATE_LIMIT requests → 429 Too Many Requests."""
+    """Exceed LOGIN_RATE_LIMIT requests â†’ 429 Too Many Requests."""
     for _ in range(LOGIN_RATE_LIMIT):
         await async_client.post(LOGIN_URL, json=BAD_CREDENTIALS)
 
@@ -234,11 +236,11 @@ async def test_read_endpoints_not_rate_limited_at_login_threshold(
 
 ---
 
-## 3. RBAC Smoke Tests — `tests/integration/security/test_rbac_smoke.py`
+## 3. RBAC Smoke Tests â€” `tests/integration/security/test_rbac_smoke.py`
 
 ```python
 """
-RBAC smoke tests — every admin endpoint must reject
+RBAC smoke tests â€” every admin endpoint must reject
 regular users (403) and unauthenticated callers (401).
 
 Each entry is (method, path).
@@ -338,7 +340,7 @@ async def test_user_accessible_endpoint_allows_user_role(
 ) -> None:
     headers = {"Authorization": f"Bearer {user_token}"}
     r = await async_client.request(method, path, headers=headers)
-    # Any of 200, 201, 404 is acceptable — all mean the user got past auth
+    # Any of 200, 201, 404 is acceptable â€” all mean the user got past auth
     assert r.status_code not in (401, 403), (
         f"{method} {path}: user should be allowed, got {r.status_code}"
     )
@@ -401,7 +403,7 @@ async def test_wrong_signing_secret_returns_401(async_client: AsyncClient) -> No
 ## Definition of Done
 
 - [ ] All security-header assertions pass against the test app instance
-- [ ] CSP, HSTS (≥1 year), X-Content-Type-Options, X-Frame-Options, Referrer-Policy, Permissions-Policy present
+- [ ] CSP, HSTS (â‰¥1 year), X-Content-Type-Options, X-Frame-Options, Referrer-Policy, Permissions-Policy present
 - [ ] Server header does not leak `uvicorn` or `python`
 - [ ] CORS: arbitrary origin rejected; whitelisted origin allowed
 - [ ] X-Request-ID header present in every response

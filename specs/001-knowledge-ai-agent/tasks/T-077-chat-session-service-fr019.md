@@ -1,15 +1,17 @@
-# T-077 — Chat Session Repository Service + Source Permission Integration
+﻿# T-077 â€” Chat Session Repository Service + Source Permission Integration
+
+**Status:** Done
 
 ## Context
 ```
-Python 3.12 | FastAPI · SQLAlchemy 2.x · Pydantic v2 · dependency-injector
-FR-019: source access per user per source — NEVER expose unapproved data
-PostgreSQL 16 · UUID PKs · soft-delete
-snake_case vars/files/tables · PascalCase classes · SCREAMING_SNAKE_CASE constants
+Python 3.12 | FastAPI Â· SQLAlchemy 2.x Â· Pydantic v2 Â· dependency-injector
+FR-019: source access per user per source â€” NEVER expose unapproved data
+PostgreSQL 16 Â· UUID PKs Â· soft-delete
+snake_case vars/files/tables Â· PascalCase classes Â· SCREAMING_SNAKE_CASE constants
 ```
 
 ## Goal
-1. Implement `ChatSessionService` — thin service layer over the repositories
+1. Implement `ChatSessionService` â€” thin service layer over the repositories
    that enforces FR-019: resolves the user's permitted `source_ids` when
    `body.source_ids` is empty  
 2. Patch the `send_message` endpoint in T-076 to use `ChatSessionService`
@@ -69,7 +71,7 @@ def downgrade() -> None:
 
 ---
 
-## 2  `app/models/chat.py` — patch (add `source_ids` column)
+## 2  `app/models/chat.py` â€” patch (add `source_ids` column)
 
 ```python
 # Inside ChatSession class, after the `title` column:
@@ -90,7 +92,7 @@ source_ids: Mapped[list] = mapped_column(
 
 ```python
 # app/services/chat_session_service.py
-"""ChatSessionService — session lifecycle and FR-019 source resolution."""
+"""ChatSessionService â€” session lifecycle and FR-019 source resolution."""
 from __future__ import annotations
 
 import logging
@@ -122,7 +124,7 @@ class ChatSessionService:
         self._repo = chat_session_repository
         self._perms = source_permission_service
 
-    # ── Session lifecycle ─────────────────────────────────────────────────
+    # â”€â”€ Session lifecycle â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     async def create_session(
         self,
@@ -147,7 +149,7 @@ class ChatSessionService:
         await db.flush()
         return session
 
-    # ── FR-019 source resolution ──────────────────────────────────────────
+    # â”€â”€ FR-019 source resolution â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     async def get_source_ids_for_session(
         self,
@@ -183,7 +185,7 @@ class ChatSessionService:
 
         return permitted
 
-    # ── Ownership enforcement ─────────────────────────────────────────────
+    # â”€â”€ Ownership enforcement â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     async def get_owned_session(
         self,
@@ -201,7 +203,7 @@ class ChatSessionService:
 
 ---
 
-## 4  `app/services/source_permission_service.py` — patch
+## 4  `app/services/source_permission_service.py` â€” patch
 
 Add `filter_permitted` helper method:
 
@@ -226,7 +228,7 @@ async def filter_permitted(
 
 ---
 
-## 5  `containers.py` — patch
+## 5  `containers.py` â€” patch
 
 ```python
 # Add after langfuse_tracing_service:
@@ -242,7 +244,7 @@ chat_session_service = providers.Factory(
 
 ---
 
-## 6  `app/api/v1/chat.py` — patch (use `ChatSessionService`)
+## 6  `app/api/v1/chat.py` â€” patch (use `ChatSessionService`)
 
 In the `send_message` endpoint, replace:
 
@@ -278,7 +280,7 @@ await db_session.commit()
 
 ---
 
-## 7  Unit Tests — `tests/unit/services/test_chat_session_service.py`
+## 7  Unit Tests â€” `tests/unit/services/test_chat_session_service.py`
 
 ```python
 # tests/unit/services/test_chat_session_service.py

@@ -1,6 +1,8 @@
-# T-097 · Dark Mode, Responsive Layout & Polish
+﻿# T-097 Â· Dark Mode, Responsive Layout & Polish
 
-**Phase:** 9 — Testing, Polish & SC Verification  
+**Status:** Done
+
+**Phase:** 9 â€” Testing, Polish & SC Verification  
 **Depends on:** T-093 (Playwright suite in place), T-094 (a11y audit baseline)  
 **Blocks:** T-099
 
@@ -9,23 +11,23 @@
 ## Context
 
 ```
-Python 3.12 | FastAPI · SQLAlchemy 2.x · Pydantic v2 · dependency-injector
-Next.js 15 App Router · shadcn/ui · Tailwind CSS v4
-React Context · TanStack Query v5 · react-hook-form · Zod
-PostgreSQL 16 + pgvector · HNSW m=16 ef_construction=64 · UUID PKs · soft-delete + audit columns
+Python 3.12 | FastAPI Â· SQLAlchemy 2.x Â· Pydantic v2 Â· dependency-injector
+Next.js 15 App Router Â· shadcn/ui Â· Tailwind CSS v4
+React Context Â· TanStack Query v5 Â· react-hook-form Â· Zod
+PostgreSQL 16 + pgvector Â· HNSW m=16 ef_construction=64 Â· UUID PKs Â· soft-delete + audit columns
 Alembic versioned migrations
-Celery + Redis · Beat replicas=1 STRICT
-MinIO · presigned PUT pattern
-JWT 15-min access + 7-day rotating httpOnly refresh cookie · bcrypt · RBAC (admin/user)
+Celery + Redis Â· Beat replicas=1 STRICT
+MinIO Â· presigned PUT pattern
+JWT 15-min access + 7-day rotating httpOnly refresh cookie Â· bcrypt Â· RBAC (admin/user)
 Fernet (connection configs + LLM API keys at rest)
-LangGraph 8-node · interrupt() for clarification · SSE streaming
-Langfuse self-hosted · every pipeline run must emit a trace
-RFC 7807 Problem Details — all non-2xx API responses
-Structured logging · INFO level · X-Request-ID correlation
-CORS strict · CSRF SameSite=Strict httpOnly · CSP moderate · rate-limit IP
-Dark mode · responsive · WCAG-AA · no animations · Lucide icons · Sonner toasts
-snake_case vars/files/tables · PascalCase classes · SCREAMING_SNAKE_CASE constants
-pytest + httpx + Playwright · ≥80% coverage
+LangGraph 8-node Â· interrupt() for clarification Â· SSE streaming
+Langfuse self-hosted Â· every pipeline run must emit a trace
+RFC 7807 Problem Details â€” all non-2xx API responses
+Structured logging Â· INFO level Â· X-Request-ID correlation
+CORS strict Â· CSRF SameSite=Strict httpOnly Â· CSP moderate Â· rate-limit IP
+Dark mode Â· responsive Â· WCAG-AA Â· no animations Â· Lucide icons Â· Sonner toasts
+snake_case vars/files/tables Â· PascalCase classes Â· SCREAMING_SNAKE_CASE constants
+pytest + httpx + Playwright Â· â‰¥80% coverage
 Docker Compose 9 services: frontend, backend, worker, beat, db, redis, minio, langfuse, langfuse-db
 ```
 
@@ -35,13 +37,13 @@ Docker Compose 9 services: frontend, backend, worker, beat, db, redis, minio, la
 
 Complete the frontend polish layer:
 
-1. **Dark mode** — theme toggle works; both modes pass colour-contrast; CSS variables correct  
-2. **Responsive layout** — no horizontal overflow at 320 px / 768 px / 1280 px / 1920 px  
-3. **No animations** — zero `animate-*` or CSS transition classes on real content  
-4. **Lucide icons** — all icons are from `lucide-react`; no inline SVG, no other icon lib  
-5. **Sonner toasts** — success, error, loading toasts render correctly; no other toast lib  
-6. **Loading skeletons** — present on data-fetching pages; no layout shift after load  
-7. **Visual regression** — Playwright screenshots confirm stable UI (light + dark, mobile + desktop)
+1. **Dark mode** â€” theme toggle works; both modes pass colour-contrast; CSS variables correct  
+2. **Responsive layout** â€” no horizontal overflow at 320 px / 768 px / 1280 px / 1920 px  
+3. **No animations** â€” zero `animate-*` or CSS transition classes on real content  
+4. **Lucide icons** â€” all icons are from `lucide-react`; no inline SVG, no other icon lib  
+5. **Sonner toasts** â€” success, error, loading toasts render correctly; no other toast lib  
+6. **Loading skeletons** â€” present on data-fetching pages; no layout shift after load  
+7. **Visual regression** â€” Playwright screenshots confirm stable UI (light + dark, mobile + desktop)
 
 ---
 
@@ -50,22 +52,22 @@ Complete the frontend polish layer:
 ```
 src/frontend/
   components/
-    theme-provider.tsx          ← next-themes wrapper (verified correct)
-    theme-toggle.tsx            ← button: sun/moon toggle
+    theme-provider.tsx          â† next-themes wrapper (verified correct)
+    theme-toggle.tsx            â† button: sun/moon toggle
     skeleton/
-      chat-skeleton.tsx         ← loading skeleton for chat stream
-      admin-table-skeleton.tsx  ← admin table loading skeleton
+      chat-skeleton.tsx         â† loading skeleton for chat stream
+      admin-table-skeleton.tsx  â† admin table loading skeleton
   hooks/
-    use-theme.ts                ← typed wrapper around next-themes
+    use-theme.ts                â† typed wrapper around next-themes
 
 tests/e2e/
   visual/
-    visual-regression.spec.ts   ← screenshot comparison (Playwright)
+    visual-regression.spec.ts   â† screenshot comparison (Playwright)
   polish/
-    dark-mode.spec.ts           ← dark mode Playwright tests
-    responsive.spec.ts          ← responsive overflow tests
-    no-animations.spec.ts       ← assert no animate-* classes
-    icons-and-toasts.spec.ts    ← icon/toast smoke tests
+    dark-mode.spec.ts           â† dark mode Playwright tests
+    responsive.spec.ts          â† responsive overflow tests
+    no-animations.spec.ts       â† assert no animate-* classes
+    icons-and-toasts.spec.ts    â† icon/toast smoke tests
 ```
 
 ---
@@ -162,7 +164,7 @@ export function ChatSkeleton() {
     <div
       className="flex flex-col gap-4 p-4"
       role="status"
-      aria-label="Loading conversation…"
+      aria-label="Loading conversationâ€¦"
     >
       {Array.from({ length: 3 }).map((_, i) => (
         <div key={i} className="flex gap-3">
@@ -185,7 +187,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 
 export function AdminTableSkeleton({ rows = 5 }: { rows?: number }) {
   return (
-    <div role="status" aria-label="Loading table…" className="w-full">
+    <div role="status" aria-label="Loading tableâ€¦" className="w-full">
       <Skeleton className="h-10 w-full mb-4" /> {/* Table header */}
       <div className="flex flex-col gap-2">
         {Array.from({ length: rows }).map((_, i) => (
@@ -202,7 +204,7 @@ export function AdminTableSkeleton({ rows = 5 }: { rows?: number }) {
 ## 3. Tailwind CSS Token Verification (`globals.css`)
 
 ```css
-/* Verify both themes use semantic tokens — no hardcoded colours */
+/* Verify both themes use semantic tokens â€” no hardcoded colours */
 @layer base {
   :root {
     --background: 0 0% 100%;
@@ -239,7 +241,7 @@ export function AdminTableSkeleton({ rows = 5 }: { rows?: number }) {
 
 ---
 
-## 4. Dark Mode Playwright Tests — `tests/e2e/polish/dark-mode.spec.ts`
+## 4. Dark Mode Playwright Tests â€” `tests/e2e/polish/dark-mode.spec.ts`
 
 ```typescript
 import { test, expect } from "@playwright/test";
@@ -258,8 +260,8 @@ test.describe("Dark mode", () => {
   test("toggle again returns to light mode", async ({ page }) => {
     await page.goto("/login");
     const btn = page.getByTestId("theme-toggle");
-    await btn.click(); // → dark
-    await btn.click(); // → light
+    await btn.click(); // â†’ dark
+    await btn.click(); // â†’ light
     const htmlClass = (await page.locator("html").getAttribute("class")) ?? "";
     expect(htmlClass).not.toMatch(/\bdark\b/);
   });
@@ -282,7 +284,7 @@ test.describe("Dark mode", () => {
     const bg = await page.evaluate(
       () => window.getComputedStyle(document.body).backgroundColor
     );
-    // In dark mode background lightness is ~4.9% — parsed RGB should be near-black
+    // In dark mode background lightness is ~4.9% â€” parsed RGB should be near-black
     // e.g. "rgb(9, 9, 18)" or similar
     const rgb = bg.match(/\d+/g)?.map(Number) ?? [];
     const luminance = (rgb[0] ?? 255 + rgb[1] ?? 255 + rgb[2] ?? 255) / 3;
@@ -293,7 +295,7 @@ test.describe("Dark mode", () => {
 
 ---
 
-## 5. Responsive Layout Tests — `tests/e2e/polish/responsive.spec.ts`
+## 5. Responsive Layout Tests â€” `tests/e2e/polish/responsive.spec.ts`
 
 ```typescript
 import { test, expect } from "@playwright/test";
@@ -336,13 +338,13 @@ for (const viewport of VIEWPORTS) {
 
 ---
 
-## 6. No Animations Tests — `tests/e2e/polish/no-animations.spec.ts`
+## 6. No Animations Tests â€” `tests/e2e/polish/no-animations.spec.ts`
 
 ```typescript
 import { test, expect } from "@playwright/test";
 
 /**
- * Spec requirement: "no animations" — zero Tailwind animate-* classes
+ * Spec requirement: "no animations" â€” zero Tailwind animate-* classes
  * on any visible content element.
  *
  * Exception: Sonner toast library may use its own micro-animations;
@@ -391,7 +393,7 @@ async function checkNoAnimations(
 
 ---
 
-## 7. Icons & Toasts Tests — `tests/e2e/polish/icons-and-toasts.spec.ts`
+## 7. Icons & Toasts Tests â€” `tests/e2e/polish/icons-and-toasts.spec.ts`
 
 ```typescript
 import { test, expect } from "./auth.fixture";
@@ -421,7 +423,7 @@ test.describe("Lucide icons & Sonner toasts", () => {
     }
   });
 
-  test("no inline SVG data URIs — all icons use lucide-react component", async ({
+  test("no inline SVG data URIs â€” all icons use lucide-react component", async ({
     page,
   }) => {
     await page.goto("/login");
@@ -458,7 +460,7 @@ test.describe("Lucide icons & Sonner toasts", () => {
 
 ---
 
-## 8. Visual Regression Tests — `tests/e2e/visual/visual-regression.spec.ts`
+## 8. Visual Regression Tests â€” `tests/e2e/visual/visual-regression.spec.ts`
 
 ```typescript
 import { test, expect } from "@playwright/test";
@@ -527,5 +529,5 @@ for (const { name, path, theme, requiresAuth, requiresAdmin } of SNAPSHOTS) {
 - [ ] No inline SVG data URIs
 - [ ] Sonner toaster DOM node present; toast region has `aria-live` or `role`
 - [ ] `ChatSkeleton` and `AdminTableSkeleton` render with `role="status"`
-- [ ] Visual regression snapshots created (light + dark × 4 pages)
+- [ ] Visual regression snapshots created (light + dark Ã— 4 pages)
 - [ ] All Playwright polish tests pass in chromium and firefox

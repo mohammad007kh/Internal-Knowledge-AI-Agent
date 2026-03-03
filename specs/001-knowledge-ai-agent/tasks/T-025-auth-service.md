@@ -1,11 +1,12 @@
-# T-025 — Auth Service
+﻿# T-025 â€” Auth Service
 
 ## Metadata
 | Field | Value |
 |---|---|
+| **Status** | Done |
 | **ID** | T-025 |
 | **Title** | Auth Service |
-| **Phase** | 1 — Authentication & User Management |
+| **Phase** | 1 â€” Authentication & User Management |
 | **Domain** | Backend / Auth |
 | **Depends on** | T-012, T-013, T-022, T-023 |
 | **Blocks** | T-026, T-030, T-037 |
@@ -15,41 +16,41 @@
 | Standard | Value |
 |---|---|
 | Python | 3.12 |
-| Backend | FastAPI · SQLAlchemy 2.x · Pydantic v2 · dependency-injector |
-| Frontend | Next.js 15 App Router · shadcn/ui · Tailwind CSS |
-| State | React Context · TanStack Query · react-hook-form · Zod |
-| Database | PostgreSQL 16 + pgvector · HNSW m=16 ef_construction=64 · UUID PKs · soft-delete + audit columns |
+| Backend | FastAPI Â· SQLAlchemy 2.x Â· Pydantic v2 Â· dependency-injector |
+| Frontend | Next.js 15 App Router Â· shadcn/ui Â· Tailwind CSS |
+| State | React Context Â· TanStack Query Â· react-hook-form Â· Zod |
+| Database | PostgreSQL 16 + pgvector Â· HNSW m=16 ef_construction=64 Â· UUID PKs Â· soft-delete + audit columns |
 | Migrations | Alembic versioned |
-| Background | Celery + Redis · Beat replicas=1 STRICT |
-| File Storage | MinIO · presigned PUT pattern |
-| Auth | JWT 15-min access + 7-day rotating httpOnly refresh cookie · bcrypt · RBAC (admin/user) |
+| Background | Celery + Redis Â· Beat replicas=1 STRICT |
+| File Storage | MinIO Â· presigned PUT pattern |
+| Auth | JWT 15-min access + 7-day rotating httpOnly refresh cookie Â· bcrypt Â· RBAC (admin/user) |
 | Encryption | Fernet (connection configs at rest) |
-| AI Pipeline | LangGraph 8-node · interrupt() for clarification · SSE streaming |
-| Tracing | Langfuse self-hosted · every pipeline run must emit a trace |
-| Error Format | RFC 7807 Problem Details — all non-2xx API responses |
-| Logging | Structured · INFO level · X-Request-ID correlation |
-| Security | CORS strict · CSRF SameSite=Strict httpOnly · CSP moderate · rate-limit IP |
-| UI | Dark mode · responsive · WCAG-AA · no animations · Lucide icons · Sonner toasts |
-| Naming | snake_case vars/files/tables · PascalCase classes · SCREAMING_SNAKE_CASE constants |
-| Commits | Conventional commits · branch pattern: NNN-description |
-| Testing | pytest + httpx + Playwright · ≥80% coverage |
+| AI Pipeline | LangGraph 8-node Â· interrupt() for clarification Â· SSE streaming |
+| Tracing | Langfuse self-hosted Â· every pipeline run must emit a trace |
+| Error Format | RFC 7807 Problem Details â€” all non-2xx API responses |
+| Logging | Structured Â· INFO level Â· X-Request-ID correlation |
+| Security | CORS strict Â· CSRF SameSite=Strict httpOnly Â· CSP moderate Â· rate-limit IP |
+| UI | Dark mode Â· responsive Â· WCAG-AA Â· no animations Â· Lucide icons Â· Sonner toasts |
+| Naming | snake_case vars/files/tables Â· PascalCase classes Â· SCREAMING_SNAKE_CASE constants |
+| Commits | Conventional commits Â· branch pattern: NNN-description |
+| Testing | pytest + httpx + Playwright Â· â‰¥80% coverage |
 | Infrastructure | Docker Compose 9 services: frontend, backend, worker, beat, db, redis, minio, langfuse, langfuse-db |
 
 ### Domain Rules
 - Source access is per-user per-source; never expose unapproved source data (FR-019)
 - Connection strings and file paths MUST NEVER appear in user-facing output, API responses, or AI content (FR-020)
-- Celery Beat MUST run with exactly 1 replica — duplicate-schedule prevention is critical
-- File size limit is defined in `app_config.yaml`; default 50 MB — NOT in .env, NOT hardcoded (FR-035)
+- Celery Beat MUST run with exactly 1 replica â€” duplicate-schedule prevention is critical
+- File size limit is defined in `app_config.yaml`; default 50 MB â€” NOT in .env, NOT hardcoded (FR-035)
 - `bootstrap_admin` executes once on startup only if zero users exist (FR-024)
 - Auto-restart is capped at 3 consecutive attempts with increasing wait; stop and alert admins on failure (FR-033)
-- All passwords validated via `validate_password_policy()` — min 8 chars, ≥1 uppercase, ≥1 lowercase, ≥1 number (FR-034)
-- Invitations are the only path to new accounts — no self-registration endpoint exists (FR-021)
+- All passwords validated via `validate_password_policy()` â€” min 8 chars, â‰¥1 uppercase, â‰¥1 lowercase, â‰¥1 number (FR-034)
+- Invitations are the only path to new accounts â€” no self-registration endpoint exists (FR-021)
 - Every LangGraph pipeline run MUST emit a Langfuse trace with spans per node
 
 ---
 
 ## Goal
-Implement `AuthService` in `app/services/auth_service.py` — the single orchestrator for all authentication flows: login, token refresh, logout, invitation acceptance, password-reset request/confirm, and forced/voluntary password change.
+Implement `AuthService` in `app/services/auth_service.py` â€” the single orchestrator for all authentication flows: login, token refresh, logout, invitation acceptance, password-reset request/confirm, and forced/voluntary password change.
 
 ---
 
@@ -166,7 +167,7 @@ class AuthService:
         return await self._issue_tokens(user)
 
     # ------------------------------------------------------------------ #
-    # Password reset — request                                              #
+    # Password reset â€” request                                              #
     # ------------------------------------------------------------------ #
     async def request_password_reset(self, email: str) -> str | None:
         """
@@ -189,7 +190,7 @@ class AuthService:
         return raw_token
 
     # ------------------------------------------------------------------ #
-    # Password reset — confirm                                              #
+    # Password reset â€” confirm                                              #
     # ------------------------------------------------------------------ #
     async def confirm_password_reset(
         self, raw_token: str, new_password: str
@@ -381,7 +382,7 @@ class RefreshTokenRepository:
 
 ---
 
-### 3. `PasswordResetToken` ORM model — extend `app/models/user.py`
+### 3. `PasswordResetToken` ORM model â€” extend `app/models/user.py`
 ```python
 class PasswordResetToken(Base, UUIDMixin, TimestampMixin):
     __tablename__ = "password_reset_tokens"
@@ -414,8 +415,8 @@ Creates `password_reset_tokens` table with index on `user_id`, unique on `token_
 
 ### 5. DI container wiring
 In `app/containers.py`, register:
-- `refresh_token_repo` — `RefreshTokenRepository` (session-scoped)
-- `auth_service` — `AuthService` (session-scoped, injected with all 4 deps)
+- `refresh_token_repo` â€” `RefreshTokenRepository` (session-scoped)
+- `auth_service` â€” `AuthService` (session-scoped, injected with all 4 deps)
 
 ---
 
@@ -427,7 +428,7 @@ In `app/containers.py`, register:
 - [ ] `request_password_reset()` returns `None` for unknown/inactive email (never raises)
 - [ ] `confirm_password_reset()` consumes token, updates password, revokes all refresh tokens
 - [ ] `change_password()` verifies current password before updating; revokes all refresh tokens
-- [ ] Token hashing uses `hashlib.sha256` — raw token NEVER stored in DB
+- [ ] Token hashing uses `hashlib.sha256` â€” raw token NEVER stored in DB
 - [ ] `PasswordResetToken` table created via Alembic migration `0004`
 - [ ] All methods are `async`; no sync DB calls
 - [ ] DI container registers `RefreshTokenRepository` and `AuthService`
@@ -446,7 +447,7 @@ In `app/containers.py`, register:
 ---
 
 ## Notes
-- Tokens are NEVER stored raw — always SHA-256 hashed before persistence. Raw value is only in memory / cookie.
-- `confirm_password_reset` revokes all refresh tokens to force re-login after a reset — security requirement.
+- Tokens are NEVER stored raw â€” always SHA-256 hashed before persistence. Raw value is only in memory / cookie.
+- `confirm_password_reset` revokes all refresh tokens to force re-login after a reset â€” security requirement.
 - `change_password` identity: same revoking behavior applies when user chooses to change password.
 - `request_password_reset` always returns 202 at the HTTP layer regardless of whether email exists (T-026 responsibility).

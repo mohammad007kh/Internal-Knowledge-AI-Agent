@@ -1,11 +1,12 @@
-# T-035 — Auth Integration Tests (Backend)
+﻿# T-035 â€” Auth Integration Tests (Backend)
 
 ## Metadata
 | Field | Value |
 |---|---|
+| **Status** | Done |
 | **ID** | T-035 |
-| **Title** | Auth Integration Tests — pytest httpx suite for all auth endpoints |
-| **Phase** | 1 — Authentication & User Management |
+| **Title** | Auth Integration Tests â€” pytest httpx suite for all auth endpoints |
+| **Phase** | 1 â€” Authentication & User Management |
 | **Domain** | Backend / Tests |
 | **Depends on** | T-008, T-025, T-026, T-027, T-028, T-029 |
 | **Blocks** | T-039 |
@@ -15,16 +16,16 @@
 | Standard | Value |
 |---|---|
 | Python | 3.12 |
-| Backend | FastAPI · SQLAlchemy 2.x · Pydantic v2 · dependency-injector |
-| Auth | JWT 15-min access + 7-day rotating httpOnly refresh cookie · bcrypt · RBAC |
-| Error Format | RFC 7807 Problem Details — all non-2xx API responses |
-| Testing | pytest + httpx · ≥80% coverage |
-| Database | PostgreSQL 16 — test DB separate from app DB (env var `TEST_DATABASE_URL`) |
+| Backend | FastAPI Â· SQLAlchemy 2.x Â· Pydantic v2 Â· dependency-injector |
+| Auth | JWT 15-min access + 7-day rotating httpOnly refresh cookie Â· bcrypt Â· RBAC |
+| Error Format | RFC 7807 Problem Details â€” all non-2xx API responses |
+| Testing | pytest + httpx Â· â‰¥80% coverage |
+| Database | PostgreSQL 16 â€” test DB separate from app DB (env var `TEST_DATABASE_URL`) |
 
 ### Domain Rules
 - All passwords validated via validate_password_policy() (FR-034)
 - Invitations are the only path to new accounts (FR-021)
-- Every test must be isolated — use per-test DB transactions that roll back after the test
+- Every test must be isolated â€” use per-test DB transactions that roll back after the test
 
 ---
 
@@ -56,7 +57,7 @@ from app.core.db import get_db
 from app.services.password_service import PasswordService
 from app.models.user import User, UserRole
 
-# ── Test database ────────────────────────────────────────────────────────────
+# â”€â”€ Test database â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 TEST_DATABASE_URL = settings.TEST_DATABASE_URL  # default: same as DATABASE_URL + "_test"
 
 _test_engine = create_async_engine(TEST_DATABASE_URL, echo=False)
@@ -93,7 +94,7 @@ async def client(db_session: AsyncSession) -> AsyncGenerator[AsyncClient, None]:
         yield ac
 
 
-# ── Helper factories ──────────────────────────────────────────────────────────
+# â”€â”€ Helper factories â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 @pytest_asyncio.fixture()
 async def admin_user(db_session: AsyncSession) -> User:
     """Create and persist an active admin user."""
@@ -125,7 +126,7 @@ async def regular_user(db_session: AsyncSession) -> User:
 
 
 async def get_access_token(client: AsyncClient, email: str, password: str) -> str:
-    """Helper — login and return the access token string."""
+    """Helper â€” login and return the access token string."""
     resp = await client.post(
         "/api/v1/auth/login",
         json={"email": email, "password": password},
@@ -409,7 +410,7 @@ class TestUsersRouter:
 
 ## Gate Criteria
 - `make test` passes: all tests green, no warnings
-- Coverage report shows ≥80% on `app/api/v1/auth.py` and `app/api/v1/users.py`
+- Coverage report shows â‰¥80% on `app/api/v1/auth.py` and `app/api/v1/users.py`
 - `test_login_wrong_password` confirms RFC 7807 shape (status, type, detail fields present)
 - `test_reset_request_always_202` verifies non-enumeration behaviour
-- Each test is isolated — running tests in any order produces the same result
+- Each test is isolated â€” running tests in any order produces the same result

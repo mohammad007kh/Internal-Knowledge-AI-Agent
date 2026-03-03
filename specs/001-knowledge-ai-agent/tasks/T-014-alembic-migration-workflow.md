@@ -1,9 +1,9 @@
----
+﻿---
 id: T-014
-title: Alembic Migration Workflow — Naming Convention, Generator Script, and Upgrade-on-Startup
-status: Not Started
+title: Alembic Migration Workflow â€” Naming Convention, Generator Script, and Upgrade-on-Startup
+status: Done
 created: 2026-02-25
-phase: Phase 0 — Foundation
+phase: Phase 0 â€” Foundation
 user_story: cross
 requirements: []
 priority: P1
@@ -23,7 +23,7 @@ Establish a disciplined Alembic migration workflow: enforce unique migration IDs
 - [ ] `backend/alembic/env.py` imports every model module before `Base.metadata` is referenced
 - [ ] Backend `Dockerfile` runs `alembic upgrade head` before starting uvicorn (with `&&`)
 - [ ] `make migrate` (from T-006) works inside the running container
-- [ ] `alembic upgrade head` is idempotent — running it twice does not error
+- [ ] `alembic upgrade head` is idempotent â€” running it twice does not error
 - [ ] A comment in `env.py` explicitly documents how to add a new model to autogenerate
 
 ---
@@ -59,8 +59,8 @@ from sqlalchemy.ext.asyncio import create_async_engine
 from alembic import context
 from src.models.base import Base
 
-# ─── IMPORTANT: Import ALL model modules here so their tables
-# ─── are visible to Base.metadata for autogenerate.
+# â”€â”€â”€ IMPORTANT: Import ALL model modules here so their tables
+# â”€â”€â”€ are visible to Base.metadata for autogenerate.
 import src.models.refresh_token      # T-012
 import src.models.user               # T-020
 import src.models.invitation         # T-020
@@ -106,7 +106,7 @@ COPY . .
 CMD alembic upgrade head && uvicorn src.main:app --host 0.0.0.0 --port 8000
 ```
 
-### `backend/alembic/script.py.mako` — migration template
+### `backend/alembic/script.py.mako` â€” migration template
 
 ```mako
 """${message}
@@ -146,7 +146,7 @@ Every migration file MUST list its covered FRs in the docstring (see template ab
 
 ---
 
-## 📝 Completion Log
+## ðŸ“ Completion Log
 
 - [ ] Code implemented
 - [ ] `alembic upgrade head` idempotent on test DB
