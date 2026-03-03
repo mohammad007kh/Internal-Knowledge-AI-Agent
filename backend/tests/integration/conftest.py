@@ -14,6 +14,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.models.enums import SourceType, SyncStatus
 from src.models.source import Source
 from src.models.sync_job import SyncJob
+from httpx import AsyncClient
+
 from src.schemas.raw_document import RawDocument
 
 
@@ -102,3 +104,25 @@ def two_raw_docs() -> list[RawDocument]:
             metadata={},
         ),
     ]
+
+
+@pytest_asyncio.fixture()
+async def admin_token(client: AsyncClient, admin_user) -> str:  # type: ignore[misc]
+    """Access token for the seeded admin user."""
+    resp = await client.post(
+        "/api/v1/auth/login",
+        json={"email": "admin@example.com", "password": "Admin@1234"},
+    )
+    resp.raise_for_status()
+    return resp.json()["access_token"]
+
+
+@pytest_asyncio.fixture()
+async def user_token(client: AsyncClient, regular_user) -> str:  # type: ignore[misc]
+    """Access token for the seeded regular user."""
+    resp = await client.post(
+        "/api/v1/auth/login",
+        json={"email": "user@example.com", "password": "User@12345"},
+    )
+    resp.raise_for_status()
+    return resp.json()["access_token"]
