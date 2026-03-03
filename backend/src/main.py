@@ -5,7 +5,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from src.api.middleware.error_handler import register_exception_handlers
-from src.api.middleware.logging_middleware import LoggingMiddleware
+from src.middleware.logging_middleware import RequestIDMiddleware
 from src.api.v1.health import router as health_router
 from src.api.v1.router import api_v1_router
 from src.core.bootstrap import bootstrap_admin
@@ -42,7 +42,7 @@ def create_app() -> FastAPI:
     register_exception_handlers(app)
 
     # ── Middleware (outermost first) ──
-    app.add_middleware(LoggingMiddleware)
+    app.add_middleware(RequestIDMiddleware)
     app.add_middleware(RateLimitMiddleware)
     app.add_middleware(
         SecurityHeadersMiddleware,
