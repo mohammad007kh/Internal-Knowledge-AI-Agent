@@ -60,7 +60,7 @@ class AuthService:
             raise UnauthorizedError("Invalid email or password")
 
         if not user.is_active:
-            raise UnauthorizedError("Account is disabled")
+            raise ForbiddenError("Account is disabled")
 
         return await self._issue_tokens(user)
 
@@ -178,7 +178,7 @@ class AuthService:
         if not self._password_svc.verify_password(
             current_password, user.hashed_password
         ):
-            raise BadRequestError("Current password is incorrect")
+            raise UnauthorizedError("Current password is incorrect")
 
         hashed = self._password_svc.hash_password(new_password)
         await self._user_repo.update(

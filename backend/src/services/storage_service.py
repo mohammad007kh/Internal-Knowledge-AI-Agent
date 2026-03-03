@@ -5,7 +5,10 @@ import io
 import logging
 from typing import Any
 
-from minio import Minio  # type: ignore[import-untyped]
+try:
+    from minio import Minio  # type: ignore[import-untyped]
+except ImportError:  # pragma: no cover
+    Minio = None  # type: ignore[assignment,misc]
 
 from src.core.config import Settings
 
