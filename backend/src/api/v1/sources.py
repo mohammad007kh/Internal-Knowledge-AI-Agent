@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import Response
 
 from src.core.deps import get_current_user
@@ -24,7 +24,7 @@ from src.schemas.source import (
     SourceUpdate,
     TestConnectionResponse,
 )
-from src.schemas.sync_job import SyncJobResponse
+from src.schemas.sync_job import SyncJobListResponse, SyncJobResponse
 from src.services.source_service import SourceService
 
 router = APIRouter()
@@ -239,4 +239,87 @@ async def test_connection(
     return TestConnectionResponse(
         success=ok,
         message="" if ok else "Connection attempt failed — check credentials and network.",
+    )
+
+
+# ---------------------------------------------------------------------------
+# Source sub-resources: documents + sync-runs
+# ---------------------------------------------------------------------------
+
+
+def _get_document_repo():  # type: ignore[no-untyped-def]
+    """Resolve DocumentRepository from the DI container."""
+    from src.core.container import Container  # noqa: PLC0415
+
+    return Container.document_repo()
+
+
+def _get_sync_job_repo():  # type: ignore[no-untyped-def]
+    """Resolve SyncJobRepository from the DI container."""
+    from src.core.container import Container  # noqa: PLC0415
+
+    return Container.sync_job_repo()
+
+
+@router.get(
+    "/{source_id}/documents",
+    summary="List documents for a source",
+)
+async def list_source_documents(
+    source_id: uuid.UUID,
+    offset: int = Query(0, ge=0),
+    limit: int = Query(50, ge=1, le=200),
+    current_user: User = Depends(get_current_user),
+    service: SourceService = Depends(_get_source_service),
+    doc_repo=Depends(_get_document_repo),
+) -> dict:
+    """Return a paginated list of active documents belonging to *source_id*."""
+    source = await service.get_source(source_id)
+    _assert_ownership_or_admin(source.owner_id, current_user)
+    docs = await doc_repo.list_by_source(source_id, offset=offset, limit=limit)
+    total = await doc_repo.count_by_source(source_id)
+    return {
+        "items": [
+            {
+                "id": str(d.id),
+                "source_id": str(d.source_id),
+                "raw_storage_path": d.raw_storage_path,
+                "is_active": d.is_active,
+                "created_at": d.created_at.isoformat(),
+                "updated_at": d.updated_at.isoformat(),
+            }
+            for d in docs
+        ],
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+    }
+
+
+@router.get(
+    "/{source_id}/sync-runs",
+    response_model=SyncJobListResponse,
+    summary="List sync runs for a source",
+)
+async def list_source_sync_runs(
+    source_id: uuid.UUID,
+    offset: int = Query(0, ge=0),
+    limit: int = Query(20, ge=1, le=100),
+    current_user: User = Depends(get_current_user),
+    service: SourceService = Depends(_get_source_service),
+    sync_repo=Depends(_get_sync_job_repo),
+) -> SyncJobListResponse:
+    """Return paginated sync job history for *source_id*."""
+    from src.core.database import AsyncSessionLocal  # noqa: PLC0415
+
+    source = await service.get_source(source_id)
+    _assert_ownership_or_admin(source.owner_id, current_user)
+    async with AsyncSessionLocal() as session:
+        jobs = await sync_repo.list_by_source(session, source_id, limit=limit, offset=offset)
+        total = await sync_repo.count_by_source(session, source_id)
+    return SyncJobListResponse(
+        items=[SyncJobResponse.model_validate(j) for j in jobs],
+        total=total,
+        limit=limit,
+        offset=offset,
     )

@@ -62,6 +62,9 @@ class User(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
     must_change_password: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False,
     )
+    last_login_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
 
     # -- relationships -------------------------------------------------------
     refresh_tokens: Mapped[list[UserRefreshToken]] = relationship(

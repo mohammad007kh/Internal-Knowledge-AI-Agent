@@ -10,13 +10,14 @@ from __future__ import annotations
 
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from src.core.deps import get_current_user, require_role
 from src.models.user import User, UserRole
 from src.schemas.user import (
     InvitationCreateRequest,
     RoleChangeRequest,
+    UpdateUserRequest,
     UserListResponse,
     UserResponse,
 )
@@ -104,6 +105,47 @@ async def deactivate_user(
 ) -> None:
     """Soft-deactivate a user and revoke their refresh tokens."""
     await user_svc.deactivate_user(admin, user_id)
+
+
+@router.patch("/{user_id}", response_model=UserResponse, summary="Activate or deactivate a user")
+async def update_user(
+    user_id: UUID,
+    body: UpdateUserRequest,
+    admin: User = Depends(AdminOnly),
+    user_svc: UserService = Depends(_get_user_service),
+) -> UserResponse:
+    """Toggle ``is_active`` for a user. Admin-only."""
+    from src.core.container import Container  # noqa: PLC0415
+    from src.repositories.user_repository import UserRepository  # noqa: PLC0415
+
+    repo: UserRepository = Container.user_repo()
+    if body.is_active is not None:
+        updated = await repo.set_active(user_id, body.is_active)
+        if updated is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found.")
+        return UserResponse.model_validate(updated)
+    # No-op: return current user
+    user = await repo.get_by_id(user_id)
+    if user is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found.")
+    return UserResponse.model_validate(user)
+
+
+@router.get("/lookup", response_model=UserResponse, summary="Look up a user by email")
+async def lookup_user(
+    email: str = Query(..., description="Email address to look up"),
+    admin: User = Depends(AdminOnly),
+    user_svc: UserService = Depends(_get_user_service),
+) -> UserResponse:
+    """Return id, email, full_name for a user matching *email*. Admin-only."""
+    from src.core.container import Container  # noqa: PLC0415
+    from src.repositories.user_repository import UserRepository  # noqa: PLC0415
+
+    repo: UserRepository = Container.user_repo()
+    user = await repo.get_by_email(email)
+    if user is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found.")
+    return UserResponse.model_validate(user)
 
 
 @router.get(

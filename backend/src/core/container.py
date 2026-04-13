@@ -8,6 +8,7 @@ from src.core.config import settings
 from src.core.database import AsyncSessionLocal
 from src.repositories.chat_repository import ChatMessageRepository, ChatSessionRepository
 from src.repositories.chunk_repository import ChunkRepository
+from src.repositories.connector_repository import ConnectorRepository
 from src.repositories.document_repository import DocumentRepository
 from src.repositories.invitation_repository import InvitationRepository
 from src.repositories.refresh_token_repository import RefreshTokenRepository
@@ -18,6 +19,7 @@ from src.repositories.user_repository import UserRepository
 from src.services.auth_service import AuthService
 from src.services.chat_session_service import ChatSessionService
 from src.services.chunking_service import ChunkingService
+from src.services.connector_service import ConnectorService
 from src.services.email_service import EmailService
 from src.services.embedding_service import EmbeddingService
 from src.services.langfuse_tracing_service import LangfuseTracingService
@@ -49,6 +51,7 @@ class Container(containers.DeclarativeContainer):
     sync_job_repo = providers.Factory(SyncJobRepository, session=db_session_factory)
     chat_session_repo = providers.Factory(ChatSessionRepository, session=db_session_factory)
     chat_message_repo = providers.Factory(ChatMessageRepository, session=db_session_factory)
+    connector_repo = providers.Factory(ConnectorRepository, session=db_session_factory)
 
     # ── Services ────────────────────────────────────────────────────
     password_service = providers.Factory(PasswordService)
@@ -89,6 +92,11 @@ class Container(containers.DeclarativeContainer):
         SyncJobService,
         session_factory=db_session_factory,
         sync_job_repo=sync_job_repo,
+    )
+    connector_service = providers.Factory(
+        ConnectorService,
+        repo=connector_repo,
+        settings=config,
     )
     chunking_service: providers.Singleton[ChunkingService] = providers.Singleton(
         ChunkingService
