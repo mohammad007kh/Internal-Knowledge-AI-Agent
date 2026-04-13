@@ -5,8 +5,12 @@ authentication strategy.  Each token is tied to a user via a CASCADE
 foreign key so that deleting or deactivating a user automatically removes
 all their outstanding refresh tokens.
 
+NOTE: Although this file is named 0002, it depends on revision "0003"
+(users/invitations tables) because user_refresh_tokens has a FK to users.id.
+Alembic execution order is: 0001 → 0003 → 0002 → 0004 → …
+
 Revision ID: 0002
-Revises:     0001
+Revises:     0003
 Create Date: 2026-02-26
 """
 
