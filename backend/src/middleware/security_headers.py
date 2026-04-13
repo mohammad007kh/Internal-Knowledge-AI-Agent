@@ -39,8 +39,9 @@ SECURITY_HEADERS = {
         "connect-src 'self'"
     ),
     "Permissions-Policy": "camera=(), microphone=(), geolocation=()",
-    "Strict-Transport-Security": "max-age=31536000; includeSubDomains",
 }
+
+_HSTS_HEADER_VALUE = "max-age=31536000; includeSubDomains"
 
 
 def _is_csrf_exempt(request: Request) -> bool:
@@ -95,6 +96,9 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         # ── Security headers ──
         for header, value in SECURITY_HEADERS.items():
             response.headers[header] = value
+
+        if self._is_https:
+            response.headers["Strict-Transport-Security"] = _HSTS_HEADER_VALUE
 
         # Suppress server fingerprinting
         response.headers["server"] = "webserver"

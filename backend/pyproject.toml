@@ -40,6 +40,7 @@ dependencies = [
     "uvicorn[standard]>=0.30",
     "python-multipart>=0.0.12",
     "pyyaml>=6.0",
+    "python-magic>=0.4.27",
 ]
 
 [project.optional-dependencies]

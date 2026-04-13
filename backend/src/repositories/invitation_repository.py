@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import uuid
 from datetime import UTC, datetime
 
@@ -19,16 +20,18 @@ class InvitationRepository(BaseRepository[Invitation]):
         super().__init__(Invitation, session)
 
     async def get_by_token(self, token: str) -> Invitation | None:
-        """Look up an invitation by its unique token."""
-        stmt = select(Invitation).where(Invitation.token == token)
+        """Look up an invitation by its token hash."""
+        token_hash = hashlib.sha256(token.encode()).hexdigest()
+        stmt = select(Invitation).where(Invitation.token == token_hash)
         result = await self._session.execute(stmt)
         return result.scalar_one_or_none()
 
     async def mark_accepted(self, token: str) -> Invitation | None:
         """Set ``accepted_at`` to the current UTC timestamp."""
+        token_hash = hashlib.sha256(token.encode()).hexdigest()
         stmt = (
             update(Invitation)
-            .where(Invitation.token == token)
+            .where(Invitation.token == token_hash)
             .values(accepted_at=datetime.now(UTC))
             .returning(Invitation)
         )
