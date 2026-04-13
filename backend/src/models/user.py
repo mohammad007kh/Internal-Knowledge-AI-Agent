@@ -109,7 +109,7 @@ class Invitation(Base, UUIDMixin, TimestampMixin):
         String(254), index=True, nullable=False,
     )
     token: Mapped[str] = mapped_column(
-        String(36), unique=True, index=True, nullable=False,
+        String(64), unique=True, index=True, nullable=False,
     )
     invited_by: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
