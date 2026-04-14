@@ -7,6 +7,7 @@ import {
   useRevokePermission,
   useSourcePermissions,
 } from '@/features/source-permissions/hooks/useSourcePermissions'
+import { apiClient } from '@/lib/api-client'
 import { UserMinus, UserPlus } from 'lucide-react'
 import { useState } from 'react'
 
@@ -14,40 +15,86 @@ interface PermissionsManagerProps {
   sourceId: string
 }
 
+interface UserLookupResponse {
+  id: string
+  email: string
+}
+
+async function lookupUserByEmail(email: string): Promise<UserLookupResponse> {
+  const { data } = await apiClient.get<UserLookupResponse>(
+    `/admin/users/lookup?email=${encodeURIComponent(email)}`
+  )
+  return data
+}
+
 export function PermissionsManager({ sourceId }: PermissionsManagerProps) {
-  const [newUserId, setNewUserId] = useState('')
+  const [email, setEmail] = useState('')
+  const [lookupError, setLookupError] = useState<string | null>(null)
+  const [isLookingUp, setIsLookingUp] = useState(false)
+
   const { data: userIds = [], isLoading } = useSourcePermissions(sourceId)
   const grantMutation = useGrantPermission(sourceId)
   const revokeMutation = useRevokePermission(sourceId)
 
-  function handleGrant() {
-    const trimmed = newUserId.trim()
+  async function handleGrant() {
+    const trimmed = email.trim()
     if (!trimmed) return
-    grantMutation.mutate(trimmed, {
-      onSuccess: () => setNewUserId(''),
-    })
+
+    setLookupError(null)
+    setIsLookingUp(true)
+
+    try {
+      const user = await lookupUserByEmail(trimmed)
+      grantMutation.mutate(user.id, {
+        onSuccess: () => setEmail(''),
+        onError: (err) => setLookupError(err.message ?? 'Failed to grant permission.'),
+      })
+    } catch (err: unknown) {
+      const status =
+        err != null &&
+        typeof err === 'object' &&
+        'response' in err &&
+        (err as { response?: { status?: number } }).response?.status
+      if (status === 404) {
+        setLookupError('User not found.')
+      } else {
+        setLookupError('Failed to look up user.')
+      }
+    } finally {
+      setIsLookingUp(false)
+    }
   }
 
   if (isLoading) {
     return <div className="py-4 text-center text-muted-foreground">Loading permissions…</div>
   }
 
+  const isPending = isLookingUp || grantMutation.isPending
+
   return (
     <div className="space-y-6">
-      <div className="flex gap-2">
-        <Input
-          placeholder="User UUID"
-          value={newUserId}
-          onChange={(e) => setNewUserId(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter') handleGrant()
-          }}
-          className="max-w-sm"
-        />
-        <Button onClick={handleGrant} disabled={!newUserId.trim() || grantMutation.isPending}>
-          <UserPlus className="mr-2 h-4 w-4" />
-          Grant
-        </Button>
+      <div className="space-y-2">
+        <div className="flex gap-2">
+          <Input
+            type="email"
+            placeholder="User email address"
+            value={email}
+            onChange={(e) => {
+              setEmail(e.target.value)
+              setLookupError(null)
+            }}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') handleGrant()
+            }}
+            className="max-w-sm"
+            aria-invalid={!!lookupError}
+          />
+          <Button onClick={handleGrant} disabled={!email.trim() || isPending}>
+            <UserPlus className="mr-2 h-4 w-4" />
+            {isPending ? 'Granting…' : 'Grant'}
+          </Button>
+        </div>
+        {lookupError && <p className="text-sm text-destructive">{lookupError}</p>}
       </div>
 
       {userIds.length === 0 ? (
