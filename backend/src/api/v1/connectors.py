@@ -98,10 +98,10 @@ async def get_connector(
     return ConnectorResponse.model_validate(connector)
 
 
-@router.put(
+@router.patch(
     "/{connector_id}",
     response_model=ConnectorResponse,
-    summary="Update a connector",
+    summary="Partially update a connector",
 )
 async def update_connector(
     connector_id: uuid.UUID,

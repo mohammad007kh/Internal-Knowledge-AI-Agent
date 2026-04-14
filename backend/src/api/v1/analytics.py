@@ -273,6 +273,7 @@ async def _check_minio() -> dict[str, Any]:
 
 @router.get("/health/detail", summary="Detailed service health checks")
 async def health_detail(
+    _: User = Depends(AdminOnly),
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
     """Return concurrent health checks for database, Redis, and MinIO."""

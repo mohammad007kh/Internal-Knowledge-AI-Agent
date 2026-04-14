@@ -85,6 +85,36 @@ async def invite_user(
     return {"detail": "Invitation sent"}
 
 
+@router.get("/lookup", response_model=UserResponse, summary="Look up a user by email")
+async def lookup_user(
+    email: str = Query(..., description="Email address to look up"),
+    admin: User = Depends(AdminOnly),
+    user_svc: UserService = Depends(_get_user_service),
+) -> UserResponse:
+    """Return id, email, full_name for a user matching *email*. Admin-only."""
+    from src.core.container import Container  # noqa: PLC0415
+    from src.repositories.user_repository import UserRepository  # noqa: PLC0415
+
+    repo: UserRepository = Container.user_repo()
+    user = await repo.get_by_email(email)
+    if user is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found.")
+    return UserResponse.model_validate(user)
+
+
+@router.get(
+    "/me/sources",
+    response_model=list[UUID],
+    summary="List source IDs accessible to the current user",
+)
+async def list_my_sources(
+    current_user: User = Depends(get_current_user),
+    svc: SourcePermissionService = Depends(_get_permission_service),
+) -> list[UUID]:
+    """Return the IDs of all sources the authenticated user may access."""
+    return await svc.list_for_user(current_user.id)
+
+
 @router.patch("/{user_id}/role", response_model=UserResponse)
 async def change_user_role(
     user_id: UUID,
@@ -129,33 +159,3 @@ async def update_user(
     if user is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found.")
     return UserResponse.model_validate(user)
-
-
-@router.get("/lookup", response_model=UserResponse, summary="Look up a user by email")
-async def lookup_user(
-    email: str = Query(..., description="Email address to look up"),
-    admin: User = Depends(AdminOnly),
-    user_svc: UserService = Depends(_get_user_service),
-) -> UserResponse:
-    """Return id, email, full_name for a user matching *email*. Admin-only."""
-    from src.core.container import Container  # noqa: PLC0415
-    from src.repositories.user_repository import UserRepository  # noqa: PLC0415
-
-    repo: UserRepository = Container.user_repo()
-    user = await repo.get_by_email(email)
-    if user is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found.")
-    return UserResponse.model_validate(user)
-
-
-@router.get(
-    "/me/sources",
-    response_model=list[UUID],
-    summary="List source IDs accessible to the current user",
-)
-async def list_my_sources(
-    current_user: User = Depends(get_current_user),
-    svc: SourcePermissionService = Depends(_get_permission_service),
-) -> list[UUID]:
-    """Return the IDs of all sources the authenticated user may access."""
-    return await svc.list_for_user(current_user.id)

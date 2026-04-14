@@ -1,12 +1,15 @@
-"""Guardrail service stub — evaluates user input / LLM output against company policies.
+"""Guardrail service — evaluates user input / LLM output against company policies.
 
 Implements FR-GUARDRAIL-* requirements.
 """
 from __future__ import annotations
 
+import logging
 import uuid
 from dataclasses import dataclass, field
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -35,9 +38,10 @@ class GuardrailService:
         guardrail_event_repo: Repository for persisting guardrail audit events.
     """
 
-    def __init__(self, policy_repo: Any, guardrail_event_repo: Any) -> None:
+    def __init__(self, policy_repo: Any, guardrail_event_repo: Any, openai_client: Any = None) -> None:
         self._policy_repo = policy_repo
         self._event_repo = guardrail_event_repo
+        self._openai_client = openai_client
 
     # ------------------------------------------------------------------
     # Public interface
@@ -119,12 +123,43 @@ class GuardrailService:
             )
         return GuardrailDecision(blocked=False)
 
-    async def _llm_evaluate(self, text: str, rule_text: str) -> bool:  # noqa: ARG002
-        """Stub: returns ``False`` (no violation) by default.
+    async def _llm_evaluate(self, text: str, rule_text: str) -> bool:
+        """Use the LLM to determine whether *text* violates *rule_text*.
 
-        Replaced in production by an LLM call.  Overridden in tests.
+        Returns ``True`` when a violation is detected (the message should be
+        blocked), ``False`` when the text is compliant.
+
+        Falls back to ``False`` (allow) when no OpenAI client is configured or
+        when the LLM call fails, so that a misconfiguration never silently
+        blocks all messages.
         """
-        return False
+        if self._openai_client is None:
+            logger.warning("_llm_evaluate: no openai_client configured — skipping LLM check")
+            return False
+
+        prompt = (
+            "You are a policy enforcement assistant.\n"
+            "Your task is to decide whether the following text violates the given policy rule.\n\n"
+            f"Policy rule:\n{rule_text}\n\n"
+            f"Text to evaluate:\n{text}\n\n"
+            "Reply with exactly one word: VIOLATION if the text violates the rule, "
+            "or COMPLIANT if it does not."
+        )
+
+        try:
+            response = await self._openai_client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[{"role": "user", "content": prompt}],
+                max_tokens=10,
+                temperature=0,
+            )
+            verdict = response.choices[0].message.content.strip().upper()
+            is_violation = verdict.startswith("VIOLATION")
+            logger.debug("_llm_evaluate: verdict=%r for rule=%r", verdict, rule_text[:80])
+            return is_violation
+        except Exception:
+            logger.exception("_llm_evaluate: LLM call failed — defaulting to compliant")
+            return False
 
     async def _log_event(
         self,

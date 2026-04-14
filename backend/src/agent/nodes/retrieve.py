@@ -19,6 +19,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 _RESULT_LIMIT = 10
+SIMILARITY_THRESHOLD = 0.4
 
 
 async def retrieve_context(
@@ -83,11 +84,21 @@ async def retrieve_context(
                 "score": round(score, 4),
             }
             for chunk, score in pairs
+            if score > SIMILARITY_THRESHOLD
         ]
+
+        if not chunks:
+            logger.info(
+                "retrieve_context: all %d chunks scored ≤ %.2f threshold — no relevant context",
+                len(pairs),
+                SIMILARITY_THRESHOLD,
+            )
+            span.update(output={"chunk_count": 0, "below_threshold": True})
+            return {"retrieved_chunks": []}
 
         span.update(output={"chunk_count": len(chunks)})
         logger.info(
-            "retrieve_context: found %d chunks for query len=%d",
+            "retrieve_context: found %d chunks (above threshold) for query len=%d",
             len(chunks),
             len(query),
         )

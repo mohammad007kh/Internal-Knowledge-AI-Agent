@@ -13,10 +13,14 @@ import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import Response
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.core.database import get_db
 from src.core.deps import get_current_user
 from src.models.user import User, UserRole
 from src.schemas.source import (
+    DocumentListResponse,
+    DocumentResponse,
     PaginatedSources,
     SourceCreate,
     SourceListItem,
@@ -263,6 +267,7 @@ def _get_sync_job_repo():  # type: ignore[no-untyped-def]
 
 @router.get(
     "/{source_id}/documents",
+    response_model=DocumentListResponse,
     summary="List documents for a source",
 )
 async def list_source_documents(
@@ -272,28 +277,18 @@ async def list_source_documents(
     current_user: User = Depends(get_current_user),
     service: SourceService = Depends(_get_source_service),
     doc_repo=Depends(_get_document_repo),
-) -> dict:
+) -> DocumentListResponse:
     """Return a paginated list of active documents belonging to *source_id*."""
     source = await service.get_source(source_id)
     _assert_ownership_or_admin(source.owner_id, current_user)
     docs = await doc_repo.list_by_source(source_id, offset=offset, limit=limit)
     total = await doc_repo.count_by_source(source_id)
-    return {
-        "items": [
-            {
-                "id": str(d.id),
-                "source_id": str(d.source_id),
-                "raw_storage_path": d.raw_storage_path,
-                "is_active": d.is_active,
-                "created_at": d.created_at.isoformat(),
-                "updated_at": d.updated_at.isoformat(),
-            }
-            for d in docs
-        ],
-        "total": total,
-        "limit": limit,
-        "offset": offset,
-    }
+    return DocumentListResponse(
+        items=[DocumentResponse.model_validate(d) for d in docs],
+        total=total,
+        limit=limit,
+        offset=offset,
+    )
 
 
 @router.get(
@@ -308,15 +303,13 @@ async def list_source_sync_runs(
     current_user: User = Depends(get_current_user),
     service: SourceService = Depends(_get_source_service),
     sync_repo=Depends(_get_sync_job_repo),
+    db: AsyncSession = Depends(get_db),
 ) -> SyncJobListResponse:
     """Return paginated sync job history for *source_id*."""
-    from src.core.database import AsyncSessionLocal  # noqa: PLC0415
-
     source = await service.get_source(source_id)
     _assert_ownership_or_admin(source.owner_id, current_user)
-    async with AsyncSessionLocal() as session:
-        jobs = await sync_repo.list_by_source(session, source_id, limit=limit, offset=offset)
-        total = await sync_repo.count_by_source(session, source_id)
+    jobs = await sync_repo.list_by_source(db, source_id, limit=limit, offset=offset)
+    total = await sync_repo.count_by_source(db, source_id)
     return SyncJobListResponse(
         items=[SyncJobResponse.model_validate(j) for j in jobs],
         total=total,
