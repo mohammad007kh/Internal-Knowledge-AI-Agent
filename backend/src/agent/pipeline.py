@@ -22,7 +22,6 @@ from src.agent.nodes import (
     handle_clarification,
     load_history,
     retrieve_context,
-    save_message,
 )
 from src.agent.state import AgentState
 from src.repositories.chat_repository import ChatMessageRepository, ChatSessionRepository
@@ -40,9 +39,9 @@ def route(state: AgentState) -> str:
 
 
 def route_after_guardrail_input(state: AgentState) -> str:
-    """Short-circuit to save_message when the input guardrail blocks the query."""
+    """Short-circuit to END when the input guardrail blocks the query."""
     if state.get("error") == "guardrail_blocked_input":
-        return "save_message"
+        return END
     return "retrieve_context"
 
 
@@ -81,12 +80,6 @@ def build_pipeline(
         openai_client=openai_client,
         langfuse=langfuse,
     )
-    _save_message = functools.partial(
-        save_message,
-        chat_session_repository=chat_session_repository,
-        chat_message_repository=chat_message_repository,
-        db_session=db_session,
-    )
 
     workflow.add_node("load_history", _load_history)
     workflow.add_node("check_clarification", _check_clarification)
@@ -107,7 +100,6 @@ def build_pipeline(
     workflow.add_node("retrieve_context", _retrieve_context)
     workflow.add_node("generate_response", _generate_response)
     workflow.add_node("format_response", format_response)
-    workflow.add_node("save_message", _save_message)
 
     workflow.add_edge(START, "load_history")
     workflow.add_edge("load_history", "check_clarification")
@@ -126,7 +118,7 @@ def build_pipeline(
             "guardrail_input",
             route_after_guardrail_input,
             {
-                "save_message": "save_message",
+                END: END,
                 "retrieve_context": "retrieve_context",
             },
         )
@@ -136,11 +128,9 @@ def build_pipeline(
 
     if guardrail_service is not None:
         workflow.add_edge("format_response", "guardrail_output")
-        workflow.add_edge("guardrail_output", "save_message")
+        workflow.add_edge("guardrail_output", END)
     else:
-        workflow.add_edge("format_response", "save_message")
-
-    workflow.add_edge("save_message", END)
+        workflow.add_edge("format_response", END)
 
     checkpointer = MemorySaver()
     return workflow.compile(checkpointer=checkpointer)

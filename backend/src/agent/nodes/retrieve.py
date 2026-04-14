@@ -84,12 +84,12 @@ async def retrieve_context(
                 "score": round(score, 4),
             }
             for chunk, score in pairs
-            if score > SIMILARITY_THRESHOLD
+            if score < SIMILARITY_THRESHOLD
         ]
 
         if not chunks:
             logger.info(
-                "retrieve_context: all %d chunks scored ≤ %.2f threshold — no relevant context",
+                "retrieve_context: all %d chunks scored ≥ %.2f distance threshold — no relevant context",
                 len(pairs),
                 SIMILARITY_THRESHOLD,
             )
