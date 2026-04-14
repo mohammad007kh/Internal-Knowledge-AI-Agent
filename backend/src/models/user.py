@@ -62,6 +62,9 @@ class User(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
     must_change_password: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False,
     )
+    last_login_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
 
     # -- relationships -------------------------------------------------------
     refresh_tokens: Mapped[list[UserRefreshToken]] = relationship(
@@ -109,7 +112,7 @@ class Invitation(Base, UUIDMixin, TimestampMixin):
         String(254), index=True, nullable=False,
     )
     token: Mapped[str] = mapped_column(
-        String(36), unique=True, index=True, nullable=False,
+        String(64), unique=True, index=True, nullable=False,
     )
     invited_by: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),

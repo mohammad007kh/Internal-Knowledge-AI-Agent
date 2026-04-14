@@ -30,12 +30,13 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
 def create_app() -> FastAPI:
     configure_logging()
+    _is_dev = settings.ENVIRONMENT == "development"
     app = FastAPI(
         title="Knowledge AI Agent",
         version="0.1.0",
         lifespan=lifespan,
-        docs_url="/docs",
-        openapi_url="/openapi.json",
+        docs_url="/docs" if _is_dev else None,
+        openapi_url="/openapi.json" if _is_dev else None,
     )
 
     # ── Exception handlers (FIRST — before anything else) ──

@@ -19,13 +19,13 @@ class InvitationRepository(BaseRepository[Invitation]):
         super().__init__(Invitation, session)
 
     async def get_by_token(self, token: str) -> Invitation | None:
-        """Look up an invitation by its unique token."""
+        """Look up an invitation by its pre-hashed token (caller must hash)."""
         stmt = select(Invitation).where(Invitation.token == token)
         result = await self._session.execute(stmt)
         return result.scalar_one_or_none()
 
     async def mark_accepted(self, token: str) -> Invitation | None:
-        """Set ``accepted_at`` to the current UTC timestamp."""
+        """Set ``accepted_at`` to the current UTC timestamp (token must be pre-hashed)."""
         stmt = (
             update(Invitation)
             .where(Invitation.token == token)

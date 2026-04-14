@@ -222,10 +222,14 @@ async def send_message(
             "final_answer": None,
             "error": None,
             "source_ids": source_ids,
+            "sources": [],
+            "total_input_tokens": 0,
+            "total_output_tokens": 0,
         }
 
         final_answer = ""
         message_id = ""
+        sources: list[Any] = []
 
         try:
             async for event in pipeline.astream_events(initial_state, config=config, version="v2"):
@@ -240,6 +244,7 @@ async def send_message(
                 elif kind == "on_chain_end" and event.get("name") == "LangGraph":
                     output = event.get("data", {}).get("output", {})
                     final_answer = output.get("final_answer", final_answer)
+                    sources = output.get("sources", sources)
 
         except Exception as exc:  # noqa: BLE001
             # Check for GraphInterrupt first (if import succeeded)
@@ -271,6 +276,7 @@ async def send_message(
             session_id=str(session_id),
             message_id=message_id,
             trace_id=trace_id,
+            sources=sources,
         ).to_sse()
         langfuse_tracing.end_trace(trace_id, output=final_answer)
 

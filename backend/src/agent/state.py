@@ -22,3 +22,6 @@ class AgentState(TypedDict):
     query: str
     final_answer: str | None
     error: str | None
+    sources: list[dict[str, Any]]
+    total_input_tokens: int
+    total_output_tokens: int

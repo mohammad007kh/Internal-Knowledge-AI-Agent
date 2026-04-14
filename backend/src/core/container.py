@@ -8,18 +8,23 @@ from src.core.config import settings
 from src.core.database import AsyncSessionLocal
 from src.repositories.chat_repository import ChatMessageRepository, ChatSessionRepository
 from src.repositories.chunk_repository import ChunkRepository
+from src.repositories.company_policy_repository import CompanyPolicyRepository
+from src.repositories.connector_repository import ConnectorRepository
 from src.repositories.document_repository import DocumentRepository
 from src.repositories.invitation_repository import InvitationRepository
 from src.repositories.refresh_token_repository import RefreshTokenRepository
 from src.repositories.source_permission_repository import SourcePermissionRepository
 from src.repositories.source_repository import SourceRepository
 from src.repositories.sync_job_repository import SyncJobRepository
+from src.repositories.guardrail_event_repository import GuardrailEventRepository
 from src.repositories.user_repository import UserRepository
 from src.services.auth_service import AuthService
 from src.services.chat_session_service import ChatSessionService
 from src.services.chunking_service import ChunkingService
+from src.services.connector_service import ConnectorService
 from src.services.email_service import EmailService
 from src.services.embedding_service import EmbeddingService
+from src.services.guardrail_service import GuardrailService
 from src.services.langfuse_tracing_service import LangfuseTracingService
 from src.services.password_service import PasswordService
 from src.services.source_permission_service import SourcePermissionService
@@ -28,11 +33,13 @@ from src.services.sync_job_service import SyncJobService
 from src.services.user_service import UserService
 
 
+
 class Container(containers.DeclarativeContainer):
     wiring_config = containers.WiringConfiguration(packages=["src.api"])
 
     config = providers.Object(settings)
-    db_session_factory = providers.Factory(lambda: AsyncSessionLocal)
+    db_session_factory = providers.Factory(AsyncSessionLocal)
+    session_factory_provider = providers.Object(AsyncSessionLocal)
 
     # ── Repositories ────────────────────────────────────────────────
     user_repo = providers.Factory(UserRepository, session=db_session_factory)
@@ -49,6 +56,9 @@ class Container(containers.DeclarativeContainer):
     sync_job_repo = providers.Factory(SyncJobRepository, session=db_session_factory)
     chat_session_repo = providers.Factory(ChatSessionRepository, session=db_session_factory)
     chat_message_repo = providers.Factory(ChatMessageRepository, session=db_session_factory)
+    connector_repo = providers.Factory(ConnectorRepository, session=db_session_factory)
+    company_policy_repo = providers.Factory(CompanyPolicyRepository, session=db_session_factory)
+    guardrail_event_repo = providers.Factory(GuardrailEventRepository, session=db_session_factory)
 
     # ── Services ────────────────────────────────────────────────────
     password_service = providers.Factory(PasswordService)
@@ -87,8 +97,13 @@ class Container(containers.DeclarativeContainer):
     )
     sync_job_service = providers.Factory(
         SyncJobService,
-        session_factory=db_session_factory,
+        session_factory=session_factory_provider,
         sync_job_repo=sync_job_repo,
+    )
+    connector_service = providers.Factory(
+        ConnectorService,
+        repo=connector_repo,
+        settings=config,
     )
     chunking_service: providers.Singleton[ChunkingService] = providers.Singleton(
         ChunkingService
@@ -106,13 +121,22 @@ class Container(containers.DeclarativeContainer):
         LangfuseTracingService,
         langfuse=langfuse,
     )
+    guardrail_service: providers.Factory[GuardrailService] = providers.Factory(
+        GuardrailService,
+        policy_repo=company_policy_repo,
+        guardrail_event_repo=guardrail_event_repo,
+        openai_client=openai_client,
+    )
     pipeline = providers.Factory(
         build_pipeline,
+        db_session=providers.Factory(AsyncSessionLocal),
         embedding_service=embedding_service,
         chunk_repository=chunk_repo,
         chat_session_repository=chat_session_repo,
         chat_message_repository=chat_message_repo,
         openai_client=openai_client,
+        langfuse=langfuse,
+        guardrail_service=guardrail_service,
     )
 
 

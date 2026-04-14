@@ -81,11 +81,10 @@ class ChunkRepository:
             SELECT
                 c.id        AS chunk_id,
                 c.source_id,
-                c.text,
+                c.chunk_text,
                 c.embedding <-> {vector_literal}  AS score
             FROM chunks c
             WHERE c.source_id = ANY(:source_ids)
-              AND c.is_deleted IS NOT TRUE
             ORDER BY score ASC
             LIMIT :limit
             """

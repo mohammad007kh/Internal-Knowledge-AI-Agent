@@ -20,12 +20,32 @@ logger = logging.getLogger(__name__)
 
 
 async def format_response(state: AgentState) -> dict[str, Any]:
-    """Format / post-process the final answer (no-op in v1).
+    """Format / post-process the final answer and extract source citations.
 
-    In a future version this node could apply Markdown sanitisation,
-    citation injection, or source-link rendering.  For now it is a no-op.
+    Builds a deduplicated list of source documents from the retrieved chunks
+    and stores it in ``state["sources"]`` so the API layer can include it in
+    the done event sent to the frontend.
     """
-    return {}
+    chunks: list[dict[str, Any]] = state.get("retrieved_chunks", [])
+
+    seen_source_ids: set[str] = set()
+    sources: list[dict[str, Any]] = []
+
+    for chunk in chunks:
+        source_id = str(chunk.get("source_id", ""))
+        if not source_id or source_id in seen_source_ids:
+            continue
+        seen_source_ids.add(source_id)
+        sources.append(
+            {
+                "source_id": source_id,
+                "title": chunk.get("document_title") or chunk.get("source_name") or source_id,
+                "page": chunk.get("page_number"),
+            }
+        )
+
+    logger.debug("format_response: extracted %d unique sources", len(sources))
+    return {"sources": sources}
 
 
 async def save_message(

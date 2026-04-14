@@ -19,7 +19,7 @@ class Settings(BaseSettings):
     MINIO_ACCESS_KEY: str
     MINIO_SECRET_KEY: str
     MINIO_BUCKET: str = "knowledge-agent"
-    MINIO_SECURE: bool = False
+    MINIO_SECURE: bool = True
     COOKIE_SECURE: bool = True
     # Langfuse
     LANGFUSE_SECRET_KEY: str = ""
@@ -45,6 +45,7 @@ class Settings(BaseSettings):
     # Security / CORS
     FRONTEND_URL: str = "http://localhost:3000"
     ENVIRONMENT: str = "development"
+    TRUSTED_PROXY_IPS: list[str] = []
     # App config (loaded from YAML)
     upload_max_size_bytes: int = 52428800
     upload_supported_formats: list[str] = ["pdf", "docx", "xlsx", "csv", "txt", "md"]

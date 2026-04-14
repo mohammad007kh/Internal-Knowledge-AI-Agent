@@ -17,15 +17,17 @@ from src.agent.nodes import (
     check_clarification,
     format_response,
     generate_response,
+    guardrail_input,
+    guardrail_output,
     handle_clarification,
     load_history,
     retrieve_context,
-    save_message,
 )
 from src.agent.state import AgentState
 from src.repositories.chat_repository import ChatMessageRepository, ChatSessionRepository
 from src.repositories.chunk_repository import ChunkRepository
 from src.services.embedding_service import EmbeddingService
+from src.services.guardrail_service import GuardrailService
 
 logger = logging.getLogger(__name__)
 
@@ -33,6 +35,13 @@ logger = logging.getLogger(__name__)
 def route(state: AgentState) -> str:
     if state.get("requires_clarification"):
         return "handle_clarification"
+    return "retrieve_context"
+
+
+def route_after_guardrail_input(state: AgentState) -> str:
+    """Short-circuit to END when the input guardrail blocks the query."""
+    if state.get("error") == "guardrail_blocked_input":
+        return END
     return "retrieve_context"
 
 
@@ -45,6 +54,7 @@ def build_pipeline(
     chat_message_repository: ChatMessageRepository,
     openai_client: AsyncOpenAI,
     langfuse: Langfuse,
+    guardrail_service: GuardrailService | None = None,
 ) -> CompiledStateGraph[Any, Any, Any, Any]:
     workflow = StateGraph[AgentState](AgentState)
 
@@ -70,20 +80,26 @@ def build_pipeline(
         openai_client=openai_client,
         langfuse=langfuse,
     )
-    _save_message = functools.partial(
-        save_message,
-        chat_session_repository=chat_session_repository,
-        chat_message_repository=chat_message_repository,
-        db_session=db_session,
-    )
 
     workflow.add_node("load_history", _load_history)
     workflow.add_node("check_clarification", _check_clarification)
     workflow.add_node("handle_clarification", handle_clarification)
+
+    if guardrail_service is not None:
+        _guardrail_input = functools.partial(
+            guardrail_input,
+            guardrail_service=guardrail_service,
+        )
+        _guardrail_output = functools.partial(
+            guardrail_output,
+            guardrail_service=guardrail_service,
+        )
+        workflow.add_node("guardrail_input", _guardrail_input)
+        workflow.add_node("guardrail_output", _guardrail_output)
+
     workflow.add_node("retrieve_context", _retrieve_context)
     workflow.add_node("generate_response", _generate_response)
     workflow.add_node("format_response", format_response)
-    workflow.add_node("save_message", _save_message)
 
     workflow.add_edge(START, "load_history")
     workflow.add_edge("load_history", "check_clarification")
@@ -92,14 +108,29 @@ def build_pipeline(
         route,
         {
             "handle_clarification": "handle_clarification",
-            "retrieve_context": "retrieve_context",
+            "retrieve_context": "guardrail_input" if guardrail_service is not None else "retrieve_context",
         },
     )
     workflow.add_edge("handle_clarification", END)
+
+    if guardrail_service is not None:
+        workflow.add_conditional_edges(
+            "guardrail_input",
+            route_after_guardrail_input,
+            {
+                END: END,
+                "retrieve_context": "retrieve_context",
+            },
+        )
+
     workflow.add_edge("retrieve_context", "generate_response")
     workflow.add_edge("generate_response", "format_response")
-    workflow.add_edge("format_response", "save_message")
-    workflow.add_edge("save_message", END)
+
+    if guardrail_service is not None:
+        workflow.add_edge("format_response", "guardrail_output")
+        workflow.add_edge("guardrail_output", END)
+    else:
+        workflow.add_edge("format_response", END)
 
     checkpointer = MemorySaver()
     return workflow.compile(checkpointer=checkpointer)
@@ -129,6 +160,9 @@ async def run_pipeline(
         "query": query,
         "final_answer": None,
         "error": None,
+        "sources": [],
+        "total_input_tokens": 0,
+        "total_output_tokens": 0,
     }
     result = await compiled_graph.ainvoke(initial_state, config=config)
     return dict(result)

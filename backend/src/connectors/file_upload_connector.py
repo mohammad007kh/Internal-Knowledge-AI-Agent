@@ -57,6 +57,15 @@ _SUPPORTED_TYPES: frozenset[str] = frozenset({"pdf", "docx", "xlsx", "csv", "txt
 
 _TEXT_TYPES: frozenset[str] = frozenset({"csv", "txt", "md"})
 
+_MIME_MAP: dict[str, str] = {
+    "pdf": "application/pdf",
+    "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    "csv": "text/csv",
+    "txt": "text/plain",
+    "md": "text/plain",
+}
+
 
 # ---------------------------------------------------------------------------
 # Connector
@@ -108,6 +117,8 @@ class FileUploadConnector(BaseConnector):
                 f"maximum of {max_bytes:,} bytes "
                 f"(object_key='{self._object_key}')."
             )
+
+        self._validate_mime_type(raw_data, self._file_type)
 
         self._raw_data = raw_data
         logger.info(
@@ -177,6 +188,43 @@ class FileUploadConnector(BaseConnector):
                 self._object_key,
             )
             return False
+
+    # ------------------------------------------------------------------
+    # Private helpers
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _validate_mime_type(data: bytes, file_type: str) -> None:
+        """Validate that the file magic bytes match the declared extension.
+
+        Raises
+        ------
+        ValueError
+            If the detected MIME type does not match the expected type for
+            *file_type*.
+        """
+        import magic  # noqa: PLC0415
+
+        expected_mime = _MIME_MAP.get(file_type)
+        if expected_mime is None:
+            return  # unknown type — already blocked by _SUPPORTED_TYPES check
+
+        detected_mime = magic.from_buffer(data[:2048], mime=True)
+
+        # For text-based types (csv, txt, md) both "text/plain" and "text/csv"
+        # are acceptable since libmagic often reports "text/plain" for CSV.
+        text_mimes = {"text/plain", "text/csv"}
+        if expected_mime in text_mimes:
+            if detected_mime not in text_mimes:
+                raise ValueError(
+                    f"File content does not match declared type '{file_type}'. "
+                    f"Detected MIME: '{detected_mime}', expected one of {sorted(text_mimes)}."
+                )
+        elif detected_mime != expected_mime:
+            raise ValueError(
+                f"File content does not match declared type '{file_type}'. "
+                f"Detected MIME: '{detected_mime}', expected '{expected_mime}'."
+            )
 
     # ------------------------------------------------------------------
     # Private parsers

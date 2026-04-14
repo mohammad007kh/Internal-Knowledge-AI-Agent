@@ -57,7 +57,7 @@ class RefreshTokenRepository:
             expires_at=datetime.now(UTC) + timedelta(days=7),
         )
         self._db.add(record)
-        await self._db.commit()
+        await self._db.flush()
         await self._db.refresh(record)
         return record
 
@@ -68,7 +68,7 @@ class RefreshTokenRepository:
             .where(UserRefreshToken.id == token_id)
             .values(revoked_at=datetime.now(UTC))
         )
-        await self._db.commit()
+        await self._db.flush()
 
     async def revoke_all_for_user(self, user_id: UUID) -> None:
         """Revoke every active refresh token belonging to *user_id*."""
@@ -80,7 +80,7 @@ class RefreshTokenRepository:
             )
             .values(revoked_at=datetime.now(UTC))
         )
-        await self._db.commit()
+        await self._db.flush()
 
     # ------------------------------------------------------------------ #
     # Password-reset tokens                                               #
@@ -105,7 +105,7 @@ class RefreshTokenRepository:
             expires_at=expires_at,
         )
         self._db.add(record)
-        await self._db.commit()
+        await self._db.flush()
 
     async def get_valid_reset_token(
         self, raw_token: str
@@ -128,4 +128,4 @@ class RefreshTokenRepository:
             .where(PasswordResetToken.id == token_id)
             .values(used_at=datetime.now(UTC))
         )
-        await self._db.commit()
+        await self._db.flush()

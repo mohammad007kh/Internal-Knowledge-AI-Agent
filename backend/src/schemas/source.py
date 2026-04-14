@@ -119,3 +119,25 @@ class TestConnectionResponse(BaseModel):
 
     success: bool
     message: str = ""
+
+
+class DocumentResponse(BaseModel):
+    """Slim document representation returned by GET /sources/{id}/documents."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    source_id: uuid.UUID
+    raw_storage_path: str | None = None
+    is_active: bool
+    created_at: datetime
+    updated_at: datetime
+
+
+class DocumentListResponse(BaseModel):
+    """Paginated envelope for document lists."""
+
+    items: list[DocumentResponse]
+    total: int
+    limit: int
+    offset: int

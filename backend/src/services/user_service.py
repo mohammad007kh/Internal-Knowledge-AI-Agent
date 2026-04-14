@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import secrets
 import uuid
 from datetime import UTC, datetime, timedelta
@@ -93,6 +94,7 @@ class UserService:
             await self._invitations.revoke_pending(existing.id)
 
         token = secrets.token_urlsafe()
+        token_hash = hashlib.sha256(token.encode()).hexdigest()
         expires_at = datetime.now(UTC) + timedelta(
             days=INVITATION_EXPIRY_DAYS,
         )
@@ -101,7 +103,7 @@ class UserService:
             email=email.lower(),
             role=role,
             invited_by=admin.id,
-            token=token,
+            token=token_hash,
             expires_at=expires_at,
         )
 
@@ -120,7 +122,8 @@ class UserService:
             ValidationError: Token expired.
             ValueError: Password does not meet policy.
         """
-        invitation = await self._invitations.get_by_token(token)
+        token_hash = hashlib.sha256(token.encode()).hexdigest()
+        invitation = await self._invitations.get_by_token(token_hash)
         if not invitation:
             raise NotFoundError("Invitation not found.")
         if invitation.accepted_at:
@@ -137,7 +140,7 @@ class UserService:
             full_name=full_name,
             role=invitation.role,
         )
-        await self._invitations.mark_accepted(token)
+        await self._invitations.mark_accepted(token_hash)
         return user
 
     # ── admin operations ────────────────────────────────────────────

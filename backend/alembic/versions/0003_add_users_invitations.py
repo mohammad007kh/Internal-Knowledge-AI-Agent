@@ -7,8 +7,13 @@ table tracks sign-up invitations sent by administrators.
 A ``userrole`` PostgreSQL enum is created first so that both tables can
 reference it for the ``role`` column.
 
+NOTE: Although this file is named 0003, it depends on revision "0001"
+and runs BEFORE 0002 in the Alembic chain. This is intentional: 0002
+(user_refresh_tokens) has a FK to users.id, so users must be created first.
+Alembic execution order: 0001 → 0003 → 0002 → 0004 → …
+
 Revision ID: 0003
-Revises:     0002
+Revises:     0001
 Create Date: 2026-02-26
 """
 

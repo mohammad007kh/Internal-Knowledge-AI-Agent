@@ -12,6 +12,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.types import ASGIApp
 
 import src.core.redis as redis_module
+from src.core.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -24,11 +25,17 @@ RATE_LIMIT_RULES: list[tuple[str, int, int]] = [
 
 
 def _get_client_ip(request: Request) -> str:
-    """Prefer X-Forwarded-For (first hop) if behind a proxy."""
-    forwarded = request.headers.get("X-Forwarded-For")
-    if forwarded:
-        return forwarded.split(",")[0].strip()
-    return request.client.host if request.client else "unknown"
+    """Return the real client IP.
+
+    X-Forwarded-For is only trusted when the direct client IP is in
+    ``settings.TRUSTED_PROXY_IPS``, preventing spoofing by arbitrary callers.
+    """
+    direct_ip = request.client.host if request.client else None
+    if direct_ip and direct_ip in settings.TRUSTED_PROXY_IPS:
+        forwarded = request.headers.get("X-Forwarded-For")
+        if forwarded:
+            return forwarded.split(",")[0].strip()
+    return direct_ip or "unknown"
 
 
 def _match_rule(path: str) -> tuple[str, int, int] | None:

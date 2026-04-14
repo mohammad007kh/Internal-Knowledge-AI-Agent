@@ -93,6 +93,12 @@ class SyncJobRepository:
         )
         return result.scalar_one_or_none()
 
+    async def count_by_source(self, session: AsyncSession, source_id: uuid.UUID) -> int:
+        result = await session.execute(
+            sa.select(sa.func.count()).select_from(SyncJob).where(SyncJob.source_id == source_id)
+        )
+        return result.scalar_one()
+
     async def list_running(self, session: AsyncSession) -> list[SyncJob]:
         result = await session.execute(
             sa.select(SyncJob).where(SyncJob.status == SyncStatus.RUNNING)
