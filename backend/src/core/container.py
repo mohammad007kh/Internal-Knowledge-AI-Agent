@@ -16,6 +16,7 @@ from src.repositories.refresh_token_repository import RefreshTokenRepository
 from src.repositories.source_permission_repository import SourcePermissionRepository
 from src.repositories.source_repository import SourceRepository
 from src.repositories.sync_job_repository import SyncJobRepository
+from src.repositories.guardrail_event_repository import GuardrailEventRepository
 from src.repositories.user_repository import UserRepository
 from src.services.auth_service import AuthService
 from src.services.chat_session_service import ChatSessionService
@@ -32,18 +33,13 @@ from src.services.sync_job_service import SyncJobService
 from src.services.user_service import UserService
 
 
-class _NoOpGuardrailEventRepo:
-    """Minimal stub used when no real guardrail event table exists yet."""
-
-    async def create(self, data: dict) -> None:  # noqa: ARG002
-        pass
-
 
 class Container(containers.DeclarativeContainer):
     wiring_config = containers.WiringConfiguration(packages=["src.api"])
 
     config = providers.Object(settings)
-    db_session_factory = providers.Factory(lambda: AsyncSessionLocal)
+    db_session_factory = providers.Factory(AsyncSessionLocal)
+    session_factory_provider = providers.Object(AsyncSessionLocal)
 
     # ── Repositories ────────────────────────────────────────────────
     user_repo = providers.Factory(UserRepository, session=db_session_factory)
@@ -62,6 +58,7 @@ class Container(containers.DeclarativeContainer):
     chat_message_repo = providers.Factory(ChatMessageRepository, session=db_session_factory)
     connector_repo = providers.Factory(ConnectorRepository, session=db_session_factory)
     company_policy_repo = providers.Factory(CompanyPolicyRepository, session=db_session_factory)
+    guardrail_event_repo = providers.Factory(GuardrailEventRepository, session=db_session_factory)
 
     # ── Services ────────────────────────────────────────────────────
     password_service = providers.Factory(PasswordService)
@@ -100,7 +97,7 @@ class Container(containers.DeclarativeContainer):
     )
     sync_job_service = providers.Factory(
         SyncJobService,
-        session_factory=db_session_factory,
+        session_factory=session_factory_provider,
         sync_job_repo=sync_job_repo,
     )
     connector_service = providers.Factory(
@@ -124,10 +121,10 @@ class Container(containers.DeclarativeContainer):
         LangfuseTracingService,
         langfuse=langfuse,
     )
-    guardrail_service: providers.Singleton[GuardrailService] = providers.Singleton(
+    guardrail_service: providers.Factory[GuardrailService] = providers.Factory(
         GuardrailService,
         policy_repo=company_policy_repo,
-        guardrail_event_repo=providers.Object(_NoOpGuardrailEventRepo()),
+        guardrail_event_repo=guardrail_event_repo,
         openai_client=openai_client,
     )
     pipeline = providers.Factory(

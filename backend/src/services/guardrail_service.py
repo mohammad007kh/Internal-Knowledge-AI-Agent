@@ -97,7 +97,7 @@ class GuardrailService:
                 "direction": direction,
                 "text": text,
                 "blocked": decision.blocked,
-                "reason": decision.reason,
+                "reason": decision.reason or None,
                 "triggered_policy_ids": [str(pid) for pid in decision.triggered_policy_ids],
                 "session_id": str(session_id) if session_id else None,
             }

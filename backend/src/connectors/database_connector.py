@@ -41,10 +41,26 @@ class DatabaseConnector(BaseConnector):
         self._conn_str_hash: str = hashlib.sha256(
             config["connection_string"].encode()
         ).hexdigest()[:12]
+        self._validate_query(config["query"])
         self._query: str = config["query"]
         self._page_size: int = int(config.get("page_size", 1000))
         self._source_id: str | None = config.get("source_id")
         self._engine: Any | None = None
+
+    @staticmethod
+    def _validate_query(query: str) -> None:
+        """Allow only a single SELECT statement — reject DDL, DML, multi-statements."""
+        import sqlparse  # noqa: PLC0415
+
+        parsed = sqlparse.parse(query.strip())
+        if len(parsed) != 1:
+            raise ValueError("Query must be a single SQL statement.")
+        stmt = parsed[0]
+        if stmt.get_type() != "SELECT":
+            raise ValueError(f"Only SELECT statements are allowed; got {stmt.get_type()!r}.")
+        # Reject semicolons inside the body (multi-statement injection)
+        if ";" in sqlparse.format(query, strip_comments=True):
+            raise ValueError("Query must not contain semicolons.")
 
     # ------------------------------------------------------------------ #
     # Lifecycle
