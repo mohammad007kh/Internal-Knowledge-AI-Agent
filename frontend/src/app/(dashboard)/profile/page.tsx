@@ -34,7 +34,7 @@ export default function ProfilePage() {
           <div>
             <p className="text-xs text-muted-foreground">Full name</p>
             <p className="text-sm font-medium">
-              {(user as { full_name?: string | null }).full_name ?? '—'}
+              {user.full_name ?? '—'}
             </p>
           </div>
         </div>

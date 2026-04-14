@@ -5,8 +5,7 @@ from openai import AsyncOpenAI
 from src.agent.pipeline import build_pipeline
 from src.connectors.factory import ConnectorFactory
 from src.core.config import settings
-from src.core.database import AsyncSessionLocal, engine
-from sqlalchemy.ext.asyncio import AsyncSession
+from src.core.database import AsyncSessionLocal
 from src.repositories.chat_repository import ChatMessageRepository, ChatSessionRepository
 from src.repositories.chunk_repository import ChunkRepository
 from src.repositories.company_policy_repository import CompanyPolicyRepository
@@ -133,7 +132,7 @@ class Container(containers.DeclarativeContainer):
     )
     pipeline = providers.Factory(
         build_pipeline,
-        db_session=providers.Factory(AsyncSession, bind=engine),
+        db_session=providers.Factory(AsyncSessionLocal),
         embedding_service=embedding_service,
         chunk_repository=chunk_repo,
         chat_session_repository=chat_session_repo,

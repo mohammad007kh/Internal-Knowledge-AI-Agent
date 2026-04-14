@@ -9,6 +9,7 @@ import {
   LogOutIcon,
   MessageCircleIcon,
   PlugIcon,
+  UserCircleIcon,
   UsersIcon,
 } from 'lucide-react'
 import Link from 'next/link'
@@ -31,6 +32,13 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           >
             <MessageCircleIcon className="h-4 w-4" />
             Chat
+          </Link>
+          <Link
+            href="/profile"
+            className="flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium hover:bg-accent hover:text-accent-foreground"
+          >
+            <UserCircleIcon className="h-4 w-4" />
+            Profile
           </Link>
 
           {user?.role === 'admin' && (

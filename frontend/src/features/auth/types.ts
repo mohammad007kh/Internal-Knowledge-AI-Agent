@@ -5,6 +5,7 @@ export interface AuthUser {
   email: string
   role: UserRole
   must_change_password: boolean
+  full_name?: string | null
 }
 
 export interface AuthContextValue {
