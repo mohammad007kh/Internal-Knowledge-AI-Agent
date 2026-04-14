@@ -757,11 +757,31 @@ REST conventions properly followed throughout:
 | Profile page added with sidebar link | ✅ FIXED | 600c2b6 / latest |
 | `full_name` added to `AuthUser` TypeScript interface | ✅ FIXED | latest |
 
+### Phase F & G Fixes (2026-04-15)
+
+**Phase F — Backend (commits 9748e94, 68300bd)**
+
+| Issue | Status | Notes |
+|---|---|---|
+| C3 — SQL injection via f-string in database_connector.py | ✅ RESOLVED | `_validate_query()` added using sqlparse; blocks DDL/DML, multi-statements, UNION/INTERSECT/EXCEPT set operations, semicolons |
+| CRITICAL-4 — BaseRepository receives sessionmaker not AsyncSession | ✅ RESOLVED | `providers.Factory(lambda: AsyncSessionLocal)` → `providers.Factory(AsyncSessionLocal)`; `session_factory_provider` added for SyncJobService |
+| Guardrail events silently discarded | ✅ RESOLVED | Migration 0017, `GuardrailEvent` ORM model, `GuardrailEventRepository`, container wired; `guardrail_service` changed Singleton→Factory |
+| guardrail_event_repository flush() never committed | ✅ RESOLVED | Changed to `commit()` with `finally: close()` to return connection to pool |
+| Empty guardrail reason stored as "" not NULL | ✅ RESOLVED | `decision.reason or None` normalization in guardrail_service |
+
+**Phase G — Frontend (commits 796a0c2, 68300bd)**
+
+| Issue | Status | Notes |
+|---|---|---|
+| /admin/analytics page missing | ✅ RESOLVED | Created `admin/analytics/page.tsx` reusing all 5 analytics components |
+| Connectors API client missing | ✅ RESOLVED | Created `frontend/src/lib/api/connectors.ts` with list/delete/test functions |
+| Permissions list shows raw UUIDs | ✅ RESOLVED | `GET /admin/users/{user_id}` backend endpoint added; `getUserByIdApi` frontend function; PermissionsManager resolves UUIDs to emails via useEffect |
+| All frontend API paths missing /api/v1 prefix | ✅ RESOLVED | Fixed in sources.ts, users.ts, connectors.ts, PermissionsManager |
+
 ### Remaining Open Issues
 
 | # | Issue | Priority | Notes |
 |---|---|---|---|
-| C3 | SQL injection in database_connector.py via f-string | P0 | Requires SQL parser / whitelist; out of scope for this remediation sprint |
 | M1 | PostgreSQL connector may leak credentials in error messages | P2 | |
 | M3 | Encryption key stored as env var, no rotation | P2 | Requires secrets vault infrastructure |
 | M5 | pgvector missing `ef_search` parameter | P2 | |
@@ -770,8 +790,7 @@ REST conventions properly followed throughout:
 | M9 | No token budget management before LLM call | P2 | |
 | M10–M17 | Various UX polish items | P2–P3 | |
 | L1–L10 | Backlog items | P3 | |
-| — | CRITICAL-4 (DI container session pattern) | P1 | All BaseRepository instances receive sessionmaker not AsyncSession; requires dedicated session management refactor across all repos |
 
 ---
 
-*Original report generated: 2026-04-13 | Last updated: 2026-04-14 after Phases A–E remediation on `develop` branch.*
+*Original report generated: 2026-04-13 | Last updated: 2026-04-15 after Phases F–G remediation on `develop` branch.*
