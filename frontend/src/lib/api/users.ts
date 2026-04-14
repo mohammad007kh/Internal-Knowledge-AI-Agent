@@ -48,3 +48,8 @@ export async function changeUserRoleApi(
 export async function deactivateUserApi(userId: string): Promise<void> {
   await apiClient.delete<void>(`/users/${userId}`)
 }
+
+export async function getUserByIdApi(userId: string): Promise<UserListItem> {
+  const { data } = await apiClient.get<UserListItem>(`/users/${userId}`)
+  return data
+}

@@ -9,7 +9,8 @@ import {
 } from '@/features/source-permissions/hooks/useSourcePermissions'
 import { apiClient } from '@/lib/api-client'
 import { UserMinus, UserPlus } from 'lucide-react'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
+import { getUserByIdApi } from '@/lib/api/users'
 
 interface PermissionsManagerProps {
   sourceId: string
@@ -31,8 +32,21 @@ export function PermissionsManager({ sourceId }: PermissionsManagerProps) {
   const [email, setEmail] = useState('')
   const [lookupError, setLookupError] = useState<string | null>(null)
   const [isLookingUp, setIsLookingUp] = useState(false)
+  const [emailMap, setEmailMap] = useState<Record<string, string>>({})
 
   const { data: userIds = [], isLoading } = useSourcePermissions(sourceId)
+
+  useEffect(() => {
+    if (userIds.length === 0) return
+    const newIds = userIds.filter((id) => !(id in emailMap))
+    if (newIds.length === 0) return
+    newIds.forEach((id) => {
+      getUserByIdApi(id)
+        .then((u) => setEmailMap((prev) => ({ ...prev, [id]: u.email })))
+        .catch(() => setEmailMap((prev) => ({ ...prev, [id]: id.slice(0, 8) + '…' })))
+    })
+  }, [userIds])
+
   const grantMutation = useGrantPermission(sourceId)
   const revokeMutation = useRevokePermission(sourceId)
 
@@ -106,7 +120,12 @@ export function PermissionsManager({ sourceId }: PermissionsManagerProps) {
               key={userId}
               className="flex items-center justify-between rounded-md border px-4 py-2"
             >
-              <span className="font-mono text-sm">{userId}</span>
+              <span
+                className="text-sm"
+                title={userId}
+              >
+                {emailMap[userId] ?? userId.slice(0, 8) + '…'}
+              </span>
               <Button
                 variant="ghost"
                 size="sm"

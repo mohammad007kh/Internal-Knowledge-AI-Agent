@@ -115,6 +115,23 @@ async def list_my_sources(
     return await svc.list_for_user(current_user.id)
 
 
+@router.get("/{user_id}", response_model=UserResponse, summary="Look up a user by ID")
+async def get_user_by_id(
+    user_id: UUID,
+    admin: User = Depends(AdminOnly),
+    user_svc: UserService = Depends(_get_user_service),
+) -> UserResponse:
+    """Return user details for a given user ID. Admin-only."""
+    from src.core.container import Container  # noqa: PLC0415
+    from src.repositories.user_repository import UserRepository  # noqa: PLC0415
+
+    repo: UserRepository = Container.user_repo()
+    user = await repo.get_by_id(user_id)
+    if user is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found.")
+    return UserResponse.model_validate(user)
+
+
 @router.patch("/{user_id}/role", response_model=UserResponse)
 async def change_user_role(
     user_id: UUID,
