@@ -37,41 +37,41 @@ export interface GrantPermissionRequest {
 }
 
 export async function listSourcesApi(limit = 50, offset = 0): Promise<PaginatedSources> {
-  const { data } = await apiClient.get<PaginatedSources>('/sources', {
+  const { data } = await apiClient.get<PaginatedSources>('/api/v1/sources', {
     params: { limit, offset },
   })
   return data
 }
 
 export async function createSourceApi(body: CreateSourceRequest): Promise<SourceListItem> {
-  const { data } = await apiClient.post<SourceListItem>('/sources', body)
+  const { data } = await apiClient.post<SourceListItem>('/api/v1/sources', body)
   return data
 }
 
 export async function deleteSourceApi(sourceId: string): Promise<void> {
-  await apiClient.delete<void>(`/sources/${sourceId}`)
+  await apiClient.delete<void>(`/api/v1/sources/${sourceId}`)
 }
 
 export async function testConnectionApi(sourceId: string): Promise<TestConnectionResponse> {
   const { data } = await apiClient.post<TestConnectionResponse>(
-    `/sources/${sourceId}/test-connection`
+    `/api/v1/sources/${sourceId}/test-connection`
   )
   return data
 }
 
 export async function listSourcePermissionsApi(sourceId: string): Promise<string[]> {
   const { data } = await apiClient.get<SourcePermissionsResponse>(
-    `/sources/${sourceId}/permissions`
+    `/api/v1/sources/${sourceId}/permissions`
   )
   return data.user_ids
 }
 
 export async function grantPermissionApi(sourceId: string, userId: string): Promise<void> {
-  await apiClient.post<void>(`/sources/${sourceId}/permissions`, {
+  await apiClient.post<void>(`/api/v1/sources/${sourceId}/permissions`, {
     user_id: userId,
   } satisfies GrantPermissionRequest)
 }
 
 export async function revokePermissionApi(sourceId: string, userId: string): Promise<void> {
-  await apiClient.delete<void>(`/sources/${sourceId}/permissions/${userId}`)
+  await apiClient.delete<void>(`/api/v1/sources/${sourceId}/permissions/${userId}`)
 }

@@ -27,29 +27,29 @@ export interface ChangeRoleRequest {
 }
 
 export async function listUsersApi(limit = 50, offset = 0): Promise<PaginatedUsers> {
-  const { data } = await apiClient.get<PaginatedUsers>('/users', {
+  const { data } = await apiClient.get<PaginatedUsers>('/api/v1/users', {
     params: { limit, offset },
   })
   return data
 }
 
 export async function inviteUserApi(body: InviteUserRequest): Promise<void> {
-  await apiClient.post<void>('/users/invitations', body)
+  await apiClient.post<void>('/api/v1/users/invitations', body)
 }
 
 export async function changeUserRoleApi(
   userId: string,
   body: ChangeRoleRequest
 ): Promise<UserListItem> {
-  const { data } = await apiClient.patch<UserListItem>(`/users/${userId}/role`, body)
+  const { data } = await apiClient.patch<UserListItem>(`/api/v1/users/${userId}/role`, body)
   return data
 }
 
 export async function deactivateUserApi(userId: string): Promise<void> {
-  await apiClient.delete<void>(`/users/${userId}`)
+  await apiClient.delete<void>(`/api/v1/users/${userId}`)
 }
 
 export async function getUserByIdApi(userId: string): Promise<UserListItem> {
-  const { data } = await apiClient.get<UserListItem>(`/users/${userId}`)
+  const { data } = await apiClient.get<UserListItem>(`/api/v1/users/${userId}`)
   return data
 }

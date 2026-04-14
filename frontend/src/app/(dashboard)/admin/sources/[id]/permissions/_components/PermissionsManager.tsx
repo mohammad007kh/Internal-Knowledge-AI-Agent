@@ -23,7 +23,7 @@ interface UserLookupResponse {
 
 async function lookupUserByEmail(email: string): Promise<UserLookupResponse> {
   const { data } = await apiClient.get<UserLookupResponse>(
-    `/admin/users/lookup?email=${encodeURIComponent(email)}`
+    `/api/v1/admin/users/lookup?email=${encodeURIComponent(email)}`
   )
   return data
 }

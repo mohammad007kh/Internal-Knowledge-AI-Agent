@@ -31,4 +31,7 @@ class GuardrailEventRepository:
             session_id=uuid.UUID(session_id_raw) if session_id_raw else None,
         )
         self._session.add(event)
-        await self._session.commit()
+        try:
+            await self._session.commit()
+        finally:
+            await self._session.close()

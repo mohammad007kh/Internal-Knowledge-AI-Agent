@@ -22,17 +22,17 @@ export interface TestConnectorResponse {
 }
 
 export async function listConnectorsApi(page = 1, pageSize = 50): Promise<PaginatedConnectors> {
-  const { data } = await apiClient.get<PaginatedConnectors>('/connectors', {
+  const { data } = await apiClient.get<PaginatedConnectors>('/api/v1/connectors', {
     params: { page, page_size: pageSize },
   })
   return data
 }
 
 export async function deleteConnectorApi(id: string): Promise<void> {
-  await apiClient.delete<void>(`/connectors/${id}`)
+  await apiClient.delete<void>(`/api/v1/connectors/${id}`)
 }
 
 export async function testConnectorApi(id: string): Promise<TestConnectorResponse> {
-  const { data } = await apiClient.post<TestConnectorResponse>(`/connectors/${id}/test`, {})
+  const { data } = await apiClient.post<TestConnectorResponse>(`/api/v1/connectors/${id}/test`, {})
   return data
 }

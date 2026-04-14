@@ -6,6 +6,7 @@ import uuid
 from collections.abc import AsyncIterator
 from typing import Any
 
+import sqlparse
 import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import create_async_engine
 
@@ -49,9 +50,7 @@ class DatabaseConnector(BaseConnector):
 
     @staticmethod
     def _validate_query(query: str) -> None:
-        """Allow only a single SELECT statement — reject DDL, DML, multi-statements."""
-        import sqlparse  # noqa: PLC0415
-
+        """Allow only a single SELECT statement — reject DDL, DML, multi-statements, UNION."""
         parsed = sqlparse.parse(query.strip())
         if len(parsed) != 1:
             raise ValueError("Query must be a single SQL statement.")
@@ -61,6 +60,11 @@ class DatabaseConnector(BaseConnector):
         # Reject semicolons inside the body (multi-statement injection)
         if ";" in sqlparse.format(query, strip_comments=True):
             raise ValueError("Query must not contain semicolons.")
+        # Reject UNION / UNION ALL — prevents cross-table data exfiltration
+        import sqlparse.tokens as T  # noqa: PLC0415
+        for token in stmt.flatten():
+            if token.ttype is T.Keyword and token.normalized.upper() in ("UNION", "INTERSECT", "EXCEPT"):
+                raise ValueError(f"Query must not use set operations (UNION/INTERSECT/EXCEPT).")
 
     # ------------------------------------------------------------------ #
     # Lifecycle
