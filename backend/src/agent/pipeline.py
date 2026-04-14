@@ -39,6 +39,13 @@ def route(state: AgentState) -> str:
     return "retrieve_context"
 
 
+def route_after_guardrail_input(state: AgentState) -> str:
+    """Short-circuit to save_message when the input guardrail blocks the query."""
+    if state.get("error") == "guardrail_blocked_input":
+        return "save_message"
+    return "retrieve_context"
+
+
 def build_pipeline(
     *,
     db_session: AsyncSession,
@@ -115,7 +122,14 @@ def build_pipeline(
     workflow.add_edge("handle_clarification", END)
 
     if guardrail_service is not None:
-        workflow.add_edge("guardrail_input", "retrieve_context")
+        workflow.add_conditional_edges(
+            "guardrail_input",
+            route_after_guardrail_input,
+            {
+                "save_message": "save_message",
+                "retrieve_context": "retrieve_context",
+            },
+        )
 
     workflow.add_edge("retrieve_context", "generate_response")
     workflow.add_edge("generate_response", "format_response")
@@ -156,6 +170,9 @@ async def run_pipeline(
         "query": query,
         "final_answer": None,
         "error": None,
+        "sources": [],
+        "total_input_tokens": 0,
+        "total_output_tokens": 0,
     }
     result = await compiled_graph.ainvoke(initial_state, config=config)
     return dict(result)
