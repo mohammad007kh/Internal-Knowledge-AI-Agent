@@ -53,7 +53,7 @@ const schema = z.object({
 type FormValues = z.infer<typeof schema>
 
 async function fetchConnectors(): Promise<ConnectorsResponse> {
-  const res = await apiClient.get<ConnectorsResponse>('/connectors?limit=100')
+  const res = await apiClient.get<ConnectorsResponse>('/api/v1/connectors?limit=100')
   return res.data
 }
 
@@ -66,7 +66,7 @@ async function createSource(values: FormValues): Promise<CreateSourceResponse> {
   if (values.config_overrides?.trim()) {
     payload.config_overrides = JSON.parse(values.config_overrides)
   }
-  const res = await apiClient.post<CreateSourceResponse>('/sources', payload)
+  const res = await apiClient.post<CreateSourceResponse>('/api/v1/sources', payload)
   return res.data
 }
 

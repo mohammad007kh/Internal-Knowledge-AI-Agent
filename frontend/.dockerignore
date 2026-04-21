@@ -1,0 +1,22 @@
+# Dependency directories
+node_modules
+.pnpm-store
+
+# Build and test artifacts
+.next
+dist
+coverage
+test-results
+playwright-report
+
+# Local env and editor artifacts
+.env
+.env.local
+.env.*.local
+*.log
+*.tsbuildinfo
+
+# VCS and misc
+.git
+.gitignore
+.vscode

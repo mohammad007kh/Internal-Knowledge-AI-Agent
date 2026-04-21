@@ -1,10 +1,10 @@
 import { type NextRequest, NextResponse } from 'next/server'
 
 // ── Route groups ──────────────────────────────────────────────────────────────
-const AUTH_ROUTES = /^\/auth(\/|$)/
-const DASHBOARD_ROUTES = /^\/(chat|admin|sources|profile)(\/|$)/
+const AUTH_ROUTES = /^\/(login|password-reset|setup|change-password)(\/|$)/
+const DASHBOARD_ROUTES = /^\/(chat|admin|profile)(\/|$)/
 const ADMIN_ROUTES = /^\/admin(\/|$)/
-const CHANGE_PASSWORD_ROUTE = '/auth/change-password'
+const CHANGE_PASSWORD_ROUTE = '/change-password'
 
 // ── JWT decode (Edge-safe, no crypto library) ────────────────────────────────
 interface EdgeJwtPayload {
@@ -69,7 +69,7 @@ export function middleware(request: NextRequest) {
   if (DASHBOARD_ROUTES.test(pathname)) {
     // No credentials at all → redirect to login
     if (!isAuthenticated && !hasRefreshCookie) {
-      const loginUrl = new URL('/auth/login', request.url)
+      const loginUrl = new URL('/login', request.url)
       loginUrl.searchParams.set('next', pathname)
       return NextResponse.redirect(loginUrl)
     }

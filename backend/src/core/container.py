@@ -1,5 +1,6 @@
+from typing import Any
+
 from dependency_injector import containers, providers
-from langfuse import Langfuse
 from openai import AsyncOpenAI
 
 from src.agent.pipeline import build_pipeline
@@ -25,13 +26,47 @@ from src.services.connector_service import ConnectorService
 from src.services.email_service import EmailService
 from src.services.embedding_service import EmbeddingService
 from src.services.guardrail_service import GuardrailService
-from src.services.langfuse_tracing_service import LangfuseTracingService
+from src.services.langfuse_tracing_service import LangfuseTracingService, NullLangfuse
 from src.services.password_service import PasswordService
 from src.services.source_permission_service import SourcePermissionService
 from src.services.source_service import SourceService
 from src.services.sync_job_service import SyncJobService
 from src.services.user_service import UserService
 
+import logging
+
+_logger = logging.getLogger(__name__)
+
+
+def _build_langfuse_client(app_settings: Any) -> Any:
+    """Return a real Langfuse client when configured, else a NullLangfuse stub.
+
+    Langfuse is optional observability — when the secret/public keys are not
+    set we return a :class:`NullLangfuse` that no-ops every call so the chat
+    pipeline keeps working without credentials.
+    """
+    secret_key = getattr(app_settings, "LANGFUSE_SECRET_KEY", "") or ""
+    public_key = getattr(app_settings, "LANGFUSE_PUBLIC_KEY", "") or ""
+    if not secret_key or not public_key:
+        _logger.info("Langfuse credentials not set — using NullLangfuse (no-op)")
+        return NullLangfuse()
+
+    try:
+        from langfuse import Langfuse  # noqa: PLC0415 - optional dependency
+    except Exception:  # noqa: BLE001
+        _logger.warning("langfuse import failed — falling back to NullLangfuse", exc_info=True)
+        return NullLangfuse()
+
+    host = getattr(app_settings, "LANGFUSE_HOST", "") or None
+    try:
+        return Langfuse(
+            secret_key=secret_key,
+            public_key=public_key,
+            host=host,
+        )
+    except Exception:  # noqa: BLE001 - never crash startup over observability
+        _logger.warning("Langfuse client init failed — falling back to NullLangfuse", exc_info=True)
+        return NullLangfuse()
 
 
 class Container(containers.DeclarativeContainer):
@@ -116,7 +151,9 @@ class Container(containers.DeclarativeContainer):
         AsyncOpenAI,
         api_key=config.provided.OPENAI_API_KEY,
     )
-    langfuse: providers.Singleton[Langfuse] = providers.Singleton(Langfuse)
+    langfuse: providers.Singleton[Any] = providers.Singleton(
+        lambda: _build_langfuse_client(settings)
+    )
     langfuse_tracing_service: providers.Singleton[LangfuseTracingService] = providers.Singleton(
         LangfuseTracingService,
         langfuse=langfuse,

@@ -49,7 +49,7 @@ function buildCards(metrics: SystemMetrics): MetricCard[] {
 export function MetricsCards() {
   const { data } = useQuery<SystemMetrics>({
     queryKey: ['admin', 'analytics', 'metrics'],
-    queryFn: () => apiClient.get<SystemMetrics>('/admin/analytics/metrics').then((r) => r.data),
+    queryFn: () => apiClient.get<SystemMetrics>('/api/v1/admin/analytics/metrics').then((r) => r.data),
     refetchInterval: 30_000,
     staleTime: 10_000,
   })

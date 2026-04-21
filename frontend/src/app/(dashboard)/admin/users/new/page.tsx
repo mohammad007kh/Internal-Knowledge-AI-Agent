@@ -36,7 +36,7 @@ const schema = z.object({
 type FormValues = z.infer<typeof schema>
 
 async function inviteUser(values: FormValues): Promise<{ id: string }> {
-  const res = await apiClient.post<{ id: string }>('/admin/users/invite', values)
+  const res = await apiClient.post<{ id: string }>('/api/v1/users/invitations', values)
   return res.data
 }
 

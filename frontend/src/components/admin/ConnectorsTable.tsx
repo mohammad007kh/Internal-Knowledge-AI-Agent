@@ -43,16 +43,16 @@ interface ConnectorsResponse {
 }
 
 async function fetchConnectors(): Promise<ConnectorsResponse> {
-  const res = await apiClient.get<ConnectorsResponse>('/connectors?page=1&page_size=20')
+  const res = await apiClient.get<ConnectorsResponse>('/api/v1/connectors?page=1&page_size=20')
   return res.data
 }
 
 async function testConnector(id: string): Promise<void> {
-  await apiClient.post(`/connectors/${id}/test`, {})
+  await apiClient.post(`/api/v1/connectors/${id}/test`, {})
 }
 
 async function deleteConnector(id: string): Promise<void> {
-  await apiClient.delete(`/connectors/${id}`)
+  await apiClient.delete(`/api/v1/connectors/${id}`)
 }
 
 function StatusBadge({ active }: { active: boolean }) {

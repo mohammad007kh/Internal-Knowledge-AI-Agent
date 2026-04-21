@@ -16,12 +16,30 @@ from src.core.config import settings
 
 logger = logging.getLogger(__name__)
 
-# (route_prefix, limit, window_seconds)
-RATE_LIMIT_RULES: list[tuple[str, int, int]] = [
-    ("/api/v1/auth/login", 5, 60),
-    ("/api/v1/auth/refresh", 10, 60),
-    ("/api/v1/", 100, 60),
-]
+
+def _get_rules() -> list[tuple[str, int, int]]:
+    """Return rate-limit rules as ``(route_prefix, limit, window_seconds)`` tuples.
+
+    Reads from ``settings`` at call time so environment-driven changes take
+    effect without requiring a module reload.
+    """
+    return [
+        (
+            "/api/v1/auth/login",
+            settings.RATE_LIMIT_AUTH_LOGIN_LIMIT,
+            settings.RATE_LIMIT_AUTH_LOGIN_WINDOW,
+        ),
+        (
+            "/api/v1/auth/refresh",
+            settings.RATE_LIMIT_AUTH_REFRESH_LIMIT,
+            settings.RATE_LIMIT_AUTH_REFRESH_WINDOW,
+        ),
+        (
+            "/api/v1/",
+            settings.RATE_LIMIT_API_LIMIT,
+            settings.RATE_LIMIT_API_WINDOW,
+        ),
+    ]
 
 
 def _get_client_ip(request: Request) -> str:
@@ -40,7 +58,7 @@ def _get_client_ip(request: Request) -> str:
 
 def _match_rule(path: str) -> tuple[str, int, int] | None:
     """Return (prefix, limit, window_seconds) for the first matching rule, else None."""
-    for prefix, limit, window in RATE_LIMIT_RULES:
+    for prefix, limit, window in _get_rules():
         if path.startswith(prefix):
             return prefix, limit, window
     return None

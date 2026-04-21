@@ -48,7 +48,7 @@ export default function PasswordResetPage() {
         </CardHeader>
         <CardContent>
           <a
-            href="/auth/login"
+            href="/login"
             className="text-sm text-muted-foreground hover:text-foreground underline-offset-4 hover:underline"
           >
             ← Back to sign in

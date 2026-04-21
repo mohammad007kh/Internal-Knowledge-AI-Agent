@@ -19,7 +19,7 @@ export function ActivityFeed() {
   const { data } = useQuery<ActivityEvent[]>({
     queryKey: ['admin', 'analytics', 'activity'],
     queryFn: () =>
-      apiClient.get<ActivityEvent[]>('/admin/analytics/activity?limit=20').then((r) => r.data),
+      apiClient.get<ActivityEvent[]>('/api/v1/admin/analytics/activity?limit=20').then((r) => r.data),
     refetchInterval: 30_000,
     staleTime: 10_000,
   })

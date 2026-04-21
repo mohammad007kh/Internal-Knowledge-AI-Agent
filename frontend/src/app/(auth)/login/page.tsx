@@ -40,7 +40,7 @@ export default function LoginPage() {
     try {
       const result = await login.mutateAsync(values)
       if (result.must_change_password) {
-        router.push('/auth/change-password')
+        router.push('/change-password')
       } else {
         router.push('/chat')
       }
@@ -75,7 +75,7 @@ export default function LoginPage() {
             <div className="flex items-center justify-between">
               <Label htmlFor="password">Password</Label>
               <a
-                href="/auth/password-reset"
+                href="/password-reset"
                 className="text-sm text-muted-foreground hover:text-foreground underline-offset-4 hover:underline"
               >
                 Forgot password?

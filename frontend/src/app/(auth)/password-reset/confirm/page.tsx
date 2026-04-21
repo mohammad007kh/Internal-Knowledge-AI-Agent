@@ -51,7 +51,7 @@ function PasswordResetConfirmForm() {
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <a href="/auth/password-reset" className="text-sm underline">
+          <a href="/password-reset" className="text-sm underline">
             Request a new link →
           </a>
         </CardContent>
@@ -66,7 +66,7 @@ function PasswordResetConfirmForm() {
         new_password: values.password,
       })
       toast.success('Password reset successful. Please sign in.')
-      router.push('/auth/login')
+      router.push('/login')
     } catch (err: unknown) {
       const message =
         err instanceof Error ? err.message : 'Reset failed. The link may have expired.'

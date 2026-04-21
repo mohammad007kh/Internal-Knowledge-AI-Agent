@@ -38,7 +38,7 @@ router = APIRouter()
 def _get_db_session_factory() -> Any:
     from src.core.container import Container  # noqa: PLC0415
 
-    return Container.db_session_factory()
+    return Container.session_factory_provider()
 
 
 def _get_chat_session_repo() -> ChatSessionRepository:

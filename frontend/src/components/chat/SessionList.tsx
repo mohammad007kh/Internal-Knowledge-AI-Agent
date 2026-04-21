@@ -43,19 +43,19 @@ interface SessionsResponse {
 
 const sessionsApi = {
   list: async (): Promise<SessionsResponse> => {
-    const res = await apiClient.get<SessionsResponse>('/chat/sessions?limit=100')
+    const res = await apiClient.get<SessionsResponse>('/api/v1/chat/sessions?limit=100')
     return res.data
   },
   create: async (title: string): Promise<ChatSession> => {
-    const res = await apiClient.post<ChatSession>('/chat/sessions', { title })
+    const res = await apiClient.post<ChatSession>('/api/v1/chat/sessions', { title })
     return res.data
   },
   rename: async (id: string, title: string): Promise<ChatSession> => {
-    const res = await apiClient.patch<ChatSession>(`/chat/sessions/${id}`, { title })
+    const res = await apiClient.patch<ChatSession>(`/api/v1/chat/sessions/${id}`, { title })
     return res.data
   },
   delete: async (id: string): Promise<void> => {
-    await apiClient.delete(`/chat/sessions/${id}`)
+    await apiClient.delete(`/api/v1/chat/sessions/${id}`)
   },
 }
 

@@ -62,7 +62,7 @@ function SetupForm() {
         password: values.password,
       })
       toast.success('Account created! Please sign in.')
-      router.push('/auth/login')
+      router.push('/login')
     } catch (err: unknown) {
       const message =
         err instanceof Error ? err.message : 'Setup failed. The link may have expired.'

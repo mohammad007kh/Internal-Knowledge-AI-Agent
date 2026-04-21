@@ -69,16 +69,16 @@ function StatusBadge({ status }: { status: SourceStatus }) {
 }
 
 async function fetchSources(page: number): Promise<SourcesResponse> {
-  const res = await apiClient.get<SourcesResponse>(`/sources?page=${page}&page_size=20`)
+  const res = await apiClient.get<SourcesResponse>(`/api/v1/sources?page=${page}&page_size=20`)
   return res.data
 }
 
 async function triggerSync(id: string): Promise<void> {
-  await apiClient.post(`/sources/${id}/sync`)
+  await apiClient.post(`/api/v1/sources/${id}/sync`)
 }
 
 async function deleteSource(id: string): Promise<void> {
-  await apiClient.delete(`/sources/${id}`)
+  await apiClient.delete(`/api/v1/sources/${id}`)
 }
 
 const columnHelper = createColumnHelper<KnowledgeSource>()

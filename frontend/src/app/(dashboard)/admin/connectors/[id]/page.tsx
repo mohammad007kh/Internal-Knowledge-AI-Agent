@@ -426,7 +426,7 @@ export default function ConnectorDetailPage() {
   const { data: connector, isLoading } = useQuery<ConnectorDetail>({
     queryKey: ['connector', id],
     queryFn: async () => {
-      const res = await apiClient.get<ConnectorDetail>(`/connectors/${id}`)
+      const res = await apiClient.get<ConnectorDetail>(`/api/v1/connectors/${id}`)
       return res.data
     },
     enabled: !!id,
@@ -495,7 +495,7 @@ export default function ConnectorDetailPage() {
 
   const saveMutation = useMutation({
     mutationFn: async (values: EditConnectorValues) => {
-      const res = await apiClient.put<ConnectorDetail>(`/connectors/${id}`, values)
+      const res = await apiClient.put<ConnectorDetail>(`/api/v1/connectors/${id}`, values)
       return res.data
     },
     onSuccess: () => {
@@ -510,7 +510,7 @@ export default function ConnectorDetailPage() {
 
   const testMutation = useMutation({
     mutationFn: async () => {
-      const res = await apiClient.post(`/connectors/${id}/test`, {})
+      const res = await apiClient.post(`/api/v1/connectors/${id}/test`, {})
       return res.data
     },
     onSuccess: () => {

@@ -34,7 +34,7 @@ const STATUS_STYLES: Record<Status, { icon: IconComponent; color: string }> = {
 export function HealthCards() {
   const { data } = useQuery<SystemHealth>({
     queryKey: ['health', 'detail'],
-    queryFn: () => apiClient.get<SystemHealth>('/health/detail').then((r) => r.data),
+    queryFn: () => apiClient.get<SystemHealth>('/api/v1/health/detail').then((r) => r.data),
     refetchInterval: 30_000,
     staleTime: 10_000,
   })

@@ -16,18 +16,18 @@ interface SessionResponse {
 }
 
 async function fetchSession(id: string): Promise<SessionResponse> {
-  const res = await apiClient.get<SessionResponse>(`/chat/sessions/${id}`)
+  const res = await apiClient.get<SessionResponse>(`/api/v1/chat/sessions/${id}`)
   return res.data
 }
 
 async function updateSessionSources(id: string, sourceIds: string[]): Promise<void> {
-  await apiClient.patch(`/chat/sessions/${id}`, { source_ids: sourceIds })
+  await apiClient.patch(`/api/v1/chat/sessions/${id}`, { source_ids: sourceIds })
 }
 
 async function fetchSourcesByIds(ids: string[]): Promise<SourceSummary[]> {
   if (ids.length === 0) return []
   const qs = ids.map((id) => `ids=${id}`).join('&')
-  const res = await apiClient.get<{ items: SourceSummary[] }>(`/sources?${qs}&limit=${ids.length}`)
+  const res = await apiClient.get<{ items: SourceSummary[] }>(`/api/v1/sources?${qs}&limit=${ids.length}`)
   return res.data.items
 }
 

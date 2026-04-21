@@ -23,14 +23,14 @@ def upgrade() -> None:
         sa.Column("name", sa.String(255), nullable=False),
         sa.Column(
             "connector_type",
-            sa.Enum(
+            postgresql.ENUM(
                 "web_url",
                 "file_upload",
                 "database",
                 "confluence",
                 "sharepoint",
                 name="sourcetype",
-                create_constraint=False,
+                create_type=False,
             ),
             nullable=False,
         ),

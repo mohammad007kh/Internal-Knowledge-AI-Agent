@@ -29,7 +29,7 @@ interface SourceSelectorProps {
 }
 
 async function fetchSources(): Promise<SourceResponse> {
-  const res = await apiClient.get('/sources?limit=100&status=ready')
+  const res = await apiClient.get('/api/v1/sources?limit=100&status=ready')
   return res.data
 }
 

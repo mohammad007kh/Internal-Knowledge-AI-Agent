@@ -46,6 +46,13 @@ class Settings(BaseSettings):
     FRONTEND_URL: str = "http://localhost:3000"
     ENVIRONMENT: str = "development"
     TRUSTED_PROXY_IPS: list[str] = []
+    # Rate limiting (per-IP, sliding window)
+    RATE_LIMIT_AUTH_LOGIN_LIMIT: int = 5
+    RATE_LIMIT_AUTH_LOGIN_WINDOW: int = 60
+    RATE_LIMIT_AUTH_REFRESH_LIMIT: int = 30
+    RATE_LIMIT_AUTH_REFRESH_WINDOW: int = 60
+    RATE_LIMIT_API_LIMIT: int = 200
+    RATE_LIMIT_API_WINDOW: int = 60
     # App config (loaded from YAML)
     upload_max_size_bytes: int = 52428800
     upload_supported_formats: list[str] = ["pdf", "docx", "xlsx", "csv", "txt", "md"]

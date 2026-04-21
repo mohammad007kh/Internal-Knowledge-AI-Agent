@@ -50,7 +50,7 @@ export default function ProfilePage() {
 
       <div>
         <Button asChild variant="outline" size="sm">
-          <Link href="/auth/change-password">
+          <Link href="/change-password">
             <KeyRoundIcon className="mr-2 h-4 w-4" />
             Change Password
           </Link>

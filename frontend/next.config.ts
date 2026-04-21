@@ -6,6 +6,16 @@ const nextConfig: NextConfig = {
   images: {
     domains: [],
   },
+  async redirects() {
+    return [
+      { source: '/favicon.ico', destination: '/favicon.svg', permanent: false },
+      { source: '/auth/login', destination: '/login', permanent: true },
+      { source: '/auth/change-password', destination: '/change-password', permanent: true },
+      { source: '/auth/password-reset', destination: '/password-reset', permanent: true },
+      { source: '/auth/setup', destination: '/setup', permanent: true },
+    ]
+  },
+
   async headers() {
     return [
       {

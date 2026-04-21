@@ -9,7 +9,7 @@ export function QueryVolumeChart() {
   const { data } = useQuery<DailyQueryCount[]>({
     queryKey: ['admin', 'analytics', 'queries'],
     queryFn: () =>
-      apiClient.get<DailyQueryCount[]>('/admin/analytics/queries?days=14').then((r) => r.data),
+      apiClient.get<DailyQueryCount[]>('/api/v1/admin/analytics/queries?days=14').then((r) => r.data),
     refetchInterval: 30_000,
     staleTime: 10_000,
   })

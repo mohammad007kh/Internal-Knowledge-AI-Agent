@@ -42,7 +42,7 @@ export default function UserDetailPage() {
   const { data: user } = useQuery({
     queryKey: ['admin-user', id],
     queryFn: async () => {
-      const res = await apiClient.get<AdminUser>(`/admin/users/${id}`)
+      const res = await apiClient.get<AdminUser>(`/api/v1/users/${id}`)
       return res.data
     },
   })
@@ -59,7 +59,7 @@ export default function UserDetailPage() {
   })
 
   const updateMutation = useMutation({
-    mutationFn: (v: FormValues) => apiClient.patch(`/admin/users/${id}`, v),
+    mutationFn: (v: FormValues) => apiClient.patch(`/api/v1/users/${id}`, v),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['admin-user', id] })
       queryClient.invalidateQueries({ queryKey: ['admin-users'] })
@@ -69,7 +69,7 @@ export default function UserDetailPage() {
   })
 
   const toggleActiveMutation = useMutation({
-    mutationFn: (active: boolean) => apiClient.patch(`/admin/users/${id}`, { is_active: active }),
+    mutationFn: (active: boolean) => apiClient.patch(`/api/v1/users/${id}`, { is_active: active }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['admin-user', id] })
       toast.success(user?.is_active ? 'User deactivated.' : 'User reactivated.')
@@ -77,7 +77,7 @@ export default function UserDetailPage() {
   })
 
   const resetPasswordMutation = useMutation({
-    mutationFn: () => apiClient.post(`/admin/users/${id}/reset-password`),
+    mutationFn: () => apiClient.post(`/api/v1/users/${id}/reset-password`),
     onSuccess: () => toast.success('Password reset email sent.'),
     onError: () => toast.error('Failed to send reset email.'),
   })

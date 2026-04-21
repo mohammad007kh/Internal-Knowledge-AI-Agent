@@ -44,18 +44,18 @@ interface SyncHistoryResponse {
 }
 
 async function fetchSource(id: string): Promise<SourceDetail> {
-  const res = await apiClient.get<SourceDetail>(`/sources/${id}`)
+  const res = await apiClient.get<SourceDetail>(`/api/v1/sources/${id}`)
   return res.data
 }
 
 async function fetchDocuments(id: string): Promise<DocumentsResponse> {
-  const res = await apiClient.get<DocumentsResponse>(`/sources/${id}/documents?page=1&page_size=20`)
+  const res = await apiClient.get<DocumentsResponse>(`/api/v1/sources/${id}/documents?page=1&page_size=20`)
   return res.data
 }
 
 async function fetchSyncHistory(id: string): Promise<SyncHistoryResponse> {
   const res = await apiClient.get<SyncHistoryResponse>(
-    `/sources/${id}/sync-runs?page=1&page_size=20`
+    `/api/v1/sources/${id}/sync-runs?page=1&page_size=20`
   )
   return res.data
 }

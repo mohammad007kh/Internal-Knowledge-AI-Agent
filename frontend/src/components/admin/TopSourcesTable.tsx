@@ -8,7 +8,7 @@ export function TopSourcesTable() {
   const { data } = useQuery<SourceQueryStat[]>({
     queryKey: ['admin', 'analytics', 'top-sources'],
     queryFn: () =>
-      apiClient.get<SourceQueryStat[]>('/admin/analytics/top-sources?limit=10').then((r) => r.data),
+      apiClient.get<SourceQueryStat[]>('/api/v1/admin/analytics/top-sources?limit=10').then((r) => r.data),
     refetchInterval: 30_000,
     staleTime: 10_000,
   })
