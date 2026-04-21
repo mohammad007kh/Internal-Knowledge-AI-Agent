@@ -25,10 +25,13 @@ const SERVICE_ICON: Record<Service, IconComponent> = {
   celery: CpuIcon,
 }
 
-const STATUS_STYLES: Record<Status, { icon: IconComponent; color: string }> = {
+const STATUS_FALLBACK = { icon: AlertTriangleIcon, color: 'text-muted-foreground' }
+
+const STATUS_STYLES: Record<string, { icon: IconComponent; color: string }> = {
   ok: { icon: CheckCircleIcon, color: 'text-green-600' },
   degraded: { icon: AlertTriangleIcon, color: 'text-amber-500' },
   down: { icon: XCircleIcon, color: 'text-red-600' },
+  error: { icon: XCircleIcon, color: 'text-red-600' },
 }
 
 export function HealthCards() {
@@ -44,8 +47,8 @@ export function HealthCards() {
   return (
     <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
       {checks.map((check) => {
-        const ServiceIcon = SERVICE_ICON[check.service]
-        const { icon: StatusIcon, color } = STATUS_STYLES[check.status]
+        const ServiceIcon = SERVICE_ICON[check.service] ?? CpuIcon
+        const { icon: StatusIcon, color } = STATUS_STYLES[check.status] ?? STATUS_FALLBACK
 
         return (
           <div
