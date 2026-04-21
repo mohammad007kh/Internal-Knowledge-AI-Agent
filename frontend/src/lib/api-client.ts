@@ -58,7 +58,9 @@ apiClient.interceptors.response.use(
 
     const original = error.config
 
-    if (error.response?.status !== 401 || original._retried) {
+    // Never retry the refresh endpoint itself — it would loop.
+    const isRefreshUrl = original?.url?.includes('/auth/refresh')
+    if (error.response?.status !== 401 || original._retried || isRefreshUrl) {
       return Promise.reject(error)
     }
 
@@ -92,7 +94,7 @@ apiClient.interceptors.response.use(
       return apiClient(original)
     } catch (refreshError) {
       refreshQueue = []
-      if (typeof window !== 'undefined') {
+      if (typeof window !== 'undefined' && !window.location.pathname.startsWith('/login')) {
         window.location.href = '/login'
       }
       return Promise.reject(parseErrorResponse(refreshError))
