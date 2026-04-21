@@ -1,0 +1,398 @@
+# ============================================================================
+# PROJECT DEFAULTS REGISTRY
+# ============================================================================
+# This is the single source of truth for project-wide technical decisions.
+# ALL commands, agents, and phases MUST read this file before generating
+# specs, plans, or code. Deviations require explicit justification.
+#
+# DO NOT EDIT MANUALLY without updating changelog.md
+# Updates require HITL (Human-In-The-Loop) approval via AskUserQuestion
+# ============================================================================
+
+version: 2
+created: 2026-02-25
+last_updated: 2026-02-25
+last_updated_by: human
+
+# ============================================================================
+# ARCHITECTURE (How the system is structured)
+# ============================================================================
+# These decisions affect EVERY part of the project and must be set early.
+# Changing architecture mid-project is expensive - get this right first.
+# ============================================================================
+architecture:
+  # Overall system pattern: monolith | modular_monolith | microservices | serverless
+  # monolith = single deployable unit
+  # modular_monolith = single deploy, internal module boundaries
+  # microservices = distributed services
+  # serverless = function-based (Lambda, Cloud Functions)
+  pattern: modular_monolith
+
+  # Code organization layers: clean | mvc | hexagonal | vertical_slice | none
+  # clean = Use Cases → Entities → Interfaces (Uncle Bob)
+  # mvc = Model-View-Controller
+  # hexagonal = Ports & Adapters
+  # vertical_slice = Feature folders with all layers inside
+  layers: clean
+
+  # API paradigm: rest | graphql | grpc | hybrid
+  # hybrid = REST for external, gRPC for internal
+  api_style: rest
+
+  # Service communication: sync | async | event_driven | cqrs
+  # sync = Request-response (HTTP/gRPC)
+  # async = Message queues (RabbitMQ, SQS)
+  # event_driven = Event bus (Kafka, EventBridge)
+  # cqrs = Command Query Responsibility Segregation
+  communication: hybrid  # sync REST for user requests, async Celery for ingestion/sync jobs
+
+  # Monorepo vs polyrepo: monorepo | polyrepo
+  repo_structure: monorepo
+
+# ============================================================================
+# CODE PATTERNS (How code is written)
+# ============================================================================
+# These patterns ensure consistency in HOW developers write code.
+# ============================================================================
+code_patterns:
+  # Data access pattern: repository | active_record | dao | raw_queries
+  # repository = Repository pattern with interfaces
+  # active_record = ORM models with query methods
+  # dao = Data Access Objects
+  # raw_queries = Direct SQL/queries
+  data_access: repository  # Protocol-based interfaces: IVectorRepository, IConnector, IFileStorage, ILLMProvider
+
+  # Dependency injection: constructor | container | manual | none
+  # constructor = Dependencies passed via constructor
+  # container = IoC container (InversifyJS, tsyringe)
+  # manual = Factory functions
+  dependency_injection: container  # dependency-injector IoC
+
+  # Error handling strategy: exceptions | result_type | error_codes
+  # exceptions = throw/catch (try-catch)
+  # result_type = Result<T, E> or Either pattern
+  # error_codes = Return codes with error objects
+  error_handling: exceptions
+
+  # Async patterns: promises | async_await | callbacks | rxjs
+  async_pattern: async_await
+
+  # Validation approach: schema | decorators | manual
+  # schema = Zod, Yup, Joi schemas
+  # decorators = class-validator decorators
+  # manual = Hand-written validation
+  validation_approach: schema  # Pydantic models (FastAPI)
+
+  # Null handling: nullable | optional | strict_null
+  # nullable = Allow nulls, check at runtime
+  # optional = Use Option/Maybe types
+  # strict_null = TypeScript strict null checks, no nulls in domain
+  null_handling: nullable
+
+# ============================================================================
+# API CONFIGURATION (How APIs are designed)
+# ============================================================================
+api:
+  # Versioning strategy: url | header | query_param | none
+  # url = /api/v1/*, header = X-API-Version, query_param = ?version=1
+  versioning: url  # /api/v1/
+
+  # Pagination strategy: cursor | offset | keyset | none
+  pagination: offset
+
+  # Error response format: rfc7807 | custom | simple
+  # rfc7807 = Problem Details (RFC 7807)
+  error_format: rfc7807
+
+  # Rate limiting approach: token_bucket | sliding_window | fixed_window | none
+  rate_limiting: none  # MVP — add post-launch
+
+  # Idempotency requirement: required | optional | none
+  idempotency: optional
+
+  # Resource naming: plural | singular
+  # plural = /users, /orders
+  # singular = /user, /order
+  resource_naming: plural
+
+  # Request body format: json | form | multipart
+  request_format: json
+
+  # Auth header format: bearer | basic | api_key | custom
+  auth_header: bearer
+
+  # Response envelope: wrapped | flat
+  # wrapped = { data: {...}, meta: {...} }
+  # flat = { ...fields directly }
+  response_envelope: wrapped
+
+  # Date format in API: iso8601 | unix_timestamp | custom
+  date_format: iso8601
+
+# ============================================================================
+# BACKEND CONFIGURATION
+# ============================================================================
+backend:
+  # Primary language: typescript | python | go | java | csharp | rust | php
+  language: python
+
+  # Runtime version (e.g., "node:20", "python:3.12", "go:1.22")
+  runtime_version: python:3.12
+
+  # Web framework (e.g., "express", "fastapi", "gin", "spring-boot", "nestjs")
+  framework: fastapi
+
+  # ORM / Data layer (e.g., "prisma", "drizzle", "sqlalchemy", "gorm", "typeorm")
+  orm: sqlalchemy
+
+  # Authentication method: jwt | session | oauth2 | api_key | saml
+  auth_method: jwt  # 15min access + 7d rotating httpOnly refresh
+
+  # Authorization pattern: rbac | abac | acl | simple | none
+  auth_pattern: rbac  # admin | user roles
+
+  # Background jobs: bull | celery | sidekiq | none
+  job_queue: celery  # + Redis broker; beat is a SEPARATE compose service (replicas: 1)
+
+  # Caching layer: redis | memcached | in_memory | none
+  cache: redis
+
+  # SSE streaming pattern: fastapi_streaming_response | none
+  sse_pattern: fastapi_streaming_response  # fetch() + ReadableStream on frontend
+
+  # Scheduled task pattern: polling_task | dynamic_beat | none
+  beat_pattern: polling_task_60s  # Single Beat task polls DB every 60s; no ext. package
+
+# ============================================================================
+# FRONTEND CONFIGURATION
+# ============================================================================
+frontend:
+  # Framework: react | vue | angular | svelte | nextjs | nuxt | remix | none
+  framework: nextjs  # v15, App Router
+
+  # Rendering strategy: spa | ssr | ssg | hybrid
+  # spa = Single Page App (client-side only)
+  # ssr = Server-Side Rendering
+  # ssg = Static Site Generation
+  # hybrid = Mix of SSR and SSG
+  rendering: hybrid
+
+  # UI component library (e.g., "shadcn", "mui", "chakra", "tailwind-headless", "ant")
+  ui_library: shadcn
+
+  # Styling approach: tailwind | css-modules | styled-components | scss | emotion
+  styling: tailwind
+
+  # State management: zustand | redux | context | tanstack-query | pinia | none
+  state_management: context  # React Context + hooks; TanStack Query handles server state
+
+  # Data fetching: tanstack-query | swr | rtk-query | apollo | fetch
+  data_fetching: tanstack-query
+
+  # Form handling: react-hook-form | formik | vee-validate | native
+  form_library: react-hook-form
+
+  # Validation library: zod | yup | joi | valibot | native
+  validation_library: zod
+
+  # Routing: react-router | tanstack-router | next-router | vue-router
+  routing: next-router
+
+# ============================================================================
+# DATABASE CONFIGURATION
+# ============================================================================
+database:
+  # Database type: postgresql | mysql | mongodb | sqlite | sqlserver
+  type: postgresql  # v16 + pgvector extension; HNSW index (m=16, ef_construction=64)
+
+  # Tenancy model: shared_db_tenant_id | shared_db_schema | separate_db | single_tenant
+  tenancy_model: single_tenant
+
+  # Soft delete enabled: true | false
+  soft_delete: true
+
+  # Audit columns (created_at, updated_at, created_by, updated_by): true | false
+  audit_columns: true
+
+  # Migration strategy: expand_contract | direct | versioned
+  # expand_contract = Add new, migrate data, remove old (zero-downtime)
+  # direct = Apply changes directly
+  # versioned = Version-numbered migrations
+  migration_strategy: versioned  # Alembic versioned migrations
+
+  # Connection pooling: orm_default | pgbouncer | external | none
+  connection_pooling: orm_default
+
+  # Query style: orm_only | raw_allowed | query_builder
+  # orm_only = Only ORM methods, no raw SQL
+  # raw_allowed = Raw SQL permitted where needed
+  # query_builder = Use query builders (Knex, etc.)
+  query_style: raw_allowed  # SQLAlchemy ORM primary; raw SQL for pgvector queries
+
+  # Table naming: snake_case | PascalCase | camelCase
+  naming_tables: snake_case
+
+  # Column naming: snake_case | camelCase
+  naming_columns: snake_case
+
+  # Primary key type: uuid | ulid | auto_increment | cuid
+  primary_key_type: uuid
+
+# ============================================================================
+# ERROR HANDLING & LOGGING
+# ============================================================================
+error_handling:
+  # Logging format: structured | text | both
+  # structured = JSON logs
+  # text = Human-readable text
+  logging_format: structured
+
+  # Log level default: debug | info | warn | error
+  log_level: info
+
+  # Error tracking service: sentry | bugsnag | rollbar | none
+  error_tracking: none  # Langfuse for LLM tracing; no APM for MVP
+
+  # Request tracing: opentelemetry | jaeger | xray | none
+  tracing: none  # Langfuse covers LLM pipeline; no full APM for MVP
+
+  # Correlation ID header: X-Request-ID | X-Correlation-ID | custom
+  correlation_header: X-Request-ID
+
+# ============================================================================
+# TESTING CONFIGURATION
+# ============================================================================
+testing:
+  # Unit test framework (e.g., "jest", "vitest", "pytest", "go-test")
+  unit_framework: pytest
+
+  # Integration test framework (e.g., "supertest", "httpx", "testcontainers")
+  integration_framework: httpx  # HTTPX async client for FastAPI TestClient
+
+  # E2E test framework (e.g., "playwright", "cypress", "selenium")
+  e2e_framework: playwright
+
+  # Minimum coverage target (percentage, e.g., 80)
+  coverage_target: 80
+
+  # Test organization: colocated | separate
+  # colocated = Tests next to source files
+  # separate = Tests in dedicated test/ folder
+  test_organization: separate
+
+  # Mocking approach: vitest_mock | jest_mock | msw | manual
+  mocking: manual  # pytest monkeypatch + unittest.mock
+
+# ============================================================================
+# INFRASTRUCTURE CONFIGURATION
+# ============================================================================
+infrastructure:
+  # CI/CD platform: github-actions | gitlab-ci | jenkins | circleci | azure-devops
+  ci_cd: github-actions
+
+  # Container runtime: docker | podman | none
+  container: docker
+
+  # Container orchestration: kubernetes | ecs | docker-compose | none
+  orchestration: docker-compose  # 9 services: frontend, backend, worker, beat, db, redis, minio, langfuse, langfuse-db
+
+  # Cloud provider: aws | gcp | azure | vercel | railway | fly | none
+  cloud_provider: none  # Self-hosted (internal tool)
+
+  # Deployment strategy: rolling | blue_green | canary | recreate
+  deployment_strategy: recreate  # Docker Compose; blue/green post-MVP if needed
+
+  # Infrastructure as code: terraform | pulumi | cloudformation | cdk | none
+  iac: none
+
+  # Secret management: vault | aws-secrets | env-files | doppler
+  secrets: env-files  # .env files per service; not committed to repo
+
+# ============================================================================
+# CONVENTIONS
+# ============================================================================
+conventions:
+  # Variable/function naming: camelCase | snake_case | PascalCase
+  variables: snake_case  # Python standard
+
+  # File naming: kebab-case | snake_case | camelCase | PascalCase
+  files: snake_case  # Python modules; kebab-case for Next.js components
+
+  # Class/component naming: PascalCase | camelCase
+  classes: PascalCase
+
+  # Constant naming: SCREAMING_SNAKE_CASE | camelCase | PascalCase
+  constants: SCREAMING_SNAKE_CASE
+
+  # Commit message format: conventional | angular | simple | gitmoji
+  commits: conventional  # feat|fix|chore|docs|test|refactor(scope): message
+
+  # Branch naming: feature/xxx | feat/xxx | xxx-description
+  branches: NNN-description  # e.g., 001-knowledge-ai-agent
+
+  # PR title format: conventional | ticket-prefix | free-form
+  pr_titles: conventional
+
+# ============================================================================
+# UI/UX SPECIFICATIONS
+# ============================================================================
+ui_specs:
+  # Dark mode support: true | false
+  dark_mode: true
+
+  # Mobile responsive: true | false
+  responsive: true
+
+  # Accessibility standard: wcag-aa | wcag-aaa | basic | none
+  accessibility: wcag-aa
+
+  # Animation library: framer-motion | react-spring | css | gsap | none
+  animations: none
+
+  # Design token source: figma | css-variables | tokens-json | style-dictionary | none
+  design_tokens: none  # Use shadcn defaults; customise via CSS variables
+
+  # Icon library: lucide | heroicons | phosphor | fontawesome | custom
+  icons: lucide  # Default with shadcn
+
+  # Toast/notification library: sonner | react-hot-toast | notistack | custom
+  notifications: sonner  # Default with shadcn
+
+# ============================================================================
+# SECURITY CONFIGURATION
+# ============================================================================
+security:
+  # CORS policy: strict | permissive | custom
+  # strict = Only allow specific origins
+  # permissive = Allow all origins (dev only)
+  cors: strict
+
+  # CSRF protection: token | double-submit | samesite | none
+  csrf: samesite  # httpOnly SameSite=Strict refresh token cookie
+
+  # Content Security Policy: strict | moderate | none
+  csp: moderate
+
+  # Rate limiting scope: ip | user | tenant | none
+  rate_limit_scope: ip  # Auth endpoints; MVP scope
+
+  # Input sanitization: strict | moderate | none
+  input_sanitization: strict
+
+  # Password requirements: strong | moderate | basic
+  # strong = 12+ chars, uppercase, lowercase, number, symbol
+  # moderate = 8+ chars, mixed case, number
+  # basic = 6+ chars
+  password_policy: moderate  # 8+ chars, uppercase + lowercase + number (FR-034)
+
+# ============================================================================
+# FEATURE TRACKING
+# ============================================================================
+# Lists which specs have used these defaults (auto-populated)
+applied_to:
+  - feature: knowledge-ai-agent
+    spec_path: specs/001-knowledge-ai-agent/spec.md
+    applied_at: 2026-02-25
+  - feature: bug-fixes
+    spec_path: specs/002-bug-fixes/spec.md
+    applied_at: 2026-02-25
