@@ -23,11 +23,14 @@ from src.core.database import get_db
 from src.core.deps import get_current_user, require_admin
 from src.models.user import User, UserRole
 from src.schemas.source import (
+    FILE_SOURCE_TYPES,
     DocumentListResponse,
     DocumentResponse,
     PaginatedSources,
     SourceCreate,
+    SourceCreateRequest,
     SourceListItem,
+    SourcePublicResponse,
     SourceResponse,
     SourceStatsResponse,
     SourceUpdate,
@@ -146,21 +149,92 @@ def _make_list_item(source: object) -> SourceListItem:
 
 @router.post(
     "",
-    response_model=SourceResponse,
+    response_model=SourcePublicResponse,
     status_code=status.HTTP_201_CREATED,
     summary="Create a new source",
+    dependencies=[Depends(require_admin)],
 )
 async def create_source(
-    payload: SourceCreate,
+    body: SourceCreateRequest,
     current_user: User = Depends(get_current_user),
     service: SourceService = Depends(_get_source_service),
-) -> SourceResponse:
-    """Create a source owned by the authenticated user.
+) -> SourcePublicResponse:
+    """Create a source from the wizard's structured request body.
 
-    Connection config is Fernet-encrypted before persistence.
+    Admin-only. Connection config is Fernet-encrypted before persistence.
+    File bytes never pass through this endpoint — use POST /sources/upload-url first.
     """
-    source = await service.create_source(payload, owner_id=current_user.id)
-    return SourceResponse.model_validate(source)
+    is_file = body.source_type in FILE_SOURCE_TYPES
+
+    if is_file and not body.object_key:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "type": "https://httpstatuses.com/400",
+                "title": "Bad Request",
+                "status": 400,
+                "detail": "object_key required for file source types.",
+            },
+        )
+    if not is_file and not body.connection:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "type": "https://httpstatuses.com/400",
+                "title": "Bad Request",
+                "status": 400,
+                "detail": "connection required for non-file source types.",
+            },
+        )
+    if body.sync_mode == "scheduled" and not body.sync_schedule:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "type": "https://httpstatuses.com/400",
+                "title": "Bad Request",
+                "status": 400,
+                "detail": "sync_schedule (cron) required when sync_mode='scheduled'.",
+            },
+        )
+
+    from src.core.exceptions import ConflictError  # noqa: PLC0415
+
+    try:
+        source = await service.create_source_v2(body, owner_id=current_user.id)
+    except ConflictError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "type": "https://httpstatuses.com/409",
+                "title": "Conflict",
+                "status": 409,
+                "detail": str(exc),
+            },
+        ) from exc
+
+    # Kick off initial ingestion (best-effort — failures don't abort the response).
+    try:
+        from celery import current_app as _celery  # noqa: PLC0415
+
+        _celery.send_task("tasks.sync_source", args=[str(source.id)])
+    except Exception:  # noqa: BLE001
+        pass
+
+    return SourcePublicResponse(
+        id=str(source.id),
+        name=source.name,
+        source_type=str(source.source_type.value if hasattr(source.source_type, "value") else source.source_type),
+        source_mode=source.source_mode,
+        retrieval_mode=source.retrieval_mode,
+        description=source.description,
+        sync_mode=source.sync_mode,
+        sync_schedule=source.sync_schedule,
+        last_synced_at=source.last_synced_at.isoformat() if source.last_synced_at else None,
+        status=source.status,
+        citations_enabled=source.citations_enabled,
+        created_at=source.created_at.isoformat(),
+        updated_at=source.updated_at.isoformat(),
+    )
 
 
 # ---------------------------------------------------------------------------

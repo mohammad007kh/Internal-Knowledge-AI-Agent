@@ -53,6 +53,96 @@ class SourceCreate(BaseModel):
         return v
 
 
+# ---------------------------------------------------------------------------
+# Phase-2 structured request (T-004)
+# ---------------------------------------------------------------------------
+
+_SOURCE_TYPES: frozenset[str] = frozenset(
+    {
+        "postgresql",
+        "mysql",
+        "mssql",
+        "mongodb",
+        "pdf",
+        "docx",
+        "xlsx",
+        "csv",
+        "txt",
+        "markdown",
+        "web_url",
+        "confluence",
+        "sharepoint",
+    }
+)
+FILE_SOURCE_TYPES: frozenset[str] = frozenset(
+    {"pdf", "docx", "xlsx", "csv", "txt", "markdown"}
+)
+_SYNC_MODES: frozenset[str] = frozenset({"manual", "scheduled", "delta"})
+_RETRIEVAL_MODES: frozenset[str] = frozenset({"vector_only", "text_to_query", "hybrid"})
+
+
+class SourceCreateRequest(BaseModel):
+    """Structured request body for POST /sources (wizard flow)."""
+
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    name: str = Field(..., min_length=1, max_length=255)
+    source_type: str
+    connection: dict[str, Any] | None = None
+    object_key: str | None = None
+    description: str = ""
+    sync_mode: str = "manual"
+    sync_schedule: str | None = None
+    retrieval_mode: str = "vector_only"
+    citations_enabled: bool = True
+
+    @field_validator("name")
+    @classmethod
+    def _name_no_slash(cls, v: str) -> str:
+        if "/" in v:
+            raise ValueError("Source name must not contain '/'.")
+        return v
+
+    @field_validator("source_type")
+    @classmethod
+    def _validate_source_type(cls, v: str) -> str:
+        if v not in _SOURCE_TYPES:
+            raise ValueError(f"Unsupported source_type: {v}")
+        return v
+
+    @field_validator("sync_mode")
+    @classmethod
+    def _validate_sync_mode(cls, v: str) -> str:
+        if v not in _SYNC_MODES:
+            raise ValueError(f"Invalid sync_mode: {v}")
+        return v
+
+    @field_validator("retrieval_mode")
+    @classmethod
+    def _validate_retrieval_mode(cls, v: str) -> str:
+        if v not in _RETRIEVAL_MODES:
+            raise ValueError(f"Invalid retrieval_mode: {v}")
+        return v
+
+
+class SourcePublicResponse(BaseModel):
+    """Public source representation — never exposes connection_config or file_storage_path."""
+
+    id: str
+    name: str
+    source_type: str
+    source_mode: str
+    retrieval_mode: str
+    description: str | None
+    sync_mode: str
+    sync_schedule: str | None
+    last_synced_at: str | None
+    status: str
+    citations_enabled: bool
+    created_at: str
+    updated_at: str
+
+
 class SourceUpdate(BaseModel):
     """Request body for PATCH /sources/{id} — all fields optional."""
 

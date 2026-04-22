@@ -24,7 +24,7 @@ from src.core.config import Settings
 from src.core.exceptions import ConflictError, NotFoundError
 from src.models.source import Source
 from src.repositories.source_repository import SourceRepository
-from src.schemas.source import SourceCreate, SourceUpdate
+from src.schemas.source import FILE_SOURCE_TYPES, SourceCreate, SourceCreateRequest, SourceUpdate
 
 
 class SourceService:
@@ -79,6 +79,43 @@ class SourceService:
             source_type=payload.source_type,
             config_encrypted=config_encrypted,
             owner_id=owner_id,
+        )
+
+    async def create_source_v2(
+        self,
+        payload: SourceCreateRequest,
+        owner_id: uuid.UUID,
+    ) -> Source:
+        """Create a Source from the wizard's structured request (T-004).
+
+        Raises:
+            ConflictError: if a source with the same name exists for this owner.
+        """
+        existing = await self._repo.find_by_name_and_owner(payload.name, owner_id)
+        if existing is not None:
+            raise ConflictError(
+                f"A source named {payload.name!r} already exists for this user."
+            )
+
+        is_file = payload.source_type in FILE_SOURCE_TYPES
+        source_mode = "snapshot" if is_file else "live"
+        config_encrypted: bytes | None = (
+            self._encrypt_config(payload.connection) if payload.connection else None
+        )
+
+        return await self._repo.create(
+            name=payload.name,
+            source_type=payload.source_type,
+            source_mode=source_mode,
+            retrieval_mode=payload.retrieval_mode,
+            description=payload.description or None,
+            sync_mode=payload.sync_mode,
+            sync_schedule=payload.sync_schedule,
+            citations_enabled=payload.citations_enabled,
+            config_encrypted=config_encrypted,
+            file_storage_path=payload.object_key,
+            owner_id=owner_id,
+            status="pending",
         )
 
     async def get_source(self, source_id: uuid.UUID) -> Source:

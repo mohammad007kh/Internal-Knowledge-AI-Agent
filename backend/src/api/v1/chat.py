@@ -144,6 +144,25 @@ async def get_session(
         }
 
 
+@router.patch("/sessions/{session_id}", response_model=ChatSessionResponse)
+async def rename_session(
+    session_id: uuid.UUID,
+    body: dict,
+    current_user: User = Depends(get_current_user),
+    db_session_factory: Any = Depends(_get_db_session_factory),
+    chat_session_repo: ChatSessionRepository = Depends(_get_chat_session_repo),
+) -> ChatSessionResponse:
+    """Rename a chat session. Body: {"title": "..."}."""
+    title = body.get("title", "")
+    if not title or not isinstance(title, str) or len(title) > 255:
+        raise problem(status=400, title="Bad Request", detail="title must be 1–255 characters.")
+    async with db_session_factory() as db:
+        session_obj = await chat_session_repo.get(db, session_id)
+        _assert_session_owner(session_obj, current_user)
+        updated = await chat_session_repo.rename(db, session_id, title.strip())
+        return ChatSessionResponse.model_validate(updated)
+
+
 @router.delete("/sessions/{session_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_session(
     session_id: uuid.UUID,
@@ -246,6 +265,23 @@ async def send_message(
                     final_answer = output.get("final_answer", final_answer)
                     sources = output.get("sources", sources)
 
+        except GeneratorExit:
+            # Client disconnected — persist partial message so the session has a record.
+            async with db_session_factory() as db:
+                try:
+                    await chat_message_repo.create(
+                        db,
+                        chat_session_id=session_id,
+                        role=MessageRole.ASSISTANT,
+                        content=final_answer,
+                        is_partial=True,
+                    )
+                    await db.commit()
+                except Exception:  # noqa: BLE001
+                    logger.exception("Failed to persist partial message for session %s", session_id)
+            langfuse_tracing.end_trace(trace_id, output="[aborted]")
+            return
+
         except Exception as exc:  # noqa: BLE001
             # Check for GraphInterrupt first (if import succeeded)
             if GraphInterrupt is not None and isinstance(exc, GraphInterrupt):
@@ -267,8 +303,10 @@ async def send_message(
                     chat_session_id=session_id,
                     role=MessageRole.ASSISTANT,
                     content=final_answer,
+                    is_partial=False,
                 )
                 message_id = str(assistant_msg.id)
+                await db.commit()
             except Exception:  # noqa: BLE001
                 logger.exception("Failed to persist assistant message for session %s", session_id)
 

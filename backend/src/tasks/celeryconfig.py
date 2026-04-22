@@ -41,6 +41,11 @@ beat_schedule = {
         "schedule": crontab(minute="*/30"),  # every 30 minutes
         "options": {"queue": "default"},
     },
+    "check-scheduled-syncs": {
+        "task": "tasks.check_scheduled_syncs",
+        "schedule": 60.0,  # every 60 seconds — polls next_sync_due_at
+        "options": {"queue": "default"},
+    },
 }
 
 beat_max_loop_interval = 30  # seconds — wake Beat up every 30 s max

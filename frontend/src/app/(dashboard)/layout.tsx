@@ -3,6 +3,7 @@
 import { ThemeToggle } from '@/components/theme-toggle'
 import { useAuth } from '@/features/auth/context/AuthContext'
 import { useLogout } from '@/features/auth/hooks/useAuthMutations'
+import { useNetworkStatus } from '@/hooks/use-network-status'
 import {
   DatabaseIcon,
   LayoutDashboardIcon,
@@ -17,6 +18,7 @@ import Link from 'next/link'
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   const { user } = useAuth()
   const logoutMutation = useLogout()
+  useNetworkStatus()
 
   return (
     <div className="flex min-h-screen bg-background">
