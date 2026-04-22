@@ -10,16 +10,19 @@ from __future__ import annotations
 
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 
 from src.core.deps import get_current_user, require_role
 from src.models.user import User, UserRole
+from src.schemas.invitation import InvitationListResponse, InvitationPublic
 from src.schemas.user import (
     InvitationCreateRequest,
     RoleChangeRequest,
     UpdateUserRequest,
     UserListResponse,
+    UserPublic,
     UserResponse,
+    UserUpdateRequest,
 )
 from src.services.source_permission_service import SourcePermissionService
 from src.services.user_service import UserService
@@ -85,6 +88,69 @@ async def invite_user(
     return {"detail": "Invitation sent"}
 
 
+@router.get(
+    "/invitations",
+    response_model=InvitationListResponse,
+    summary="List pending invitations",
+)
+async def list_invitations(
+    limit: int = Query(20, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+    _admin: User = Depends(AdminOnly),
+) -> InvitationListResponse:
+    """Return paginated pending (not accepted, not expired) invitations. Admin-only."""
+    from src.core.container import Container  # noqa: PLC0415
+
+    repo = Container.invitation_repo()
+    items, total = await repo.list_pending(limit=limit, offset=offset)
+    return InvitationListResponse(
+        items=[InvitationPublic.from_orm_row(i) for i in items],
+        total=total,
+        limit=limit,
+        offset=offset,
+    )
+
+
+@router.delete(
+    "/invitations/{invitation_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Revoke a pending invitation",
+)
+async def revoke_invitation(
+    invitation_id: UUID,
+    _admin: User = Depends(AdminOnly),
+) -> Response:
+    """Hard-delete a pending invitation. Admin-only.
+
+    Returns 404 if the invitation does not exist and 409 if it has already
+    been accepted (already-accepted invitations are retained for audit).
+    """
+    from src.core.container import Container  # noqa: PLC0415
+
+    repo = Container.invitation_repo()
+    invite = await repo.get_by_id(invitation_id)
+    if invite is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={
+                "title": "Invitation not found",
+                "status": status.HTTP_404_NOT_FOUND,
+                "type": "not_found",
+            },
+        )
+    if invite.accepted_at is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "title": "Cannot revoke accepted invitation",
+                "status": status.HTTP_409_CONFLICT,
+                "type": "conflict",
+            },
+        )
+    await repo.revoke(invitation_id)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
 @router.get("/lookup", response_model=UserResponse, summary="Look up a user by email")
 async def lookup_user(
     email: str = Query(..., description="Email address to look up"),
@@ -100,6 +166,80 @@ async def lookup_user(
     if user is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found.")
     return UserResponse.model_validate(user)
+
+
+@router.get(
+    "/me",
+    response_model=UserPublic,
+    summary="Get the current user's profile",
+)
+async def get_me(
+    current_user: User = Depends(get_current_user),
+) -> UserPublic:
+    """Return the profile of the authenticated user."""
+    return UserPublic.model_validate(current_user)
+
+
+@router.patch(
+    "/me",
+    response_model=UserPublic,
+    summary="Update the current user's profile",
+)
+async def update_me(
+    body: UserUpdateRequest,
+    current_user: User = Depends(get_current_user),
+) -> UserPublic:
+    """Partial update of the authenticated user's own profile.
+
+    Password changes require ``current_password`` for re-authentication.
+    """
+    from src.core.container import Container  # noqa: PLC0415
+
+    new_hash: str | None = None
+    if body.new_password:
+        password_service = Container.password_service()
+        if body.current_password is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={
+                    "title": "current_password required",
+                    "status": status.HTTP_400_BAD_REQUEST,
+                    "type": "validation_error",
+                },
+            )
+        if not password_service.verify_password(
+            body.current_password, current_user.hashed_password
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={
+                    "title": "Invalid current password",
+                    "status": status.HTTP_400_BAD_REQUEST,
+                    "type": "invalid_credentials",
+                },
+            )
+        try:
+            password_service.validate_password_policy(body.new_password)
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={
+                    "title": "Password policy violation",
+                    "status": status.HTTP_400_BAD_REQUEST,
+                    "type": "validation_error",
+                    "detail": str(exc),
+                },
+            ) from exc
+        new_hash = password_service.hash_password(body.new_password)
+
+    user_repo = Container.user_repo()
+    updated = await user_repo.update_me(
+        user_id=current_user.id,
+        full_name=body.full_name,
+        show_citations_preference=body.show_citations_preference,
+        new_password_hash=new_hash,
+    )
+    return UserPublic.model_validate(updated)
 
 
 @router.get(

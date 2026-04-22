@@ -5,8 +5,9 @@ from __future__ import annotations
 import uuid
 from datetime import UTC, datetime
 
-from sqlalchemy import select, update
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from src.models.user import Invitation
 from src.repositories.base_repository import BaseRepository
@@ -24,6 +25,53 @@ class InvitationRepository(BaseRepository[Invitation]):
         result = await self._session.execute(stmt)
         return result.scalar_one_or_none()
 
+    async def get_by_id(self, invitation_id: uuid.UUID) -> Invitation | None:
+        """Return the invitation row for *invitation_id* (or ``None``)."""
+        stmt = select(Invitation).where(Invitation.id == invitation_id)
+        result = await self._session.execute(stmt)
+        return result.scalar_one_or_none()
+
+    async def list_pending(
+        self, limit: int = 20, offset: int = 0
+    ) -> tuple[list[Invitation], int]:
+        """Return (items, total) for pending (not accepted, not expired) invitations.
+
+        Eager-loads ``invited_by_user`` so the router can expose
+        ``invited_by_email`` without triggering lazy I/O.
+        """
+        now = datetime.now(UTC)
+        base_where = (
+            Invitation.accepted_at.is_(None),
+            Invitation.expires_at > now,
+        )
+
+        items_stmt = (
+            select(Invitation)
+            .where(*base_where)
+            .options(selectinload(Invitation.invited_by_user))
+            .order_by(Invitation.created_at.desc())
+            .limit(limit)
+            .offset(offset)
+        )
+        total_stmt = (
+            select(func.count()).select_from(Invitation).where(*base_where)
+        )
+
+        items_result = await self._session.execute(items_stmt)
+        total_result = await self._session.execute(total_stmt)
+        return list(items_result.scalars().all()), int(total_result.scalar_one())
+
+    async def revoke(self, invitation_id: uuid.UUID) -> None:
+        """Hard-delete a pending invitation row.
+
+        The ``Invitation`` model has no ``status`` column, so revocation is
+        implemented as a hard delete. Callers must check that the invitation
+        is still pending before invoking.
+        """
+        stmt = delete(Invitation).where(Invitation.id == invitation_id)
+        await self._session.execute(stmt)
+        await self._session.commit()
+
     async def mark_accepted(self, token: str) -> Invitation | None:
         """Set ``accepted_at`` to the current UTC timestamp (token must be pre-hashed)."""
         stmt = (
@@ -33,7 +81,9 @@ class InvitationRepository(BaseRepository[Invitation]):
             .returning(Invitation)
         )
         result = await self._session.execute(stmt)
-        return result.scalar_one_or_none()
+        invitation = result.scalar_one_or_none()
+        await self._session.commit()
+        return invitation
 
     async def get_pending_by_email(self, email: str) -> Invitation | None:
         """Return the pending (not accepted, not expired) invitation for *email*."""
@@ -57,3 +107,4 @@ class InvitationRepository(BaseRepository[Invitation]):
             .values(expires_at=datetime.now(UTC))
         )
         await self._session.execute(stmt)
+        await self._session.commit()

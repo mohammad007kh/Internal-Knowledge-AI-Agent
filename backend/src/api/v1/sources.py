@@ -10,13 +10,17 @@ The ``config`` / ``config_encrypted`` field is never returned in any response.
 from __future__ import annotations
 
 import uuid
+from datetime import datetime, timezone
+from typing import Any
+from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import Response
+from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.database import get_db
-from src.core.deps import get_current_user
+from src.core.deps import get_current_user, require_admin
 from src.models.user import User, UserRole
 from src.schemas.source import (
     DocumentListResponse,
@@ -25,6 +29,7 @@ from src.schemas.source import (
     SourceCreate,
     SourceListItem,
     SourceResponse,
+    SourceStatsResponse,
     SourceUpdate,
     TestConnectionResponse,
 )
@@ -32,6 +37,58 @@ from src.schemas.sync_job import SyncJobListResponse, SyncJobResponse
 from src.services.source_service import SourceService
 
 router = APIRouter()
+
+
+# ---------------------------------------------------------------------------
+# Inline schemas for inspection + presigned upload endpoints
+# ---------------------------------------------------------------------------
+
+
+class SourceInspectRequest(BaseModel):
+    """Body for POST /sources/inspect — preview a source before persisting."""
+
+    source_type: str = Field(
+        ...,
+        description=(
+            "Connector type identifier: web_url|file_upload|database|"
+            "confluence|sharepoint or a file shorthand (pdf|docx|xlsx|csv|"
+            "txt|markdown)."
+        ),
+    )
+    connection: dict[str, Any] = Field(default_factory=dict)
+
+
+class SourceInspectResponse(BaseModel):
+    """Result of POST /sources/inspect."""
+
+    description: str
+    schema_summary: dict[str, Any]
+
+
+_ALLOWED_CONTENT_TYPES: frozenset[str] = frozenset(
+    {
+        "application/pdf",
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "text/csv",
+        "text/plain",
+        "text/markdown",
+    }
+)
+
+
+class UploadUrlRequest(BaseModel):
+    """Body for POST /sources/upload-url — request a presigned PUT URL."""
+
+    filename: str = Field(..., min_length=1, max_length=255)
+    content_type: str = Field(..., min_length=1)
+
+
+class UploadUrlResponse(BaseModel):
+    """Result of POST /sources/upload-url."""
+
+    upload_url: str
+    object_key: str
 
 
 # ---------------------------------------------------------------------------
@@ -104,6 +161,99 @@ async def create_source(
     """
     source = await service.create_source(payload, owner_id=current_user.id)
     return SourceResponse.model_validate(source)
+
+
+# ---------------------------------------------------------------------------
+# Inspect a not-yet-persisted source (T-002)
+# ---------------------------------------------------------------------------
+
+
+@router.post(
+    "/inspect",
+    response_model=SourceInspectResponse,
+    summary="Test connection + generate AI description (no persistence)",
+)
+async def inspect_source(
+    body: SourceInspectRequest,
+    _admin: User = Depends(require_admin),
+) -> SourceInspectResponse:
+    """Preview a source: test the connection, inspect schema, draft description.
+
+    Admin-only.  Does not persist anything.  Never echoes the submitted
+    ``connection`` dict back to the caller.
+    """
+    from src.core.container import Container  # noqa: PLC0415
+
+    service = Container.source_inspection_service()
+    try:
+        result = await service.inspect_source(body.source_type, body.connection)
+    except ConnectionError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={
+                "type": "https://httpstatuses.com/422",
+                "title": "Unprocessable Entity",
+                "status": 422,
+                "detail": str(exc),
+            },
+        ) from exc
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "type": "https://httpstatuses.com/400",
+                "title": "Bad Request",
+                "status": 400,
+                "detail": str(exc),
+            },
+        ) from exc
+    return SourceInspectResponse(**result)
+
+
+# ---------------------------------------------------------------------------
+# Presigned upload URL (T-003)
+# ---------------------------------------------------------------------------
+
+
+@router.post(
+    "/upload-url",
+    response_model=UploadUrlResponse,
+    summary="Generate a presigned PUT URL for direct-to-MinIO upload",
+)
+async def create_upload_url(
+    body: UploadUrlRequest,
+    _admin: User = Depends(require_admin),
+) -> UploadUrlResponse:
+    """Return a short-lived presigned PUT URL plus the generated object key.
+
+    Admin-only.  The object key is namespaced by year/month plus a UUID so
+    two users uploading the same filename do not collide.
+    """
+    if body.content_type not in _ALLOWED_CONTENT_TYPES:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "type": "https://httpstatuses.com/400",
+                "title": "Bad Request",
+                "status": 400,
+                "detail": "Unsupported file type",
+            },
+        )
+
+    from src.core.container import Container  # noqa: PLC0415
+
+    storage = Container.storage_service()
+
+    now = datetime.now(tz=timezone.utc)
+    safe_name = body.filename.replace("/", "_").replace("\\", "_")
+    object_key = f"uploads/{now.strftime('%Y/%m')}/{uuid4()}-{safe_name}"
+
+    upload_url = await storage.generate_presigned_put_url(
+        object_key=object_key,
+        content_type=body.content_type,
+        expires_minutes=15,
+    )
+    return UploadUrlResponse(upload_url=upload_url, object_key=object_key)
 
 
 # ---------------------------------------------------------------------------
@@ -316,3 +466,55 @@ async def list_source_sync_runs(
         limit=limit,
         offset=offset,
     )
+
+
+# ---------------------------------------------------------------------------
+# Stats + refresh description (T-014)
+# ---------------------------------------------------------------------------
+
+
+@router.get(
+    "/{source_id}/stats",
+    response_model=SourceStatsResponse,
+    summary="Aggregate counts + last-synced timestamp for a source",
+)
+async def get_source_stats(
+    source_id: uuid.UUID,
+    _admin: User = Depends(require_admin),
+    service: SourceService = Depends(_get_source_service),
+) -> SourceStatsResponse:
+    """Return document/chunk/sync-job counts + ``last_synced_at`` for a source.
+
+    Admin-only.  Raises 404 when the source does not exist.
+    """
+    # Ensure the source exists (raises NotFoundError → 404 via error handler).
+    await service.get_source(source_id)
+
+    from src.core.container import Container  # noqa: PLC0415
+
+    repo = Container.source_repo()
+    stats = await repo.get_stats(source_id)
+    return SourceStatsResponse(**stats)
+
+
+@router.post(
+    "/{source_id}/refresh-description",
+    summary="Regenerate the AI description for a source (does not persist)",
+)
+async def refresh_description(
+    source_id: uuid.UUID,
+    _admin: User = Depends(require_admin),
+    service: SourceService = Depends(_get_source_service),
+) -> dict[str, str]:
+    """Regenerate (but don't save) a description for an existing source.
+
+    Admin-only.  The caller is expected to PATCH the source with the
+    ``proposed_description`` if they want to persist it.
+    """
+    source = await service.get_source(source_id)
+
+    from src.core.container import Container  # noqa: PLC0415
+
+    inspection_service = Container.source_inspection_service()
+    proposed = await inspection_service.generate_description(source)
+    return {"proposed_description": proposed}

@@ -122,13 +122,16 @@ class TestConnectionResponse(BaseModel):
 
 
 class DocumentResponse(BaseModel):
-    """Slim document representation returned by GET /sources/{id}/documents."""
+    """Slim document representation returned by GET /sources/{id}/documents.
+
+    ``raw_storage_path`` is deliberately absent — it exposes internal MinIO
+    object keys and must not leak via the API.
+    """
 
     model_config = ConfigDict(from_attributes=True)
 
     id: uuid.UUID
     source_id: uuid.UUID
-    raw_storage_path: str | None = None
     is_active: bool
     created_at: datetime
     updated_at: datetime
@@ -141,3 +144,12 @@ class DocumentListResponse(BaseModel):
     total: int
     limit: int
     offset: int
+
+
+class SourceStatsResponse(BaseModel):
+    """Aggregate counts for GET /sources/{id}/stats."""
+
+    document_count: int
+    chunk_count: int
+    last_synced_at: datetime | None = None
+    sync_job_count: int

@@ -13,6 +13,7 @@ from src.repositories.company_policy_repository import CompanyPolicyRepository
 from src.repositories.connector_repository import ConnectorRepository
 from src.repositories.document_repository import DocumentRepository
 from src.repositories.invitation_repository import InvitationRepository
+from src.repositories.llm_config_repository import LLMConfigRepository
 from src.repositories.refresh_token_repository import RefreshTokenRepository
 from src.repositories.source_permission_repository import SourcePermissionRepository
 from src.repositories.source_repository import SourceRepository
@@ -28,8 +29,10 @@ from src.services.embedding_service import EmbeddingService
 from src.services.guardrail_service import GuardrailService
 from src.services.langfuse_tracing_service import LangfuseTracingService, NullLangfuse
 from src.services.password_service import PasswordService
+from src.services.source_inspection_service import SourceInspectionService
 from src.services.source_permission_service import SourcePermissionService
 from src.services.source_service import SourceService
+from src.services.storage_service import StorageService
 from src.services.sync_job_service import SyncJobService
 from src.services.user_service import UserService
 
@@ -94,6 +97,7 @@ class Container(containers.DeclarativeContainer):
     connector_repo = providers.Factory(ConnectorRepository, session=db_session_factory)
     company_policy_repo = providers.Factory(CompanyPolicyRepository, session=db_session_factory)
     guardrail_event_repo = providers.Factory(GuardrailEventRepository, session=db_session_factory)
+    llm_config_repo = providers.Factory(LLMConfigRepository, session=db_session_factory)
 
     # ── Services ────────────────────────────────────────────────────
     password_service = providers.Factory(PasswordService)
@@ -150,6 +154,16 @@ class Container(containers.DeclarativeContainer):
     openai_client: providers.Singleton[AsyncOpenAI] = providers.Singleton(
         AsyncOpenAI,
         api_key=config.provided.OPENAI_API_KEY,
+    )
+    storage_service: providers.Singleton[StorageService] = providers.Singleton(
+        StorageService,
+        settings=config,
+    )
+    source_inspection_service: providers.Singleton[SourceInspectionService] = (
+        providers.Singleton(
+            SourceInspectionService,
+            openai_client=openai_client,
+        )
     )
     langfuse: providers.Singleton[Any] = providers.Singleton(
         lambda: _build_langfuse_client(settings)

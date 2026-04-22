@@ -93,3 +93,18 @@ def require_role(*roles: UserRole) -> Callable[..., Awaitable[User]]:
         return current_user
 
     return _check
+
+
+async def require_admin(
+    current_user: User = Depends(get_current_user),
+) -> User:
+    """FastAPI dependency that enforces the admin role.
+
+    Raises
+    ------
+    ForbiddenError (403)
+        The authenticated user is not an admin.
+    """
+    if current_user.role != UserRole.admin:
+        raise ForbiddenError("Requires role: admin")
+    return current_user

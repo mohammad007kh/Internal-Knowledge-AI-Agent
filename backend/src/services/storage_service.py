@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import io
 import logging
+from datetime import timedelta
 from typing import Any
 
 try:
@@ -84,6 +85,35 @@ class StorageService:
         finally:
             response.close()
             response.release_conn()
+
+    async def generate_presigned_put_url(
+        self,
+        object_key: str,
+        content_type: str,
+        expires_minutes: int = 15,
+    ) -> str:
+        """Return a presigned PUT URL for direct browser-to-MinIO upload.
+
+        The caller uses the returned URL to ``PUT`` raw bytes directly to
+        MinIO without relaying them through the API.  ``content_type`` is
+        accepted for symmetry with the upload flow (browsers set the
+        ``Content-Type`` header themselves); it is not bound into the URL
+        because MinIO's presigned PUT does not pin it by default.
+
+        ``expires_minutes`` is clamped to the inclusive range [1, 15] to
+        keep presigned credentials short-lived.
+        """
+        if expires_minutes > 15:
+            raise ValueError("Presigned URL TTL must not exceed 15 minutes")
+        if expires_minutes < 1:
+            raise ValueError("Presigned URL TTL must be at least 1 minute")
+        del content_type  # noqa: F841 - accepted for caller symmetry
+        url: str = self._client.presigned_put_object(
+            bucket_name=self._bucket,
+            object_name=object_key,
+            expires=timedelta(minutes=expires_minutes),
+        )
+        return url
 
     async def object_exists(
         self,

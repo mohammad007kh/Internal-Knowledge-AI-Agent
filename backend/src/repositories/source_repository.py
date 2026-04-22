@@ -3,11 +3,16 @@
 from __future__ import annotations
 
 import uuid
+from typing import Any
 
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.core.exceptions import NotFoundError
+from src.models.chunk import Chunk
+from src.models.document import Document
 from src.models.source import Source
+from src.models.sync_job import SyncJob
 from src.repositories.base_repository import BaseRepository
 
 
@@ -149,6 +154,60 @@ class SourceRepository(BaseRepository[Source]):
         )
         result = await self._session.execute(stmt)
         return result.scalars().first() is not None
+
+    async def get_stats(self, source_id: uuid.UUID) -> dict[str, Any]:
+        """Return aggregate counts + last sync timestamp for a source.
+
+        Keys returned:
+          * ``document_count``    — count of active documents
+          * ``chunk_count``       — count of chunks (all, not filtered by is_active)
+          * ``last_synced_at``    — Source.last_synced_at or None
+          * ``sync_job_count``    — total historical sync runs
+
+        Raises
+        ------
+        NotFoundError
+            When no ``Source`` row exists for *source_id*.  Defense-in-depth
+            against callers (e.g. Celery tasks) that bypass the router's own
+            existence check and would otherwise see silent zeros.
+        """
+        src_result = await self._session.execute(
+            select(Source).where(Source.id == source_id)
+        )
+        source = src_result.scalar_one_or_none()
+        if not source:
+            raise NotFoundError(f"Source {source_id} not found")
+
+        doc_result = await self._session.execute(
+            select(func.count())
+            .select_from(Document)
+            .where(
+                Document.source_id == source_id,
+                Document.is_active.is_(True),
+            )
+        )
+        document_count = doc_result.scalar() or 0
+
+        chunk_result = await self._session.execute(
+            select(func.count())
+            .select_from(Chunk)
+            .where(Chunk.source_id == source_id)
+        )
+        chunk_count = chunk_result.scalar() or 0
+
+        sync_result = await self._session.execute(
+            select(func.count())
+            .select_from(SyncJob)
+            .where(SyncJob.source_id == source_id)
+        )
+        sync_job_count = sync_result.scalar() or 0
+
+        return {
+            "document_count": int(document_count),
+            "chunk_count": int(chunk_count),
+            "last_synced_at": source.last_synced_at if source else None,
+            "sync_job_count": int(sync_job_count),
+        }
 
     async def list_by_ids(self, source_ids: list[uuid.UUID]) -> list[Source]:
         """Bulk fetch by list of PKs; returns only active sources.
