@@ -13,6 +13,7 @@ from src.models.document import Document
 from src.models.enums import SourceType, SyncStatus
 from src.models.refresh_token import UserRefreshToken
 from src.models.source import Source
+from src.models.source_description_history import SourceDescriptionHistory
 from src.models.source_permission import SourcePermission
 from src.models.sync_job import SyncJob
 from src.models.user import Invitation, PasswordResetToken, User, UserRole
@@ -27,6 +28,7 @@ __all__ = [
     "MessageRole",
     "PasswordResetToken",
     "Source",
+    "SourceDescriptionHistory",
     "SourcePermission",
     "SourceType",
     "SyncJob",
