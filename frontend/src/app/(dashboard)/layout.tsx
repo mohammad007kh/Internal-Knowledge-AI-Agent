@@ -4,20 +4,79 @@ import { ThemeToggle } from '@/components/theme-toggle'
 import { useAuth } from '@/features/auth/context/AuthContext'
 import { useLogout } from '@/features/auth/hooks/useAuthMutations'
 import { useNetworkStatus } from '@/hooks/use-network-status'
+import { cn } from '@/lib/utils'
 import {
+  CpuIcon,
   DatabaseIcon,
   LayoutDashboardIcon,
   LogOutIcon,
   MessageCircleIcon,
   PlugIcon,
+  ShieldIcon,
   UserCircleIcon,
   UsersIcon,
 } from 'lucide-react'
 import Link from 'next/link'
+import { usePathname } from 'next/navigation'
+import type { ComponentType, SVGProps } from 'react'
+
+type IconType = ComponentType<SVGProps<SVGSVGElement> & { className?: string }>
+
+interface NavItem {
+  href: string
+  label: string
+  icon: IconType
+}
+
+const USER_NAV: NavItem[] = [
+  { href: '/chat', label: 'Chat', icon: MessageCircleIcon },
+  { href: '/profile', label: 'Profile', icon: UserCircleIcon },
+]
+
+const ADMIN_NAV: NavItem[] = [
+  { href: '/admin/sources', label: 'Sources', icon: DatabaseIcon },
+  { href: '/admin/users', label: 'Users', icon: UsersIcon },
+  { href: '/admin/connectors', label: 'Connectors', icon: PlugIcon },
+  { href: '/admin/analytics', label: 'Analytics', icon: LayoutDashboardIcon },
+  { href: '/admin/llm-settings', label: 'LLM Settings', icon: CpuIcon },
+  { href: '/admin/policy', label: 'Policy', icon: ShieldIcon },
+]
+
+interface NavLinkProps {
+  href: string
+  label: string
+  icon: IconType
+  active: boolean
+}
+
+function NavLink({ href, label, icon: Icon, active }: NavLinkProps) {
+  return (
+    <Link
+      href={href}
+      aria-current={active ? 'page' : undefined}
+      className={cn(
+        'flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition-colors',
+        active
+          ? 'bg-accent text-accent-foreground'
+          : 'hover:bg-accent hover:text-accent-foreground'
+      )}
+    >
+      <Icon className="h-4 w-4" />
+      {label}
+    </Link>
+  )
+}
+
+function isActivePath(pathname: string | null, href: string): boolean {
+  if (!pathname) return false
+  if (pathname === href) return true
+  return pathname.startsWith(`${href}/`)
+}
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   const { user } = useAuth()
   const logoutMutation = useLogout()
+  const pathname = usePathname()
   useNetworkStatus()
 
   return (
@@ -27,55 +86,31 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         <div className="flex h-14 items-center border-b border-border px-4">
           <span className="font-semibold text-card-foreground">Knowledge AI</span>
         </div>
-        <nav className="flex-1 p-4 space-y-1">
-          <Link
-            href="/chat"
-            className="flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium hover:bg-accent hover:text-accent-foreground"
-          >
-            <MessageCircleIcon className="h-4 w-4" />
-            Chat
-          </Link>
-          <Link
-            href="/profile"
-            className="flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium hover:bg-accent hover:text-accent-foreground"
-          >
-            <UserCircleIcon className="h-4 w-4" />
-            Profile
-          </Link>
+        <nav className="flex-1 p-4 space-y-1" aria-label="Primary">
+          {USER_NAV.map((item) => (
+            <NavLink
+              key={item.href}
+              href={item.href}
+              label={item.label}
+              icon={item.icon}
+              active={isActivePath(pathname, item.href)}
+            />
+          ))}
 
           {user?.role === 'admin' && (
             <>
               <div className="pt-3 pb-1 px-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
                 Admin
               </div>
-              <Link
-                href="/admin/sources"
-                className="flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium hover:bg-accent hover:text-accent-foreground"
-              >
-                <DatabaseIcon className="h-4 w-4" />
-                Sources
-              </Link>
-              <Link
-                href="/admin/users"
-                className="flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium hover:bg-accent hover:text-accent-foreground"
-              >
-                <UsersIcon className="h-4 w-4" />
-                Users
-              </Link>
-              <Link
-                href="/admin/connectors"
-                className="flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium hover:bg-accent hover:text-accent-foreground"
-              >
-                <PlugIcon className="h-4 w-4" />
-                Connectors
-              </Link>
-              <Link
-                href="/admin/analytics"
-                className="flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium hover:bg-accent hover:text-accent-foreground"
-              >
-                <LayoutDashboardIcon className="h-4 w-4" />
-                Analytics
-              </Link>
+              {ADMIN_NAV.map((item) => (
+                <NavLink
+                  key={item.href}
+                  href={item.href}
+                  label={item.label}
+                  icon={item.icon}
+                  active={isActivePath(pathname, item.href)}
+                />
+              ))}
             </>
           )}
         </nav>

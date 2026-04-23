@@ -3,6 +3,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { useMediaQuery } from '@/hooks/useMediaQuery'
 import { ChatInputBar } from './ChatInputBar'
 import { ClarificationCard } from './ClarificationCard'
+import { GuardrailCard } from './GuardrailCard'
 import { MessageThread } from './MessageThread'
 import { useSelectedSession } from './SelectedSessionContext'
 import { SessionList } from './SessionList'
@@ -13,12 +14,15 @@ export function ChatLayout() {
   const isDesktop = useMediaQuery('(min-width: 768px)')
   const {
     send,
+    abort,
     isPending,
     streamingToken,
     isStreaming,
     optimisticMessages,
     clarification,
     dismissClarification,
+    guardrailMessage,
+    dismissGuardrail,
   } = useChat({ sessionId })
 
   const chatPane = (
@@ -37,7 +41,16 @@ export function ChatLayout() {
           disabled={isPending}
         />
       )}
-      <ChatInputBar onSend={send} disabled={isPending} sessionId={sessionId} />
+      {guardrailMessage && (
+        <GuardrailCard message={guardrailMessage} onDismiss={dismissGuardrail} />
+      )}
+      <ChatInputBar
+        onSend={send}
+        onStop={abort}
+        disabled={isPending && !isStreaming}
+        isStreaming={isStreaming}
+        sessionId={sessionId}
+      />
     </div>
   )
 

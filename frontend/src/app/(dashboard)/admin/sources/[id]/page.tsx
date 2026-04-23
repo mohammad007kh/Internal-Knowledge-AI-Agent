@@ -1,228 +1,366 @@
 'use client'
 
-import { useQuery } from '@tanstack/react-query'
-import { useParams } from 'next/navigation'
-
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
 import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { Skeleton } from '@/components/ui/skeleton'
+import { Switch } from '@/components/ui/switch'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { apiClient } from '@/lib/api-client'
-
-interface SourceDetail {
-  id: string
-  name: string
-  connector_type: string
-  status: string
-  document_count: number
-  last_synced_at: string | null
-  created_at: string
-}
-
-interface Document {
-  id: string
-  title: string
-  url: string | null
-  created_at: string
-}
-
-interface SyncRun {
-  id: string
-  started_at: string
-  completed_at: string | null
-  status: string
-  documents_indexed: number | null
-  error_message: string | null
-}
-
-interface DocumentsResponse {
-  items: Document[]
-  total: number
-}
-
-interface SyncHistoryResponse {
-  items: SyncRun[]
-  total: number
-}
-
-async function fetchSource(id: string): Promise<SourceDetail> {
-  const res = await apiClient.get<SourceDetail>(`/api/v1/sources/${id}`)
-  return res.data
-}
-
-async function fetchDocuments(id: string): Promise<DocumentsResponse> {
-  const res = await apiClient.get<DocumentsResponse>(`/api/v1/sources/${id}/documents?page=1&page_size=20`)
-  return res.data
-}
-
-async function fetchSyncHistory(id: string): Promise<SyncHistoryResponse> {
-  const res = await apiClient.get<SyncHistoryResponse>(
-    `/api/v1/sources/${id}/sync-runs?page=1&page_size=20`
-  )
-  return res.data
-}
-
-function StatusBadge({ status }: { status: string }) {
-  const variantMap: Record<string, string> = {
-    ready: 'bg-green-600/15 text-green-700 dark:text-green-400',
-    syncing: 'bg-blue-600/15 text-blue-700 dark:text-blue-400',
-    error: 'bg-red-600/15 text-red-700 dark:text-red-400',
-    pending: 'bg-yellow-600/15 text-yellow-700 dark:text-yellow-400',
-    disabled: 'bg-zinc-600/15 text-zinc-500 dark:text-zinc-400',
-  }
-  const cls = variantMap[status] ?? variantMap.disabled
-  return (
-    <Badge className={cls} variant="outline">
-      {status}
-    </Badge>
-  )
-}
-
-function DocumentsTab({ sourceId }: { sourceId: string }) {
-  const { data, isLoading } = useQuery({
-    queryKey: ['source-documents', sourceId],
-    queryFn: () => fetchDocuments(sourceId),
-  })
-
-  if (isLoading) {
-    return <p className="text-muted-foreground py-4 text-sm">Loading documents…</p>
-  }
-
-  if (!data?.items.length) {
-    return <p className="text-muted-foreground py-4 text-sm">No documents indexed yet.</p>
-  }
-
-  return (
-    <div className="space-y-1">
-      <p className="text-muted-foreground mb-3 text-xs">
-        {data.total} document{data.total !== 1 ? 's' : ''} indexed
-      </p>
-      <div className="divide-y rounded-md border">
-        {data.items.map((doc) => (
-          <div className="flex items-center justify-between px-4 py-3" key={doc.id}>
-            <div className="min-w-0">
-              <p className="truncate text-sm font-medium">{doc.title}</p>
-              {doc.url && (
-                <a
-                  className="text-muted-foreground truncate text-xs hover:underline"
-                  href={doc.url}
-                  rel="noreferrer"
-                  target="_blank"
-                >
-                  {doc.url}
-                </a>
-              )}
-            </div>
-            <span className="text-muted-foreground ml-4 shrink-0 text-xs">
-              {new Date(doc.created_at).toLocaleDateString()}
-            </span>
-          </div>
-        ))}
-      </div>
-    </div>
-  )
-}
-
-function SyncHistoryTab({ sourceId }: { sourceId: string }) {
-  const { data, isLoading } = useQuery({
-    queryKey: ['source-sync-history', sourceId],
-    queryFn: () => fetchSyncHistory(sourceId),
-  })
-
-  if (isLoading) {
-    return <p className="text-muted-foreground py-4 text-sm">Loading sync history…</p>
-  }
-
-  if (!data?.items.length) {
-    return <p className="text-muted-foreground py-4 text-sm">No sync runs yet.</p>
-  }
-
-  return (
-    <div className="divide-y rounded-md border">
-      {data.items.map((run) => (
-        <div className="px-4 py-3" key={run.id}>
-          <div className="flex items-center justify-between">
-            <StatusBadge status={run.status} />
-            <span className="text-muted-foreground text-xs">
-              {new Date(run.started_at).toLocaleString()}
-            </span>
-          </div>
-          {run.documents_indexed !== null && (
-            <p className="mt-1 text-sm">
-              {run.documents_indexed} document{run.documents_indexed !== 1 ? 's' : ''} indexed
-            </p>
-          )}
-          {run.error_message && (
-            <p className="mt-1 text-sm text-red-600 dark:text-red-400">{run.error_message}</p>
-          )}
-        </div>
-      ))}
-    </div>
-  )
-}
+import { ErrorState } from '@/components/ui/ErrorState'
+import {
+  SourceModeBadge,
+  StatusBadge,
+  SyncModeBadge,
+  formatTimestamp,
+} from '@/features/sources/source-ui'
+import {
+  useDeleteSource,
+  useRefreshDescription,
+  useSource,
+  useSourceStats,
+  useSyncJobs,
+  useTriggerSync,
+  useUpdateSource,
+} from '@/features/sources/hooks/useSources'
+import { getErrorMessage } from '@/lib/errors'
+import { ChevronRightIcon, RefreshCwIcon, Trash2Icon } from 'lucide-react'
+import Link from 'next/link'
+import { useParams, useRouter } from 'next/navigation'
+import { useState } from 'react'
+import { toast } from 'sonner'
 
 export default function SourceDetailPage() {
   const { id } = useParams<{ id: string }>()
+  const router = useRouter()
 
-  const { data: source, isLoading } = useQuery({
-    queryKey: ['source', id],
-    queryFn: () => fetchSource(id),
-    enabled: Boolean(id),
-  })
+  const { data: source, isLoading, isError, error, refetch } = useSource(id)
+  const { data: stats } = useSourceStats(id)
+  const { data: syncJobsData } = useSyncJobs(id)
+
+  const syncMutation = useTriggerSync()
+  const deleteMutation = useDeleteSource()
+  const updateMutation = useUpdateSource(id)
+  const refreshDesc = useRefreshDescription(id)
+
+  const [confirmDelete, setConfirmDelete] = useState(false)
+  const [proposedDesc, setProposedDesc] = useState<string | null>(null)
 
   if (isLoading) {
     return (
-      <div className="flex h-full items-center justify-center p-8">
-        <span className="text-muted-foreground text-sm">Loading…</span>
+      <div className="space-y-4 p-6">
+        <Skeleton className="h-6 w-48" />
+        <Skeleton className="h-10 w-full max-w-md" />
+        <Skeleton className="h-64 w-full" />
       </div>
     )
   }
 
-  if (!source) {
+  if (isError || !source) {
     return (
-      <div className="p-8">
-        <p className="text-muted-foreground text-sm">Source not found.</p>
+      <div className="p-6">
+        <ErrorState message={getErrorMessage(error)} onRetry={() => refetch()} />
       </div>
     )
   }
+
+  const syncJobs = syncJobsData?.items ?? []
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-start justify-between gap-4">
-        <div>
+    <div className="space-y-6 p-6">
+      {/* Breadcrumb */}
+      <nav className="flex items-center gap-1 text-sm text-muted-foreground" aria-label="Breadcrumb">
+        <Link href="/admin/sources" className="hover:text-foreground hover:underline">
+          Sources
+        </Link>
+        <ChevronRightIcon className="h-4 w-4" aria-hidden />
+        <span className="font-medium text-foreground">{source.name}</span>
+      </nav>
+
+      {/* Header */}
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div className="space-y-1">
           <h1 className="text-2xl font-bold">{source.name}</h1>
-          <p className="text-muted-foreground mt-1 text-sm font-mono">{source.connector_type}</p>
+          {source.description && (
+            <p className="text-sm text-muted-foreground">{source.description}</p>
+          )}
         </div>
-        <StatusBadge status={source.status} />
-      </div>
-
-      <div className="grid grid-cols-2 gap-4 sm:grid-cols-3">
-        <div className="rounded-md border p-3">
-          <p className="text-muted-foreground text-xs">Documents</p>
-          <p className="mt-1 text-xl font-semibold tabular-nums">{source.document_count}</p>
-        </div>
-        <div className="rounded-md border p-3">
-          <p className="text-muted-foreground text-xs">Last Synced</p>
-          <p className="mt-1 text-sm">
-            {source.last_synced_at ? new Date(source.last_synced_at).toLocaleString() : 'Never'}
-          </p>
-        </div>
-        <div className="rounded-md border p-3">
-          <p className="text-muted-foreground text-xs">Created</p>
-          <p className="mt-1 text-sm">{new Date(source.created_at).toLocaleDateString()}</p>
+        <div className="flex items-center gap-2">
+          <StatusBadge status={source.status} />
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => syncMutation.mutate(id)}
+            disabled={syncMutation.isPending}
+            aria-label={`Sync source ${source.name}`}
+          >
+            <RefreshCwIcon className="mr-1.5 h-4 w-4" />
+            Sync now
+          </Button>
         </div>
       </div>
 
-      <Tabs defaultValue="documents">
+      <Tabs defaultValue="overview">
         <TabsList>
-          <TabsTrigger value="documents">Documents</TabsTrigger>
-          <TabsTrigger value="sync-history">Sync History</TabsTrigger>
+          <TabsTrigger value="overview">Overview</TabsTrigger>
+          <TabsTrigger value="sync">Sync</TabsTrigger>
+          <TabsTrigger value="access">Access</TabsTrigger>
+          <TabsTrigger value="settings">Settings</TabsTrigger>
         </TabsList>
-        <TabsContent className="mt-4" value="documents">
-          <DocumentsTab sourceId={id} />
+
+        {/* OVERVIEW */}
+        <TabsContent value="overview" className="mt-4 space-y-4">
+          <div className="grid gap-4 sm:grid-cols-3">
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm font-medium text-muted-foreground">Documents</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <p className="text-2xl font-bold tabular-nums">{stats?.document_count ?? '—'}</p>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm font-medium text-muted-foreground">Chunks</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <p className="text-2xl font-bold tabular-nums">{stats?.chunk_count ?? '—'}</p>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm font-medium text-muted-foreground">Last synced</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <p className="text-sm">{formatTimestamp(source.last_synced_at)}</p>
+              </CardContent>
+            </Card>
+          </div>
+
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between pb-2">
+              <CardTitle className="text-sm font-medium">AI Description</CardTitle>
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={refreshDesc.isPending}
+                onClick={() =>
+                  refreshDesc.mutate(undefined, {
+                    onSuccess: (data) => setProposedDesc(data.proposed_description),
+                    onError: (err) => toast.error(getErrorMessage(err)),
+                  })
+                }
+              >
+                {refreshDesc.isPending ? 'Generating…' : 'Refresh'}
+              </Button>
+            </CardHeader>
+            <CardContent>
+              <p className="text-sm text-muted-foreground">
+                {source.description || 'No description yet. Click Refresh to generate one.'}
+              </p>
+            </CardContent>
+          </Card>
         </TabsContent>
-        <TabsContent className="mt-4" value="sync-history">
-          <SyncHistoryTab sourceId={id} />
+
+        {/* SYNC */}
+        <TabsContent value="sync" className="mt-4 space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-sm font-medium">Sync configuration</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3 text-sm">
+              <div className="flex items-center justify-between">
+                <span className="text-muted-foreground">Mode</span>
+                <SyncModeBadge mode={source.sync_mode} />
+              </div>
+              {source.sync_schedule && (
+                <div className="flex items-center justify-between">
+                  <span className="text-muted-foreground">Schedule</span>
+                  <code className="rounded bg-muted px-1.5 py-0.5 text-xs">{source.sync_schedule}</code>
+                </div>
+              )}
+              <div className="flex items-center justify-between">
+                <span className="text-muted-foreground">Source mode</span>
+                <SourceModeBadge mode={source.source_mode} />
+              </div>
+            </CardContent>
+          </Card>
+
+          <div>
+            <h3 className="mb-3 text-sm font-medium">Sync history</h3>
+            {syncJobs.length === 0 ? (
+              <p className="py-4 text-sm text-muted-foreground">No sync runs yet.</p>
+            ) : (
+              <div className="divide-y rounded-md border">
+                {syncJobs.map((job) => (
+                  <div className="flex items-center justify-between px-4 py-3" key={job.id}>
+                    <div className="space-y-0.5">
+                      <div className="flex items-center gap-2">
+                        <StatusBadge status={job.status} />
+                        {job.documents_indexed > 0 && (
+                          <span className="text-xs text-muted-foreground">
+                            {job.documents_indexed} docs indexed
+                          </span>
+                        )}
+                      </div>
+                      {job.error_message && (
+                        <p className="text-xs text-destructive">{job.error_message}</p>
+                      )}
+                    </div>
+                    <span className="shrink-0 text-xs text-muted-foreground">
+                      {formatTimestamp(job.started_at)}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </TabsContent>
+
+        {/* ACCESS */}
+        <TabsContent value="access" className="mt-4">
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-sm font-medium">Access control</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <p className="text-sm text-muted-foreground">
+                Manage which users can query this source in{' '}
+                <Link
+                  href={`/admin/sources/${id}/permissions`}
+                  className="underline hover:text-foreground"
+                >
+                  Permissions settings
+                </Link>
+                .
+              </p>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* SETTINGS */}
+        <TabsContent value="settings" className="mt-4 space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-sm font-medium">Source settings</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4 text-sm">
+              <div className="flex items-center justify-between">
+                <span className="text-muted-foreground">Type</span>
+                <Badge variant="secondary">{source.source_type}</Badge>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-muted-foreground">Retrieval mode</span>
+                <Badge variant="secondary">{source.retrieval_mode.replace(/_/g, ' ')}</Badge>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-muted-foreground">Citations enabled</span>
+                <Switch
+                  checked={source.citations_enabled}
+                  disabled={updateMutation.isPending}
+                  onCheckedChange={(checked) =>
+                    updateMutation.mutate(
+                      { citations_enabled: checked },
+                      {
+                        onSuccess: () => toast.success('Citations setting updated'),
+                        onError: (err) => toast.error(getErrorMessage(err)),
+                      }
+                    )
+                  }
+                  aria-label="Toggle citations"
+                />
+              </div>
+            </CardContent>
+          </Card>
+
+          <div className="rounded-md border border-destructive/40 p-4">
+            <h3 className="text-sm font-medium text-destructive">Danger zone</h3>
+            <p className="mt-1 text-xs text-muted-foreground">
+              Deleting a source permanently removes all indexed documents and cannot be undone.
+            </p>
+            <Button
+              className="mt-3"
+              variant="destructive"
+              size="sm"
+              onClick={() => setConfirmDelete(true)}
+            >
+              <Trash2Icon className="mr-1.5 h-4 w-4" />
+              Delete source
+            </Button>
+          </div>
         </TabsContent>
       </Tabs>
+
+      {/* Proposed description dialog */}
+      <Dialog open={!!proposedDesc} onOpenChange={(o) => !o && setProposedDesc(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Proposed description</DialogTitle>
+          </DialogHeader>
+          <p className="text-sm">{proposedDesc}</p>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setProposedDesc(null)}>
+              Discard
+            </Button>
+            <Button
+              disabled={updateMutation.isPending}
+              onClick={() =>
+                updateMutation.mutate(
+                  { description: proposedDesc ?? undefined },
+                  {
+                    onSuccess: () => {
+                      toast.success('Description updated')
+                      setProposedDesc(null)
+                    },
+                    onError: (err) => toast.error(getErrorMessage(err)),
+                  }
+                )
+              }
+            >
+              {updateMutation.isPending ? 'Saving…' : 'Save'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Delete confirmation */}
+      <AlertDialog open={confirmDelete} onOpenChange={setConfirmDelete}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete &ldquo;{source.name}&rdquo;?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will permanently delete the source and all indexed documents.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              onClick={() =>
+                deleteMutation.mutate(id, {
+                  onSuccess: () => {
+                    toast.success('Source deleted')
+                    router.push('/admin/sources')
+                  },
+                  onError: (err) => toast.error(getErrorMessage(err)),
+                })
+              }
+            >
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }
