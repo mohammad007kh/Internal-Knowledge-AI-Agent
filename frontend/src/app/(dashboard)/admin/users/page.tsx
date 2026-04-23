@@ -28,7 +28,7 @@ import { getErrorMessage } from '@/lib/errors'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { PlusIcon, Trash2Icon } from 'lucide-react'
 import Link from 'next/link'
-import { Suspense, useState } from 'react'
+import { useState } from 'react'
 import { toast } from 'sonner'
 
 interface Invitation {
@@ -192,9 +192,7 @@ export default function UsersPage() {
           <TabsTrigger value="invitations">Invitations</TabsTrigger>
         </TabsList>
         <TabsContent value="users" className="mt-4">
-          <Suspense fallback={<div className="h-64 animate-pulse rounded-md bg-muted" />}>
-            <UsersTable />
-          </Suspense>
+          <UsersTable />
         </TabsContent>
         <TabsContent value="invitations" className="mt-4">
           <InvitationsTable />

@@ -43,6 +43,7 @@ import {
   useTriggerSync,
 } from '@/features/sources/hooks/useSources'
 import type { SourceListItem, SourceType } from '@/lib/api/sources'
+import { getErrorMessage } from '@/lib/errors'
 import {
   Database as DatabaseIcon,
   Eye,
@@ -54,6 +55,7 @@ import {
 } from 'lucide-react'
 import Link from 'next/link'
 import { useDeferredValue, useMemo, useState } from 'react'
+import { toast } from 'sonner'
 
 type TypeGroup = 'all' | 'database' | 'file' | 'web' | 'integration'
 type StatusFilter = 'all' | 'pending' | 'syncing' | 'ready' | 'error' | 'disabled'
@@ -110,7 +112,12 @@ function SourceRowActions({
         variant="outline"
         size="sm"
         aria-label={`Sync source ${source.name}`}
-        onClick={() => syncMutation.mutate(source.id)}
+        onClick={() =>
+          syncMutation.mutate(source.id, {
+            onSuccess: () => toast.success('Sync started'),
+            onError: (err) => toast.error(getErrorMessage(err) || 'Sync failed'),
+          })
+        }
         disabled={isSyncing}
       >
         {isSyncing ? (

@@ -100,7 +100,12 @@ export default function SourceDetailPage() {
           <Button
             variant="outline"
             size="sm"
-            onClick={() => syncMutation.mutate(id)}
+            onClick={() =>
+              syncMutation.mutate(id, {
+                onSuccess: () => toast.success('Sync started'),
+                onError: (err) => toast.error(getErrorMessage(err)),
+              })
+            }
             disabled={syncMutation.isPending}
             aria-label={`Sync source ${source.name}`}
           >
@@ -346,6 +351,7 @@ export default function SourceDetailPage() {
             <AlertDialogCancel>Cancel</AlertDialogCancel>
             <AlertDialogAction
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              disabled={deleteMutation.isPending}
               onClick={() =>
                 deleteMutation.mutate(id, {
                   onSuccess: () => {
@@ -356,7 +362,7 @@ export default function SourceDetailPage() {
                 })
               }
             >
-              Delete
+              {deleteMutation.isPending ? 'Deleting…' : 'Delete'}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

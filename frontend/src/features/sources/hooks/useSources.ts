@@ -90,10 +90,6 @@ export function useUpdateSource(sourceId: string) {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: sourcesKeys.detail(sourceId) })
       queryClient.invalidateQueries({ queryKey: sourcesKeys.list() })
-      toast.success('Source updated')
-    },
-    onError: (error: unknown) => {
-      toast.error(getErrorMessage(error) || 'Failed to update source')
     },
   })
 }
@@ -104,10 +100,6 @@ export function useDeleteSource() {
     mutationFn: (sourceId: string) => deleteSourceApi(sourceId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: sourcesKeys.all })
-      toast.success('Source deleted')
-    },
-    onError: (error: unknown) => {
-      toast.error(getErrorMessage(error) || 'Failed to delete source')
     },
   })
 }
@@ -137,10 +129,6 @@ export function useTriggerSync() {
       queryClient.invalidateQueries({ queryKey: sourcesKeys.detail(sourceId) })
       queryClient.invalidateQueries({ queryKey: sourcesKeys.syncJobs(sourceId) })
       queryClient.invalidateQueries({ queryKey: sourcesKeys.stats(sourceId) })
-      toast.success('Sync started')
-    },
-    onError: (error: unknown) => {
-      toast.error(getErrorMessage(error) || 'Failed to trigger sync')
     },
   })
 }
@@ -148,11 +136,5 @@ export function useTriggerSync() {
 export function useRefreshDescription(sourceId: string) {
   return useMutation({
     mutationFn: () => refreshDescriptionApi(sourceId),
-    onSuccess: () => {
-      toast.success('Description regenerated — review and save to apply')
-    },
-    onError: (error: unknown) => {
-      toast.error(getErrorMessage(error) || 'Failed to refresh description')
-    },
   })
 }

@@ -39,11 +39,31 @@ async function requestUploadUrl(body: UploadUrlRequest): Promise<UploadUrlRespon
   return data
 }
 
+const ALLOWED_UPLOAD_ORIGINS = (
+  process.env.NEXT_PUBLIC_MINIO_ENDPOINT ?? 'http://localhost:9000'
+)
+  .split(',')
+  .map((s) => s.trim())
+
+function validateUploadUrl(url: string): void {
+  let parsed: URL
+  try {
+    parsed = new URL(url)
+  } catch {
+    throw new Error('Invalid upload URL returned by server')
+  }
+  const origin = parsed.origin
+  if (!ALLOWED_UPLOAD_ORIGINS.some((allowed) => origin === allowed || url.startsWith(allowed))) {
+    throw new Error(`Upload URL origin "${origin}" is not trusted`)
+  }
+}
+
 async function putToPresignedUrl(
   uploadUrl: string,
   file: File,
   onProgress?: (percent: number) => void
 ): Promise<void> {
+  validateUploadUrl(uploadUrl)
   await axios.put(uploadUrl, file, {
     headers: {
       'Content-Type': file.type || 'application/octet-stream',
