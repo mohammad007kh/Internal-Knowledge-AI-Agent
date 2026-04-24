@@ -19,6 +19,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+import { usersKeys } from '@/features/users/hooks/useUsersQueries'
 import { apiClient } from '@/lib/api-client'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
@@ -39,8 +40,8 @@ export default function UserDetailPage() {
   const router = useRouter()
   const queryClient = useQueryClient()
 
-  const { data: user } = useQuery({
-    queryKey: ['admin-user', id],
+  const { data: user, isLoading, isError } = useQuery({
+    queryKey: usersKeys.detail(id),
     queryFn: async () => {
       const res = await apiClient.get<AdminUser>(`/api/v1/users/${id}`)
       return res.data
@@ -61,8 +62,8 @@ export default function UserDetailPage() {
   const updateMutation = useMutation({
     mutationFn: (v: FormValues) => apiClient.patch(`/api/v1/users/${id}`, v),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['admin-user', id] })
-      queryClient.invalidateQueries({ queryKey: ['admin-users'] })
+      queryClient.invalidateQueries({ queryKey: usersKeys.all })
+      queryClient.invalidateQueries({ queryKey: ['admin', 'analytics'] })
       toast.success('User updated.')
     },
     onError: () => toast.error('Failed to update user.'),
@@ -71,7 +72,8 @@ export default function UserDetailPage() {
   const toggleActiveMutation = useMutation({
     mutationFn: (active: boolean) => apiClient.patch(`/api/v1/users/${id}`, { is_active: active }),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['admin-user', id] })
+      queryClient.invalidateQueries({ queryKey: usersKeys.all })
+      queryClient.invalidateQueries({ queryKey: ['admin', 'analytics'] })
       toast.success(user?.is_active ? 'User deactivated.' : 'User reactivated.')
     },
   })
@@ -82,8 +84,19 @@ export default function UserDetailPage() {
     onError: () => toast.error('Failed to send reset email.'),
   })
 
-  if (!user) {
+  if (isLoading) {
     return <div className="h-64 animate-pulse rounded-md bg-muted" aria-busy="true" />
+  }
+
+  if (isError || !user) {
+    return (
+      <div className="flex flex-col items-center gap-3 p-6 text-center">
+        <p className="font-medium text-destructive">Failed to load user.</p>
+        <Button variant="outline" size="sm" onClick={() => router.push('/admin/users')}>
+          Back to users
+        </Button>
+      </div>
+    )
   }
 
   return (

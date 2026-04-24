@@ -74,11 +74,20 @@ function PolicyEditor() {
     if (data) setDraft(data.content ?? '')
   }, [data])
 
+  const isDirty = data ? draft !== (data.content ?? '') : false
+
+  useEffect(() => {
+    if (!isDirty) return
+    const handler = (e: BeforeUnloadEvent) => {
+      e.preventDefault()
+    }
+    window.addEventListener('beforeunload', handler)
+    return () => window.removeEventListener('beforeunload', handler)
+  }, [isDirty])
+
   if (isLoading) return <Skeleton className="h-64 w-full" />
   if (isError)
     return <ErrorState message={getErrorMessage(error)} onRetry={() => refetch()} />
-
-  const isDirty = data ? draft !== (data.content ?? '') : false
 
   return (
     <Card>

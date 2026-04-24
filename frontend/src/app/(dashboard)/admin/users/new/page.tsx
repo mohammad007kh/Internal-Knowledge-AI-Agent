@@ -18,9 +18,10 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+import { usersKeys } from '@/features/users/hooks/useUsersQueries'
 import { apiClient } from '@/lib/api-client'
 import { zodResolver } from '@hookform/resolvers/zod'
-import { useMutation } from '@tanstack/react-query'
+import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useRouter } from 'next/navigation'
 import { useForm } from 'react-hook-form'
 import { toast } from 'sonner'
@@ -42,6 +43,7 @@ async function inviteUser(values: FormValues): Promise<{ id: string }> {
 
 export default function InviteUserPage() {
   const router = useRouter()
+  const queryClient = useQueryClient()
 
   const form = useForm<FormValues>({
     resolver: zodResolver(schema),
@@ -50,9 +52,18 @@ export default function InviteUserPage() {
 
   const mutation = useMutation({
     mutationFn: inviteUser,
-    onSuccess: (data) => {
-      toast.success('User invited successfully.')
-      router.push(`/admin/users/${data.id}`)
+    onSuccess: () => {
+      // Refresh pending-invitations badge, the users list (in case the
+      // backend creates a shell row), and analytics tiles.
+      queryClient.invalidateQueries({ queryKey: usersKeys.invitations() })
+      queryClient.invalidateQueries({ queryKey: usersKeys.all })
+      queryClient.invalidateQueries({ queryKey: ['admin', 'analytics'] })
+
+      toast.success('Invitation sent successfully.')
+      // Note: inviteUser returns an *invitation* id, not a user id, so we
+      // cannot safely navigate to /admin/users/:id — redirect to the list
+      // where the new invitation will appear under the Invitations tab.
+      router.push('/admin/users')
     },
     onError: () => toast.error('Failed to invite user.'),
   })

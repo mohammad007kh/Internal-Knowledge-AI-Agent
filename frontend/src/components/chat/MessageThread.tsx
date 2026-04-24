@@ -26,7 +26,7 @@ const SUGGESTED_PROMPTS: string[] = [
 ]
 
 async function fetchMessages(id: string): Promise<SessionMessagesResponse> {
-  const res = await apiClient.get<SessionMessagesResponse>(`/chat/sessions/${id}`)
+  const res = await apiClient.get<SessionMessagesResponse>(`/api/v1/chat/sessions/${id}`)
   return res.data
 }
 

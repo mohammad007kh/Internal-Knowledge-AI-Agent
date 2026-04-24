@@ -1,9 +1,7 @@
 'use client'
 
 import {
-  type CreateSourceRequest,
   type UpdateSourceRequest,
-  createSourceApi,
   deleteSourceApi,
   getSourceApi,
   getSourceStatsApi,
@@ -79,20 +77,6 @@ export function useSourceDocuments(sourceId: string | undefined) {
 // Mutations
 // ---------------------------------------------------------------------------
 
-export function useCreateSource() {
-  const queryClient = useQueryClient()
-  return useMutation({
-    mutationFn: (body: CreateSourceRequest) => createSourceApi(body),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: sourcesKeys.all })
-      toast.success('Source created successfully')
-    },
-    onError: (error: unknown) => {
-      toast.error(getErrorMessage(error) || 'Failed to create source')
-    },
-  })
-}
-
 export function useUpdateSource(sourceId: string) {
   const queryClient = useQueryClient()
   return useMutation({
@@ -100,6 +84,7 @@ export function useUpdateSource(sourceId: string) {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: sourcesKeys.detail(sourceId) })
       queryClient.invalidateQueries({ queryKey: sourcesKeys.list() })
+      queryClient.invalidateQueries({ queryKey: ['admin', 'analytics'] })
     },
   })
 }
@@ -110,6 +95,11 @@ export function useDeleteSource() {
     mutationFn: (sourceId: string) => deleteSourceApi(sourceId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: sourcesKeys.all })
+      queryClient.invalidateQueries({ queryKey: ['admin', 'analytics'] })
+      toast.success('Source deleted.')
+    },
+    onError: (error: unknown) => {
+      toast.error(getErrorMessage(error) || 'Failed to delete source')
     },
   })
 }

@@ -23,6 +23,7 @@ import {
 } from '@/components/ui/table'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { UsersTable } from '@/components/admin/UsersTable'
+import { usersKeys } from '@/features/users/hooks/useUsersQueries'
 import { apiClient } from '@/lib/api-client'
 import { getErrorMessage } from '@/lib/errors'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
@@ -55,7 +56,7 @@ async function revokeInvitation(id: string): Promise<void> {
 }
 
 function useInvitations() {
-  return useQuery({ queryKey: ['invitations'], queryFn: listInvitations })
+  return useQuery({ queryKey: usersKeys.invitations(), queryFn: listInvitations })
 }
 
 function useRevokeInvitation() {
@@ -63,7 +64,8 @@ function useRevokeInvitation() {
   return useMutation({
     mutationFn: revokeInvitation,
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['invitations'] })
+      queryClient.invalidateQueries({ queryKey: usersKeys.invitations() })
+      queryClient.invalidateQueries({ queryKey: ['admin', 'analytics'] })
       toast.success('Invitation revoked')
     },
     onError: (err) => toast.error(getErrorMessage(err)),

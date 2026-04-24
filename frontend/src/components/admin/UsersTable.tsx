@@ -29,6 +29,7 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { useAuth } from '@/features/auth/context/AuthContext'
+import { usersKeys } from '@/features/users/hooks/useUsersQueries'
 import { apiClient } from '@/lib/api-client'
 import { cn } from '@/lib/utils'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
@@ -85,7 +86,7 @@ export function UsersTable() {
   const [deactivatingId, setDeactivatingId] = useState<string | null>(null)
 
   const { data, isLoading } = useQuery({
-    queryKey: ['admin-users', page, search],
+    queryKey: usersKeys.list(page, search),
     queryFn: () => fetchUsers(page, search),
     staleTime: 15_000,
   })
@@ -106,7 +107,8 @@ export function UsersTable() {
   const deactivateMutation = useMutation({
     mutationFn: deactivateUser,
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['admin-users'] })
+      queryClient.invalidateQueries({ queryKey: usersKeys.all })
+      queryClient.invalidateQueries({ queryKey: ['admin', 'analytics'] })
       setDeactivatingId(null)
       toast.success('User deactivated.')
     },
@@ -116,7 +118,8 @@ export function UsersTable() {
   const reactivateMutation = useMutation({
     mutationFn: reactivateUser,
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['admin-users'] })
+      queryClient.invalidateQueries({ queryKey: usersKeys.all })
+      queryClient.invalidateQueries({ queryKey: ['admin', 'analytics'] })
       toast.success('User reactivated.')
     },
     onError: () => toast.error('Failed to reactivate user.'),
@@ -362,10 +365,11 @@ export function UsersTable() {
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
             <AlertDialogAction
+              disabled={deactivateMutation.isPending}
               onClick={() => deactivatingId && deactivateMutation.mutate(deactivatingId)}
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
             >
-              Deactivate
+              {deactivateMutation.isPending ? 'Deactivating…' : 'Deactivate'}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

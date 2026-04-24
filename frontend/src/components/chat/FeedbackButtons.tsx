@@ -37,7 +37,7 @@ async function submitFeedback(
   payload: FeedbackPayload
 ): Promise<FeedbackResponse> {
   const res = await apiClient.post<FeedbackResponse>(
-    `/chat/sessions/${sessionId}/messages/${messageId}/feedback`,
+    `/api/v1/chat/sessions/${sessionId}/messages/${messageId}/feedback`,
     payload
   )
   return res.data

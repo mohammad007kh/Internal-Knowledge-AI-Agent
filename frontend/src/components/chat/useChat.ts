@@ -3,6 +3,7 @@
 import { useChatStream } from '@/hooks/use-chat-stream'
 import { useQueryClient } from '@tanstack/react-query'
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { useSelectedSession } from './SelectedSessionContext'
 
 export interface OptimisticMessage {
   id: string
@@ -32,6 +33,7 @@ export interface UseChatReturn {
 export function useChat({ sessionId }: { sessionId: string | null }): UseChatReturn {
   const queryClient = useQueryClient()
   const stream = useChatStream()
+  const { registerAbortStream } = useSelectedSession()
 
   const [optimisticMessages, setOptimisticMessages] = useState<OptimisticMessage[]>([])
   const [clarification, setClarification] = useState<Clarification | null>(null)
@@ -55,6 +57,10 @@ export function useChat({ sessionId }: { sessionId: string | null }): UseChatRet
       if (!sessionId || !text.trim()) return
       const trimmed = text.trim()
       lastQueryRef.current = trimmed
+
+      // Clear any stale optimistic bubble from a previous in-flight send
+      // so a rapid second send does not leave a ghost bubble behind.
+      clearOptimistic()
 
       const optimisticId = `optimistic-${Date.now()}`
       const optimisticMsg: OptimisticMessage = {
@@ -96,6 +102,24 @@ export function useChat({ sessionId }: { sessionId: string | null }): UseChatRet
     clearOptimistic()
     setIsPending(false)
   }, [stream, clearOptimistic])
+
+  // Abort any in-flight stream when the active session changes — switching
+  // sessions (including deletion of the current one) must not leak a stream
+  // that would then populate the wrong session's view on completion.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: only session switches should trigger this
+  useEffect(() => {
+    return () => {
+      abort()
+    }
+  }, [sessionId])
+
+  // Expose this instance's abort to the shared selection context so that
+  // components outside the React tree that owns `useChat` (e.g. SessionList
+  // when deleting the active session) can force-cancel an in-flight stream
+  // before clearing the selection.
+  useEffect(() => {
+    return registerAbortStream(abort)
+  }, [registerAbortStream, abort])
 
   const dismissClarification = useCallback(() => {
     setClarification(null)

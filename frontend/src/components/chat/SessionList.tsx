@@ -187,7 +187,7 @@ function SessionItem({
 }
 
 export function SessionList() {
-  const { sessionId, setSessionId } = useSelectedSession()
+  const { sessionId, setSessionId, abortStream } = useSelectedSession()
   const queryClient = useQueryClient()
 
   const [search, setSearch] = useState('')
@@ -226,7 +226,13 @@ export function SessionList() {
     mutationFn: (id: string) => sessionsApi.delete(id),
     onSuccess: (_, deletedId) => {
       queryClient.invalidateQueries({ queryKey: ['chat-sessions'] })
-      if (sessionId === deletedId) setSessionId(null)
+      if (sessionId === deletedId) {
+        // Cancel any in-flight stream bound to the session we just deleted
+        // before clearing the selection so no stale tokens or completion
+        // events arrive after the session is gone.
+        abortStream()
+        setSessionId(null)
+      }
       setDeletingId(null)
       toast.success('Session deleted.')
     },

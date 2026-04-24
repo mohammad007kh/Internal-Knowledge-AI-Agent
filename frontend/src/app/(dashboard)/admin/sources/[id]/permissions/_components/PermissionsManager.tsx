@@ -9,7 +9,7 @@ import {
 } from '@/features/source-permissions/hooks/useSourcePermissions'
 import { apiClient } from '@/lib/api-client'
 import { UserMinus, UserPlus } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { getUserByIdApi } from '@/lib/api/users'
 
 interface PermissionsManagerProps {
@@ -36,11 +36,13 @@ export function PermissionsManager({ sourceId }: PermissionsManagerProps) {
 
   const { data: userIds = [], isLoading } = useSourcePermissions(sourceId)
 
+  const fetchedIdsRef = useRef<Set<string>>(new Set())
   useEffect(() => {
     if (userIds.length === 0) return
-    const newIds = userIds.filter((id) => !(id in emailMap))
+    const newIds = userIds.filter((id) => !fetchedIdsRef.current.has(id))
     if (newIds.length === 0) return
     newIds.forEach((id) => {
+      fetchedIdsRef.current.add(id)
       getUserByIdApi(id)
         .then((u) => setEmailMap((prev) => ({ ...prev, [id]: u.email })))
         .catch(() => setEmailMap((prev) => ({ ...prev, [id]: id.slice(0, 8) + '…' })))
@@ -131,7 +133,7 @@ export function PermissionsManager({ sourceId }: PermissionsManagerProps) {
                 size="sm"
                 className="text-destructive hover:text-destructive"
                 onClick={() => revokeMutation.mutate(userId)}
-                disabled={revokeMutation.isPending}
+                disabled={revokeMutation.isPending && revokeMutation.variables === userId}
               >
                 <UserMinus className="mr-1 h-4 w-4" />
                 Revoke

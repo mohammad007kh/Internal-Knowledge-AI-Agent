@@ -1,7 +1,7 @@
 'use client'
 
 import { getToken } from '@/lib/token-store'
-import { useCallback, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 
 /**
  * Citation shape from the backend SSE `citations` event.
@@ -114,6 +114,14 @@ export function useChatStream(): UseChatStreamReturn {
   const [lastMessageId, setLastMessageId] = useState<string | null>(null)
 
   const controllerRef = useRef<AbortController | null>(null)
+
+  // Abort any in-flight stream when the hook unmounts to prevent
+  // setState-on-unmounted-component warnings and orphaned network requests.
+  useEffect(() => {
+    return () => {
+      controllerRef.current?.abort()
+    }
+  }, [])
 
   const abortStream = useCallback(() => {
     controllerRef.current?.abort()

@@ -1,5 +1,15 @@
 'use client'
 
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
@@ -13,8 +23,10 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { useUpdateLlmStage } from '@/features/llm-settings/hooks/useLlmSettings'
+import { getErrorMessage } from '@/lib/errors'
 import type { LlmStageConfig } from '@/lib/api/llm-settings'
 import { useEffect, useState } from 'react'
+import { toast } from 'sonner'
 
 interface EditStageDialogProps {
   stage: LlmStageConfig
@@ -30,6 +42,7 @@ export function EditStageDialog({ stage, open, onOpenChange }: EditStageDialogPr
   const [temperature, setTemperature] = useState(stage.temperature)
   const [maxTokens, setMaxTokens] = useState(stage.max_tokens)
   const [customPrompt, setCustomPrompt] = useState(stage.custom_prompt ?? '')
+  const [confirmDiscard, setConfirmDiscard] = useState(false)
 
   useEffect(() => {
     if (open) {
@@ -38,6 +51,7 @@ export function EditStageDialog({ stage, open, onOpenChange }: EditStageDialogPr
       setTemperature(stage.temperature)
       setMaxTokens(stage.max_tokens)
       setCustomPrompt(stage.custom_prompt ?? '')
+      setConfirmDiscard(false)
     }
   }, [open, stage])
 
@@ -50,7 +64,8 @@ export function EditStageDialog({ stage, open, onOpenChange }: EditStageDialogPr
 
   function handleOpenChange(next: boolean) {
     if (!next && isDirty && !updateMutation.isPending) {
-      if (!window.confirm('You have unsaved changes. Discard them?')) return
+      setConfirmDiscard(true)
+      return
     }
     onOpenChange(next)
   }
@@ -70,17 +85,36 @@ export function EditStageDialog({ stage, open, onOpenChange }: EditStageDialogPr
       },
       {
         onSuccess: () => onOpenChange(false),
+        onError: (err) => toast.error(getErrorMessage(err) || 'Failed to save settings.'),
       }
     )
   }
 
   return (
-    <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogContent className="sm:max-w-[520px]">
-        <DialogHeader>
-          <DialogTitle>Edit {stage.label}</DialogTitle>
-          <DialogDescription>{stage.description}</DialogDescription>
-        </DialogHeader>
+    <>
+      <AlertDialog open={confirmDiscard} onOpenChange={setConfirmDiscard}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Discard changes?</AlertDialogTitle>
+            <AlertDialogDescription>
+              You have unsaved changes. Closing this dialog will discard them.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Keep editing</AlertDialogCancel>
+            <AlertDialogAction onClick={() => { setConfirmDiscard(false); onOpenChange(false) }}>
+              Discard
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <Dialog open={open} onOpenChange={handleOpenChange}>
+        <DialogContent className="sm:max-w-[520px]">
+          <DialogHeader>
+            <DialogTitle>Edit {stage.label}</DialogTitle>
+            <DialogDescription>{stage.description}</DialogDescription>
+          </DialogHeader>
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="space-y-2">
             <Label htmlFor={`${stage.stage}-model`}>Model</Label>
@@ -161,5 +195,6 @@ export function EditStageDialog({ stage, open, onOpenChange }: EditStageDialogPr
         </form>
       </DialogContent>
     </Dialog>
+    </>
   )
 }

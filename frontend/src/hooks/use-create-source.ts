@@ -72,6 +72,7 @@ export function useCreateSource() {
     mutationFn: createSource,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['sources'] })
+      queryClient.invalidateQueries({ queryKey: ['admin', 'analytics'] })
     },
   })
 }
