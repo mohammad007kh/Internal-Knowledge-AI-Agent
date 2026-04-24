@@ -9,12 +9,15 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from src.models.enums import SourceType
 from src.schemas.sync_job import SyncJobResponse
+
+# Canonical list of file extensions accepted by the consolidated "Files" source.
+FileTypeLiteral = Literal["pdf", "docx", "xlsx", "csv", "txt", "markdown"]
 
 # ---------------------------------------------------------------------------
 # Input schemas
@@ -59,37 +62,109 @@ class SourceCreate(BaseModel):
 
 _SOURCE_TYPES: frozenset[str] = frozenset(
     {
-        "postgresql",
-        "mysql",
-        "mssql",
-        "mongodb",
+        # Canonical SourceType enum values
+        "database",
+        "file_upload",
+        "web_url",
+        "confluence",
+        "sharepoint",
+        # Legacy per-extension shorthands (back-compat — file team consolidation)
         "pdf",
         "docx",
         "xlsx",
         "csv",
         "txt",
         "markdown",
-        "web_url",
-        "confluence",
-        "sharepoint",
     }
 )
+# Canonical list of database dialects accepted by the consolidated "Database"
+# source.  The granular ``postgresql``/``mysql``/``mssql``/``mongodb`` strings
+# are NOT valid SourceType enum members and are rejected by Pydantic at INSERT
+# time — they live here only as the ``db_type`` discriminator inside the
+# connection payload.
+DbTypeLiteral = Literal["postgresql", "mysql", "mssql", "mongodb"]
+SQL_DB_TYPES: frozenset[str] = frozenset({"postgresql", "mysql", "mssql"})
+# Includes both the canonical ``file_upload`` enum value and the legacy
+# per-extension shorthands (kept for backward compatibility with older clients).
 FILE_SOURCE_TYPES: frozenset[str] = frozenset(
-    {"pdf", "docx", "xlsx", "csv", "txt", "markdown"}
+    {"pdf", "docx", "xlsx", "csv", "txt", "markdown", "file_upload"}
 )
 _SYNC_MODES: frozenset[str] = frozenset({"manual", "scheduled", "delta"})
 _RETRIEVAL_MODES: frozenset[str] = frozenset({"vector_only", "text_to_query", "hybrid"})
 
 
+class DatabaseConnectionConfig(BaseModel):
+    """Typed connection config for the consolidated ``database`` source type.
+
+    The wizard sends fields in a typed shape (no JSON blobs).  The backend
+    translates them into the underlying connector config:
+      * SQL  → ``{connection_string, query, ssl_mode?}`` for ``DatabaseConnector``
+      * Mongo → ``{uri, database, collection}`` for ``MongoDBConnector``
+
+    Credentials are URL-quoted at translation time before being placed into
+    any connection string (see :func:`SourceService._build_database_config`).
+    """
+
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    db_type: DbTypeLiteral
+    host: str = Field(..., min_length=1, max_length=255)
+    port: int = Field(..., ge=1, le=65535)
+    database: str = Field(..., min_length=1, max_length=255)
+    username: str = Field(default="", max_length=255)
+    password: str = Field(default="", max_length=4096)
+    # SQL-only fields
+    query: str | None = None
+    ssl_mode: Literal["disable", "require"] | None = None
+    # MongoDB-only field
+    collection: str | None = None
+
+    @model_validator(mode="after")
+    def _enforce_per_dialect_shape(self) -> DatabaseConnectionConfig:
+        """Enforce SQL vs MongoDB field requirements after parse."""
+        if self.db_type == "mongodb":
+            if not self.collection or not self.collection.strip():
+                raise ValueError("'collection' is required for MongoDB sources.")
+        else:  # SQL dialects
+            if not self.query or not self.query.strip():
+                raise ValueError(
+                    "'query' is required for SQL database sources."
+                )
+        return self
+
+
+class FileRef(BaseModel):
+    """Reference to a single uploaded file inside the consolidated Files source.
+
+    Each file lives in MinIO under ``object_key`` and carries enough metadata
+    for the connector to download, type-check, and parse it.
+    """
+
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    object_key: str = Field(..., min_length=1, max_length=1024)
+    original_name: str = Field(..., min_length=1, max_length=255)
+    file_type: FileTypeLiteral
+    size_bytes: int | None = Field(default=None, ge=0)
+
+
 class SourceCreateRequest(BaseModel):
-    """Structured request body for POST /sources (wizard flow)."""
+    """Structured request body for POST /sources (wizard flow).
+
+    For file sources, prefer the ``files`` array (multi-file).  The legacy
+    singular ``object_key`` field is retained for backward compatibility and
+    accepted only when ``files`` is omitted.
+    """
 
     model_config = ConfigDict(str_strip_whitespace=True)
 
     name: str = Field(..., min_length=1, max_length=255)
     source_type: str
     connection: dict[str, Any] | None = None
+    # Legacy single-file shape — kept for back-compat.
     object_key: str | None = None
+    # New multi-file shape — preferred going forward.
+    files: list[FileRef] | None = None
     description: str = ""
     sync_mode: str = "manual"
     sync_schedule: str | None = None
@@ -123,6 +198,17 @@ class SourceCreateRequest(BaseModel):
         if v not in _RETRIEVAL_MODES:
             raise ValueError(f"Invalid retrieval_mode: {v}")
         return v
+
+    @model_validator(mode="after")
+    def _enforce_file_payload_shape(self) -> SourceCreateRequest:
+        """Ensure file-typed sources include either ``files`` or ``object_key``.
+
+        When ``files`` is provided it MUST be non-empty.  When both are
+        provided, ``files`` wins and ``object_key`` is ignored.
+        """
+        if self.files is not None and len(self.files) == 0:
+            raise ValueError("files must contain at least one entry when provided.")
+        return self
 
 
 class SourcePublicResponse(BaseModel):

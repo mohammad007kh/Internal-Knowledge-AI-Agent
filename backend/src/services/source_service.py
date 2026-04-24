@@ -14,17 +14,36 @@ Design decisions
 from __future__ import annotations
 
 import json
+import logging
 import uuid
 from typing import Any, cast
+from urllib.parse import quote_plus
 
 from cryptography.fernet import Fernet
+from pydantic import ValidationError
 
 from src.connectors.factory import ConnectorFactory
 from src.core.config import Settings
 from src.core.exceptions import ConflictError, NotFoundError
+from src.models.enums import SourceType
 from src.models.source import Source
 from src.repositories.source_repository import SourceRepository
-from src.schemas.source import FILE_SOURCE_TYPES, SourceCreate, SourceCreateRequest, SourceUpdate
+from src.schemas.source import (
+    FILE_SOURCE_TYPES,
+    DatabaseConnectionConfig,
+    SourceCreate,
+    SourceCreateRequest,
+    SourceUpdate,
+)
+
+logger = logging.getLogger(__name__)
+
+# SQLAlchemy async-driver mapping per SQL dialect.
+_SQL_DIALECT_DRIVERS: dict[str, str] = {
+    "postgresql": "postgresql+asyncpg",
+    "mysql": "mysql+aiomysql",
+    "mssql": "mssql+aioodbc",
+}
 
 
 class SourceService:
@@ -37,6 +56,7 @@ class SourceService:
         connector_factory: ConnectorFactory,
     ) -> None:
         self._repo = source_repo
+        self._settings = settings
         self._fernet = Fernet(settings.ENCRYPTION_KEY.encode())
         self._connector_factory = connector_factory
 
@@ -88,6 +108,12 @@ class SourceService:
     ) -> Source:
         """Create a Source from the wizard's structured request (T-004).
 
+        For file-typed sources the persisted ``source_type`` is normalised to
+        the canonical :pyattr:`SourceType.FILE_UPLOAD` enum value.  The list of
+        uploaded files (object_key + file_type + original_name) is encrypted
+        into ``config_encrypted`` so the connector can iterate through them at
+        sync time.
+
         Raises:
             ConflictError: if a source with the same name exists for this owner.
         """
@@ -98,14 +124,51 @@ class SourceService:
             )
 
         is_file = payload.source_type in FILE_SOURCE_TYPES
+        is_database = payload.source_type == "database"
         source_mode = "snapshot" if is_file else "live"
+
+        # Determine the persisted source_type and config payload.
+        persisted_source_type: str
+        config_for_encryption: dict[str, Any] | None
+        first_object_key: str | None = None
+
+        if is_file:
+            # Always persist the canonical enum value — the granular
+            # 'pdf'/'docx'/... shorthands are NOT valid SourceType members.
+            persisted_source_type = SourceType.FILE_UPLOAD.value
+
+            files_payload = self._normalise_file_refs(payload)
+            first_object_key = files_payload[0]["object_key"] if files_payload else None
+
+            config_for_encryption = {
+                "minio_bucket": self._settings.MINIO_BUCKET,
+                "files": files_payload,
+            }
+        elif is_database:
+            # Translate the typed wizard payload into the connector-shaped
+            # config that ``DatabaseConnector`` / ``MongoDBConnector`` expect.
+            persisted_source_type = SourceType.DATABASE.value
+            try:
+                typed_conn = DatabaseConnectionConfig.model_validate(
+                    payload.connection or {}
+                )
+            except ValidationError as exc:
+                # Surface the underlying field issues to the caller.
+                raise ValueError(
+                    f"Invalid database connection payload: {exc.errors()}"
+                ) from exc
+            config_for_encryption = self._build_database_config(typed_conn)
+        else:
+            persisted_source_type = payload.source_type
+            config_for_encryption = payload.connection
+
         config_encrypted: bytes | None = (
-            self._encrypt_config(payload.connection) if payload.connection else None
+            self._encrypt_config(config_for_encryption) if config_for_encryption else None
         )
 
         return await self._repo.create(
             name=payload.name,
-            source_type=payload.source_type,
+            source_type=persisted_source_type,
             source_mode=source_mode,
             retrieval_mode=payload.retrieval_mode,
             description=payload.description or None,
@@ -113,10 +176,111 @@ class SourceService:
             sync_schedule=payload.sync_schedule,
             citations_enabled=payload.citations_enabled,
             config_encrypted=config_encrypted,
-            file_storage_path=payload.object_key,
+            file_storage_path=first_object_key,
             owner_id=owner_id,
             status="pending",
         )
+
+    @staticmethod
+    def _build_database_config(typed: DatabaseConnectionConfig) -> dict[str, Any]:
+        """Translate the wizard's typed DB payload into the connector-shaped config.
+
+        Returns the dict that will be Fernet-encrypted into ``config_encrypted``
+        and later read by the connector at sync time.
+
+        Output shapes:
+          * SQL dialects (postgresql/mysql/mssql)::
+              {
+                  "db_type": <dialect>,
+                  "connection_string": "<scheme>://user:pwd@host:port/db",
+                  "query": <SELECT statement>,
+                  "ssl_mode": <"disable"|"require"|None>,
+              }
+          * MongoDB::
+              {
+                  "db_type": "mongodb",
+                  "uri": "mongodb://user:pwd@host:port",
+                  "database": <db>,
+                  "collection": <collection>,
+              }
+
+        Empty username AND password are omitted from the URL (anonymous
+        connection) instead of producing ``://:@host``.  Both username and
+        password are URL-quoted via :func:`urllib.parse.quote_plus`.
+        """
+        user = typed.username.strip() if typed.username else ""
+        pw = typed.password if typed.password else ""
+        if user or pw:
+            auth = f"{quote_plus(user)}:{quote_plus(pw)}@"
+        else:
+            auth = ""
+
+        if typed.db_type == "mongodb":
+            uri = f"mongodb://{auth}{typed.host}:{typed.port}"
+            return {
+                "db_type": "mongodb",
+                "uri": uri,
+                "database": typed.database,
+                "collection": (typed.collection or "").strip(),
+            }
+
+        # SQL dialects.
+        scheme = _SQL_DIALECT_DRIVERS.get(typed.db_type)
+        if scheme is None:  # pragma: no cover — guarded by Pydantic literal
+            raise ValueError(f"Unsupported SQL dialect: {typed.db_type!r}")
+
+        if typed.db_type == "mssql":
+            # The aioodbc driver may not be installed in this environment.
+            # We still build the URL so creation succeeds; sync will fail
+            # later with a clear error message — log a warning here to make
+            # that visible in operations dashboards.
+            logger.warning(
+                "Creating MSSQL source: ensure 'aioodbc' driver is installed "
+                "for sync to succeed."
+            )
+
+        connection_string = (
+            f"{scheme}://{auth}{typed.host}:{typed.port}/{typed.database}"
+        )
+        cfg: dict[str, Any] = {
+            "db_type": typed.db_type,
+            "connection_string": connection_string,
+            "query": (typed.query or "").strip(),
+        }
+        if typed.ssl_mode is not None:
+            cfg["ssl_mode"] = typed.ssl_mode
+        return cfg
+
+    @staticmethod
+    def _normalise_file_refs(payload: SourceCreateRequest) -> list[dict[str, Any]]:
+        """Return the list of files for a file-typed source.
+
+        Prefers ``payload.files`` (multi-file shape).  Falls back to the legacy
+        single ``object_key`` + scalar ``source_type`` pair when ``files`` is
+        absent — converting it into a single-element list.
+        """
+        if payload.files:
+            return [
+                {
+                    "object_key": ref.object_key,
+                    "original_name": ref.original_name,
+                    "file_type": ref.file_type,
+                    "size_bytes": ref.size_bytes,
+                }
+                for ref in payload.files
+            ]
+        if payload.object_key:
+            # Legacy: source_type was a per-extension shorthand.  Map "markdown"
+            # to its alias understood by the connector ("md") downstream.
+            return [
+                {
+                    "object_key": payload.object_key,
+                    "original_name": payload.object_key.rsplit("/", 1)[-1],
+                    "file_type": payload.source_type,
+                    "size_bytes": None,
+                }
+            ]
+        return []
 
     async def get_source(self, source_id: uuid.UUID) -> Source:
         """Fetch a single Source by PK.

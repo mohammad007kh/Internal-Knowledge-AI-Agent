@@ -24,7 +24,7 @@ class Settings(BaseSettings):
     MINIO_ACCESS_KEY: str
     MINIO_SECRET_KEY: str
     MINIO_BUCKET: str = "knowledge-agent"
-    MINIO_SECURE: bool = True
+    MINIO_SECURE: bool = False
     COOKIE_SECURE: bool = True
     # Langfuse
     LANGFUSE_SECRET_KEY: str = ""

@@ -2,19 +2,23 @@
 
 import { zodResolver } from '@hookform/resolvers/zod'
 import {
+  AlertCircleIcon,
   BookOpenIcon,
+  CheckCircle2Icon,
   ChevronRightIcon,
   CloudIcon,
   DatabaseIcon,
-  FileIcon,
   FileTextIcon,
   GlobeIcon,
-  TableIcon as TableColumnsIcon,
+  Loader2Icon,
+  PlusIcon,
+  RefreshCwIcon,
+  XIcon,
 } from 'lucide-react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { useState } from 'react'
-import { useForm } from 'react-hook-form'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { type UseFormReturn, useForm } from 'react-hook-form'
 import { toast } from 'sonner'
 import { z } from 'zod'
 
@@ -39,25 +43,84 @@ import {
 } from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
-import { useCreateSource, type CreateSourcePayload } from '@/hooks/use-create-source'
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
+import {
+  type CreateSourcePayload,
+  type FileTypeKey,
+  type UploadedFileRef,
+  useCreateSource,
+} from '@/hooks/use-create-source'
 import { useUploadFile } from '@/hooks/use-upload-url'
 import { cn } from '@/lib/utils'
 
 const SOURCE_TYPE_OPTIONS = [
-  { value: 'pdf', label: 'PDF', icon: FileTextIcon, category: 'File' },
-  { value: 'docx', label: 'Word', icon: FileTextIcon, category: 'File' },
-  { value: 'xlsx', label: 'Excel', icon: TableColumnsIcon, category: 'File' },
-  { value: 'csv', label: 'CSV', icon: FileIcon, category: 'File' },
-  { value: 'txt', label: 'Text', icon: FileIcon, category: 'File' },
-  { value: 'markdown', label: 'Markdown', icon: FileTextIcon, category: 'File' },
-  { value: 'postgresql', label: 'PostgreSQL', icon: DatabaseIcon, category: 'Database' },
-  { value: 'mysql', label: 'MySQL', icon: DatabaseIcon, category: 'Database' },
-  { value: 'mssql', label: 'SQL Server', icon: DatabaseIcon, category: 'Database' },
-  { value: 'mongodb', label: 'MongoDB', icon: DatabaseIcon, category: 'Database' },
+  { value: 'file_upload', label: 'Files', icon: FileTextIcon, category: 'File' },
+  { value: 'database', label: 'Database', icon: DatabaseIcon, category: 'Database' },
   { value: 'web_url', label: 'Web URL', icon: GlobeIcon, category: 'Web' },
   { value: 'confluence', label: 'Confluence', icon: BookOpenIcon, category: 'SaaS' },
   { value: 'sharepoint', label: 'SharePoint', icon: CloudIcon, category: 'SaaS' },
 ] as const
+
+const FILE_EXTENSION_MAP: Record<string, FileTypeKey> = {
+  pdf: 'pdf',
+  docx: 'docx',
+  xlsx: 'xlsx',
+  csv: 'csv',
+  txt: 'txt',
+  md: 'markdown',
+  markdown: 'markdown',
+}
+
+const ACCEPTED_FILE_EXTENSIONS = '.pdf,.docx,.xlsx,.csv,.txt,.md,.markdown'
+const MAX_PARALLEL_UPLOADS = 3
+
+const FILE_TYPE_LABELS: Record<FileTypeKey, string> = {
+  pdf: 'PDF',
+  docx: 'Word',
+  xlsx: 'Excel',
+  csv: 'CSV',
+  txt: 'Text',
+  markdown: 'Markdown',
+}
+
+const FILE_TYPE_PILL_CLASSES: Record<FileTypeKey, string> = {
+  pdf: 'bg-red-500/10 text-red-700 dark:text-red-300 border-red-500/30',
+  docx: 'bg-blue-500/10 text-blue-700 dark:text-blue-300 border-blue-500/30',
+  xlsx: 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border-emerald-500/30',
+  csv: 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border-emerald-500/30',
+  txt: 'bg-zinc-500/10 text-zinc-700 dark:text-zinc-300 border-zinc-500/30',
+  markdown: 'bg-violet-500/10 text-violet-700 dark:text-violet-300 border-violet-500/30',
+}
+
+function detectFileType(filename: string): FileTypeKey | null {
+  const idx = filename.lastIndexOf('.')
+  if (idx === -1) return null
+  const ext = filename.slice(idx + 1).toLowerCase()
+  return FILE_EXTENSION_MAP[ext] ?? null
+}
+
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} kB`
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+}
+
+type UploadStatus = 'queued' | 'uploading' | 'uploaded' | 'failed'
+
+interface UploadEntry {
+  /** Stable client-side id used as the React key. */
+  localId: string
+  file: File
+  fileType: FileTypeKey
+  status: UploadStatus
+  progress: number
+  objectKey: string | null
+  error: string | null
+}
+
+function makeLocalId(): string {
+  return `f-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
+}
 
 const CRON_PRESETS = [
   { label: 'Hourly', value: '0 * * * *' },
@@ -65,43 +128,154 @@ const CRON_PRESETS = [
   { label: 'Weekly', value: '0 2 * * 1' },
 ] as const
 
-const FILE_SOURCE_TYPES = new Set([
-  'pdf', 'docx', 'xlsx', 'csv', 'txt', 'markdown',
-])
+const FILE_SOURCE_TYPES = new Set(['file_upload'])
 
-const schema = z.object({
-  source_type: z.enum([
-    'postgresql', 'mysql', 'mssql', 'mongodb',
-    'pdf', 'docx', 'xlsx', 'csv', 'txt', 'markdown',
-    'web_url', 'confluence', 'sharepoint',
-  ]),
-  name: z.string().min(1, 'Name is required').max(200, 'Max 200 characters'),
-  description: z.string().max(500, 'Max 500 characters').optional(),
-  connection: z.string().optional(),
-  retrieval_mode: z.enum(['vector_only', 'text_to_query', 'hybrid']),
-  sync_mode: z.enum(['manual', 'scheduled', 'delta']),
-  sync_schedule: z.string().optional(),
-  citations_enabled: z.boolean(),
-})
+const DB_TYPES = ['postgresql', 'mysql', 'mssql', 'mongodb'] as const
+type DbType = (typeof DB_TYPES)[number]
+const SQL_DB_TYPES: ReadonlySet<DbType> = new Set<DbType>(['postgresql', 'mysql', 'mssql'])
+
+const DB_TYPE_LABELS: Record<DbType, string> = {
+  postgresql: 'PostgreSQL',
+  mysql: 'MySQL',
+  mssql: 'SQL Server',
+  mongodb: 'MongoDB',
+}
+
+const DB_DEFAULT_PORTS: Record<DbType, number> = {
+  postgresql: 5432,
+  mysql: 3306,
+  mssql: 1433,
+  mongodb: 27017,
+}
+
+const DB_PREVIEW_SCHEME: Record<DbType, string> = {
+  postgresql: 'postgresql',
+  mysql: 'mysql',
+  mssql: 'mssql',
+  mongodb: 'mongodb',
+}
+
+const databaseConnectionSchema = z
+  .object({
+    db_type: z.enum(DB_TYPES),
+    host: z.string().min(1, 'Host is required'),
+    port: z.coerce.number().int().min(1, 'Port must be ≥ 1').max(65535, 'Port must be ≤ 65535'),
+    database_name: z.string().min(1, 'Database name is required'),
+    username: z.string().optional(),
+    password: z.string().optional(),
+    query: z.string().optional(),
+    collection: z.string().optional(),
+    ssl_mode: z.enum(['disable', 'require']).optional(),
+  })
+  .superRefine((value, ctx) => {
+    if (value.db_type === 'mongodb') {
+      if (!value.collection || value.collection.trim() === '') {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['collection'],
+          message: 'Collection is required for MongoDB',
+        })
+      }
+      return
+    }
+    if (!value.query || value.query.trim() === '') {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['query'],
+        message: 'Query is required for SQL databases',
+      })
+    }
+  })
+
+type DatabaseConnectionValues = z.infer<typeof databaseConnectionSchema>
+
+const schema = z
+  .object({
+    source_type: z.enum(['database', 'file_upload', 'web_url', 'confluence', 'sharepoint']),
+    name: z.string().min(1, 'Name is required').max(200, 'Max 200 characters'),
+    description: z.string().max(500, 'Max 500 characters').optional(),
+    db_type: z.enum(DB_TYPES).optional(),
+    host: z.string().optional(),
+    port: z.union([z.string(), z.number()]).optional(),
+    database_name: z.string().optional(),
+    username: z.string().optional(),
+    password: z.string().optional(),
+    query: z.string().optional(),
+    collection: z.string().optional(),
+    ssl_mode: z.enum(['disable', 'require']).optional(),
+    retrieval_mode: z.enum(['vector_only', 'text_to_query', 'hybrid']),
+    sync_mode: z.enum(['manual', 'scheduled', 'delta']),
+    sync_schedule: z.string().optional(),
+    citations_enabled: z.boolean(),
+  })
+  .superRefine((values, ctx) => {
+    if (values.source_type !== 'database') return
+    const dbResult = databaseConnectionSchema.safeParse({
+      db_type: values.db_type,
+      host: values.host,
+      port: values.port,
+      database_name: values.database_name,
+      username: values.username,
+      password: values.password,
+      query: values.query,
+      collection: values.collection,
+      ssl_mode: values.ssl_mode,
+    })
+    if (!dbResult.success) {
+      for (const issue of dbResult.error.issues) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: issue.path,
+          message: issue.message,
+        })
+      }
+    }
+  })
 
 type FormValues = z.infer<typeof schema>
+
+function buildConnectionPreview(values: DatabaseConnectionValues): string {
+  const scheme = DB_PREVIEW_SCHEME[values.db_type]
+  const userPart = values.username ? `${values.username}:***@` : ''
+  return `${scheme}://${userPart}${values.host || 'host'}:${values.port || DB_DEFAULT_PORTS[values.db_type]}/${values.database_name || 'dbname'}`
+}
 
 export default function NewSourcePage() {
   const router = useRouter()
   const createSource = useCreateSource()
   const uploadFile = useUploadFile()
 
-  const [uploadProgress, setUploadProgress] = useState<number | null>(null)
-  const [objectKey, setObjectKey] = useState<string | null>(null)
-  const [uploadedFileName, setUploadedFileName] = useState<string | null>(null)
+  const [uploads, setUploads] = useState<UploadEntry[]>([])
+  const fileInputRef = useRef<HTMLInputElement | null>(null)
+
+  // Counters derived from uploads state.
+  const uploadSummary = useMemo(() => {
+    const total = uploads.length
+    const uploaded = uploads.filter((u) => u.status === 'uploaded').length
+    const failed = uploads.filter((u) => u.status === 'failed').length
+    const inFlight = uploads.filter((u) => u.status === 'uploading' || u.status === 'queued').length
+    return { total, uploaded, failed, inFlight }
+  }, [uploads])
+
+  const resetUploads = useCallback(() => {
+    setUploads([])
+  }, [])
 
   const form = useForm<FormValues>({
     resolver: zodResolver(schema),
     defaultValues: {
-      source_type: 'pdf',
+      source_type: 'file_upload',
       name: '',
       description: '',
-      connection: '',
+      db_type: 'postgresql',
+      host: '',
+      port: DB_DEFAULT_PORTS.postgresql,
+      database_name: '',
+      username: '',
+      password: '',
+      query: '',
+      collection: '',
+      ssl_mode: 'disable',
       retrieval_mode: 'hybrid',
       sync_mode: 'manual',
       sync_schedule: '',
@@ -111,56 +285,201 @@ export default function NewSourcePage() {
 
   const sourceType = form.watch('source_type')
   const syncMode = form.watch('sync_mode')
+  const dbType = form.watch('db_type') ?? 'postgresql'
   const isFileType = FILE_SOURCE_TYPES.has(sourceType)
+  const isDatabaseType = sourceType === 'database'
+  const isMongo = isDatabaseType && dbType === 'mongodb'
+  const isSqlDb = isDatabaseType && SQL_DB_TYPES.has(dbType)
 
-  async function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0]
-    if (!file) return
+  // Track whether the user has manually edited the port — only auto-fill when untouched.
+  const portTouchedRef = useRef(false)
 
-    setUploadProgress(0)
-    setObjectKey(null)
+  useEffect(() => {
+    if (!isDatabaseType) return
+    if (portTouchedRef.current) return
+    form.setValue('port', DB_DEFAULT_PORTS[dbType], { shouldDirty: false, shouldValidate: false })
+  }, [dbType, isDatabaseType, form])
 
-    try {
-      const result = await uploadFile.mutateAsync({
-        file,
-        onProgress: setUploadProgress,
-      })
-      setObjectKey(result.object_key)
-      setUploadedFileName(file.name)
-      setUploadProgress(100)
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Upload failed'
-      toast.error(msg)
-      setUploadProgress(null)
-    }
+  const updateEntry = useCallback((localId: string, patch: Partial<UploadEntry>) => {
+    setUploads((prev) =>
+      prev.map((entry) => (entry.localId === localId ? { ...entry, ...patch } : entry))
+    )
+  }, [])
+
+  const runUpload = useCallback(
+    async (entry: UploadEntry) => {
+      updateEntry(entry.localId, { status: 'uploading', progress: 0, error: null })
+      try {
+        const result = await uploadFile.mutateAsync({
+          file: entry.file,
+          onProgress: (percent) => {
+            updateEntry(entry.localId, { progress: percent })
+          },
+        })
+        updateEntry(entry.localId, {
+          status: 'uploaded',
+          progress: 100,
+          objectKey: result.object_key,
+          error: null,
+        })
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : 'Upload failed'
+        updateEntry(entry.localId, {
+          status: 'failed',
+          error: msg,
+        })
+      }
+    },
+    [uploadFile, updateEntry]
+  )
+
+  /**
+   * Concurrency-limited uploader: never run more than MAX_PARALLEL_UPLOADS at
+   * a time.  Newly added entries are drained against the limit; the rest stay
+   * 'queued' until a slot frees up.
+   */
+  const drainQueue = useCallback(
+    async (newlyAdded: UploadEntry[]) => {
+      let cursor = 0
+      const inflight = new Set<Promise<void>>()
+      const next = (): UploadEntry | undefined => newlyAdded[cursor++]
+
+      const launch = (entry: UploadEntry): Promise<void> => {
+        const task = runUpload(entry).finally(() => {
+          inflight.delete(task)
+        })
+        inflight.add(task)
+        return task
+      }
+
+      const initial = Math.min(MAX_PARALLEL_UPLOADS, newlyAdded.length)
+      for (let i = 0; i < initial; i += 1) {
+        const entry = next()
+        if (entry) launch(entry)
+      }
+
+      while (inflight.size > 0) {
+        await Promise.race(inflight)
+        const entry = next()
+        if (entry) launch(entry)
+      }
+    },
+    [runUpload]
+  )
+
+  const enqueueFiles = useCallback(
+    (files: FileList | File[]) => {
+      const newEntries: UploadEntry[] = []
+      const rejected: string[] = []
+
+      for (const file of Array.from(files)) {
+        const fileType = detectFileType(file.name)
+        if (!fileType) {
+          rejected.push(file.name)
+          continue
+        }
+        newEntries.push({
+          localId: makeLocalId(),
+          file,
+          fileType,
+          status: 'queued',
+          progress: 0,
+          objectKey: null,
+          error: null,
+        })
+      }
+
+      if (rejected.length > 0) {
+        toast.error(
+          `Unsupported file type: ${rejected.join(', ')}. Allowed: PDF, Word, Excel, CSV, Text, Markdown.`
+        )
+      }
+      if (newEntries.length === 0) return
+
+      setUploads((prev) => [...prev, ...newEntries])
+      void drainQueue(newEntries)
+    },
+    [drainQueue]
+  )
+
+  function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const list = e.target.files
+    if (!list || list.length === 0) return
+    enqueueFiles(list)
+    if (fileInputRef.current) fileInputRef.current.value = ''
+  }
+
+  function handleRetry(localId: string) {
+    const entry = uploads.find((u) => u.localId === localId)
+    if (!entry) return
+    void runUpload({ ...entry, status: 'queued', progress: 0, error: null })
+  }
+
+  function handleRemove(localId: string) {
+    setUploads((prev) => prev.filter((u) => u.localId !== localId))
+  }
+
+  function handleAddMore() {
+    fileInputRef.current?.click()
   }
 
   async function onSubmit(values: FormValues) {
-    if (isFileType && !objectKey) {
-      toast.error('Please upload a file before submitting.')
-      return
-    }
-
-    let connection: Record<string, unknown> | null = null
-    if (!isFileType && values.connection?.trim()) {
-      try {
-        connection = JSON.parse(values.connection) as Record<string, unknown>
-      } catch {
-        form.setError('connection', { message: 'Invalid JSON — check the format.' })
+    if (isFileType) {
+      if (uploadSummary.uploaded === 0) {
+        toast.error('Upload at least one file before creating the source.')
+        return
+      }
+      if (uploadSummary.inFlight > 0) {
+        toast.error('Wait for in-progress uploads to finish.')
         return
       }
     }
 
+    let connection: Record<string, unknown> | null = null
+    if (values.source_type === 'database') {
+      const portValue =
+        typeof values.port === 'number' ? values.port : Number(values.port ?? Number.NaN)
+      const dbTypeValue = values.db_type ?? 'postgresql'
+      const base: Record<string, unknown> = {
+        db_type: dbTypeValue,
+        host: values.host ?? '',
+        port: Number.isFinite(portValue) ? portValue : DB_DEFAULT_PORTS[dbTypeValue],
+        database: values.database_name ?? '',
+        username: values.username ?? '',
+        password: values.password ?? '',
+      }
+      if (dbTypeValue === 'mongodb') {
+        base.collection = values.collection ?? ''
+      } else {
+        base.query = values.query ?? ''
+        if (values.ssl_mode) {
+          base.ssl_mode = values.ssl_mode
+        }
+      }
+      connection = base
+    }
+
+    let files: UploadedFileRef[] | null = null
+    if (isFileType) {
+      files = uploads
+        .filter((u) => u.status === 'uploaded' && u.objectKey)
+        .map((u) => ({
+          object_key: u.objectKey as string,
+          original_name: u.file.name,
+          file_type: u.fileType,
+          size_bytes: u.file.size,
+        }))
+    }
+
     const payload: CreateSourcePayload = {
       name: values.name,
-      source_type: values.source_type as CreateSourcePayload['source_type'],
+      source_type: values.source_type,
       description: values.description ?? '',
       connection,
-      object_key: isFileType ? objectKey : null,
+      files,
       retrieval_mode: values.retrieval_mode,
       sync_mode: values.sync_mode,
-      sync_schedule:
-        values.sync_mode === 'scheduled' ? (values.sync_schedule ?? null) : null,
+      sync_schedule: values.sync_mode === 'scheduled' ? (values.sync_schedule ?? null) : null,
       citations_enabled: values.citations_enabled,
     }
 
@@ -224,9 +543,15 @@ export default function NewSourcePage() {
                               aria-checked={checked}
                               onClick={() => {
                                 field.onChange(opt.value)
-                                setObjectKey(null)
-                                setUploadedFileName(null)
-                                setUploadProgress(null)
+                                resetUploads()
+                                if (opt.value === 'database') {
+                                  portTouchedRef.current = false
+                                  const currentDbType = form.getValues('db_type') ?? 'postgresql'
+                                  form.setValue('port', DB_DEFAULT_PORTS[currentDbType], {
+                                    shouldDirty: false,
+                                    shouldValidate: false,
+                                  })
+                                }
                               }}
                               className={cn(
                                 'flex flex-col items-center gap-1.5 rounded-lg border p-3 text-xs transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
@@ -284,65 +609,32 @@ export default function NewSourcePage() {
 
           <Card>
             <CardHeader>
-              <CardTitle className="text-base">
-                {isFileType ? 'File upload' : 'Connection'}
-              </CardTitle>
+              <CardTitle className="text-base">{isFileType ? 'Files' : 'Connection'}</CardTitle>
             </CardHeader>
-            <CardContent>
+            <CardContent className="space-y-4">
               {isFileType ? (
-                <div className="space-y-2">
-                  <label className="block text-sm font-medium" htmlFor="file-upload">
-                    Upload file
-                  </label>
-                  <input
-                    id="file-upload"
-                    type="file"
-                    accept=".pdf,.docx,.xlsx,.csv,.txt,.md"
-                    onChange={handleFileChange}
-                    disabled={uploadFile.isPending}
-                    className="block w-full text-sm text-muted-foreground file:mr-4 file:rounded-md file:border-0 file:bg-primary file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-primary-foreground hover:file:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50"
-                    aria-label="Upload file"
-                  />
-                  {uploadProgress !== null && uploadProgress < 100 && (
-                    <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted">
-                      <div
-                        className="h-full bg-primary transition-all"
-                        style={{ width: `${uploadProgress}%` }}
-                        role="progressbar"
-                        aria-valuenow={uploadProgress}
-                        aria-valuemin={0}
-                        aria-valuemax={100}
-                      />
-                    </div>
-                  )}
-                  {uploadedFileName && (
-                    <p className="text-xs text-muted-foreground">
-                      Uploaded: <span className="font-medium">{uploadedFileName}</span>
-                    </p>
-                  )}
-                </div>
-              ) : (
-                <FormField
-                  control={form.control}
-                  name="connection"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Connection config (JSON)</FormLabel>
-                      <FormControl>
-                        <Textarea
-                          className="font-mono text-xs"
-                          placeholder={'{\n  "host": "localhost",\n  "port": 5432\n}'}
-                          rows={5}
-                          {...field}
-                        />
-                      </FormControl>
-                      <FormDescription>
-                        Paste the connection details as valid JSON.
-                      </FormDescription>
-                      <FormMessage />
-                    </FormItem>
-                  )}
+                <FilesPickerSection
+                  uploads={uploads}
+                  summary={uploadSummary}
+                  fileInputRef={fileInputRef}
+                  onPick={handleFileChange}
+                  onAddMore={handleAddMore}
+                  onRetry={handleRetry}
+                  onRemove={handleRemove}
                 />
+              ) : isDatabaseType ? (
+                <DatabaseConnectionFields
+                  form={form}
+                  isMongo={isMongo}
+                  isSqlDb={isSqlDb}
+                  onPortTouched={() => {
+                    portTouchedRef.current = true
+                  }}
+                />
+              ) : (
+                <p className="text-sm text-muted-foreground">
+                  No additional configuration is required for this source type yet.
+                </p>
               )}
             </CardContent>
           </Card>
@@ -461,15 +753,14 @@ export default function NewSourcePage() {
           <div className="flex gap-3">
             <Button
               type="submit"
-              disabled={createSource.isPending || uploadFile.isPending}
+              disabled={
+                createSource.isPending ||
+                (isFileType && (uploadSummary.inFlight > 0 || uploadSummary.uploaded === 0))
+              }
             >
               {createSource.isPending ? 'Creating…' : 'Create source'}
             </Button>
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => router.push('/admin/sources')}
-            >
+            <Button type="button" variant="outline" onClick={() => router.push('/admin/sources')}>
               Cancel
             </Button>
           </div>
@@ -477,4 +768,449 @@ export default function NewSourcePage() {
       </Form>
     </div>
   )
+}
+
+interface DatabaseConnectionFieldsProps {
+  form: UseFormReturn<FormValues>
+  isMongo: boolean
+  isSqlDb: boolean
+  onPortTouched: () => void
+}
+
+function DatabaseConnectionFields({
+  form,
+  isMongo,
+  isSqlDb,
+  onPortTouched,
+}: DatabaseConnectionFieldsProps) {
+  const dbType = (form.watch('db_type') ?? 'postgresql') as DbType
+  const host = form.watch('host') ?? ''
+  const port = form.watch('port')
+  const databaseName = form.watch('database_name') ?? ''
+  const username = form.watch('username') ?? ''
+
+  const previewPort =
+    typeof port === 'number'
+      ? port
+      : Number.isFinite(Number(port))
+        ? Number(port)
+        : DB_DEFAULT_PORTS[dbType]
+
+  const preview = buildConnectionPreview({
+    db_type: dbType,
+    host,
+    port: previewPort,
+    database_name: databaseName,
+    username,
+  })
+
+  return (
+    <div className="space-y-4">
+      <FormField
+        control={form.control}
+        name="db_type"
+        render={({ field }) => (
+          <FormItem>
+            <FormLabel>Database type</FormLabel>
+            <Select
+              onValueChange={(value) => {
+                field.onChange(value)
+                onPortTouched()
+                // Reset the touched flag from the parent so default port can re-apply.
+                // The parent's effect re-runs on db_type change and overwrites port
+                // unless the user has manually edited it.
+              }}
+              value={field.value ?? 'postgresql'}
+            >
+              <FormControl>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+              </FormControl>
+              <SelectContent>
+                {DB_TYPES.map((t) => (
+                  <SelectItem key={t} value={t}>
+                    {DB_TYPE_LABELS[t]}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <FormMessage />
+          </FormItem>
+        )}
+      />
+
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+        <FormField
+          control={form.control}
+          name="host"
+          render={({ field }) => (
+            <FormItem className="sm:col-span-2">
+              <FormLabel>Host</FormLabel>
+              <FormControl>
+                <Input placeholder="db.internal.example.com" autoComplete="off" {...field} />
+              </FormControl>
+              <FormMessage />
+            </FormItem>
+          )}
+        />
+        <FormField
+          control={form.control}
+          name="port"
+          render={({ field }) => (
+            <FormItem>
+              <FormLabel>Port</FormLabel>
+              <FormControl>
+                <Input
+                  type="number"
+                  inputMode="numeric"
+                  min={1}
+                  max={65535}
+                  value={field.value ?? ''}
+                  onChange={(e) => {
+                    onPortTouched()
+                    const raw = e.target.value
+                    field.onChange(raw === '' ? '' : Number(raw))
+                  }}
+                  onBlur={field.onBlur}
+                  name={field.name}
+                  ref={field.ref}
+                />
+              </FormControl>
+              <FormDescription className="text-xs">
+                Default: {DB_DEFAULT_PORTS[dbType]}
+              </FormDescription>
+              <FormMessage />
+            </FormItem>
+          )}
+        />
+      </div>
+
+      <FormField
+        control={form.control}
+        name="database_name"
+        render={({ field }) => (
+          <FormItem>
+            <FormLabel>Database name</FormLabel>
+            <FormControl>
+              <Input placeholder="analytics" autoComplete="off" {...field} />
+            </FormControl>
+            <FormMessage />
+          </FormItem>
+        )}
+      />
+
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+        <FormField
+          control={form.control}
+          name="username"
+          render={({ field }) => (
+            <FormItem>
+              <FormLabel>Username (optional)</FormLabel>
+              <FormControl>
+                <Input placeholder="readonly_user" autoComplete="off" {...field} />
+              </FormControl>
+              <FormMessage />
+            </FormItem>
+          )}
+        />
+        <FormField
+          control={form.control}
+          name="password"
+          render={({ field }) => (
+            <FormItem>
+              <FormLabel>Password (optional)</FormLabel>
+              <FormControl>
+                <Input
+                  type="password"
+                  placeholder="••••••••"
+                  autoComplete="new-password"
+                  {...field}
+                />
+              </FormControl>
+              <FormMessage />
+            </FormItem>
+          )}
+        />
+      </div>
+
+      {isSqlDb && (
+        <FormField
+          control={form.control}
+          name="ssl_mode"
+          render={({ field }) => (
+            <FormItem>
+              <FormLabel>SSL mode</FormLabel>
+              <Select onValueChange={field.onChange} value={field.value ?? 'disable'}>
+                <FormControl>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                </FormControl>
+                <SelectContent>
+                  <SelectItem value="disable">Disable</SelectItem>
+                  <SelectItem value="require">Require</SelectItem>
+                </SelectContent>
+              </Select>
+              <FormMessage />
+            </FormItem>
+          )}
+        />
+      )}
+
+      {isSqlDb && (
+        <FormField
+          control={form.control}
+          name="query"
+          render={({ field }) => (
+            <FormItem>
+              <FormLabel>Query</FormLabel>
+              <FormControl>
+                <Textarea
+                  className="font-mono text-xs"
+                  rows={4}
+                  placeholder="SELECT id, title, body, updated_at FROM articles"
+                  {...field}
+                />
+              </FormControl>
+              <FormDescription>
+                SELECT statement that returns the rows to index. The first column should be a stable
+                id.
+              </FormDescription>
+              <FormMessage />
+            </FormItem>
+          )}
+        />
+      )}
+
+      {isMongo && (
+        <FormField
+          control={form.control}
+          name="collection"
+          render={({ field }) => (
+            <FormItem>
+              <FormLabel>Collection</FormLabel>
+              <FormControl>
+                <Input placeholder="articles" autoComplete="off" {...field} />
+              </FormControl>
+              <FormDescription>MongoDB collection to read documents from.</FormDescription>
+              <FormMessage />
+            </FormItem>
+          )}
+        />
+      )}
+
+      <div className="rounded-md border bg-muted/30 p-3">
+        <div className="text-xs font-medium text-muted-foreground">Connection preview</div>
+        <code className="mt-1 block break-all font-mono text-xs">{preview}</code>
+      </div>
+
+      <TooltipProvider>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <span className="inline-flex">
+              <Button type="button" variant="outline" size="sm" disabled>
+                Test connection
+              </Button>
+            </span>
+          </TooltipTrigger>
+          <TooltipContent>Coming soon</TooltipContent>
+        </Tooltip>
+      </TooltipProvider>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Files picker — multi-file upload UI for the consolidated "Files" source.
+// ---------------------------------------------------------------------------
+
+interface UploadSummaryShape {
+  total: number
+  uploaded: number
+  failed: number
+  inFlight: number
+}
+
+interface FilesPickerSectionProps {
+  uploads: UploadEntry[]
+  summary: UploadSummaryShape
+  fileInputRef: React.MutableRefObject<HTMLInputElement | null>
+  onPick: (e: React.ChangeEvent<HTMLInputElement>) => void
+  onAddMore: () => void
+  onRetry: (localId: string) => void
+  onRemove: (localId: string) => void
+}
+
+function FilesPickerSection({
+  uploads,
+  summary,
+  fileInputRef,
+  onPick,
+  onAddMore,
+  onRetry,
+  onRemove,
+}: FilesPickerSectionProps) {
+  return (
+    <div className="space-y-3">
+      {uploads.length === 0 ? (
+        <div className="space-y-2">
+          <label className="block text-sm font-medium" htmlFor="file-upload">
+            Upload files
+          </label>
+          <input
+            ref={fileInputRef}
+            id="file-upload"
+            type="file"
+            multiple
+            accept={ACCEPTED_FILE_EXTENSIONS}
+            onChange={onPick}
+            className="block w-full text-sm text-muted-foreground file:mr-4 file:rounded-md file:border-0 file:bg-primary file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-primary-foreground hover:file:bg-primary/90"
+            aria-label="Upload files"
+          />
+          <p className="text-xs text-muted-foreground">
+            Select one or more files. Allowed: PDF, Word, Excel, CSV, Text, Markdown.
+          </p>
+        </div>
+      ) : (
+        <>
+          <input
+            ref={fileInputRef}
+            type="file"
+            multiple
+            accept={ACCEPTED_FILE_EXTENSIONS}
+            onChange={onPick}
+            className="sr-only"
+            aria-label="Add more files"
+          />
+          <UploadSummary summary={summary} />
+          <ul className="space-y-2" aria-label="Selected files">
+            {uploads.map((entry) => (
+              <UploadRow key={entry.localId} entry={entry} onRetry={onRetry} onRemove={onRemove} />
+            ))}
+          </ul>
+          <Button type="button" variant="outline" size="sm" onClick={onAddMore} className="gap-1.5">
+            <PlusIcon className="h-4 w-4" aria-hidden />
+            Add more files
+          </Button>
+        </>
+      )}
+    </div>
+  )
+}
+
+function UploadSummary({ summary }: { summary: UploadSummaryShape }) {
+  if (summary.total === 0) return null
+  const head = `${summary.total} ${summary.total === 1 ? 'file' : 'files'} selected`
+  const tail: string[] = []
+  if (summary.uploaded > 0) tail.push(`${summary.uploaded} uploaded`)
+  if (summary.inFlight > 0) tail.push(`${summary.inFlight} in progress`)
+  if (summary.failed > 0) tail.push(`${summary.failed} failed`)
+  return (
+    <div className="rounded-md bg-muted/50 px-3 py-2 text-xs text-muted-foreground">
+      {head}
+      {tail.length > 0 ? ` (${tail.join(', ')})` : ''}
+    </div>
+  )
+}
+
+interface UploadRowProps {
+  entry: UploadEntry
+  onRetry: (localId: string) => void
+  onRemove: (localId: string) => void
+}
+
+function UploadRow({ entry, onRetry, onRemove }: UploadRowProps) {
+  return (
+    <li
+      className={cn(
+        'flex items-start gap-3 rounded-md border p-3',
+        entry.status === 'failed'
+          ? 'border-destructive/40 bg-destructive/5'
+          : 'border-border bg-background'
+      )}
+    >
+      <div className="mt-0.5 shrink-0">
+        <UploadStatusIcon status={entry.status} />
+      </div>
+      <div className="min-w-0 flex-1 space-y-1">
+        <div className="flex items-center gap-2">
+          <span className="truncate text-sm font-medium" title={entry.file.name}>
+            {entry.file.name}
+          </span>
+          <span
+            className={cn(
+              'rounded-full border px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide',
+              FILE_TYPE_PILL_CLASSES[entry.fileType]
+            )}
+          >
+            {FILE_TYPE_LABELS[entry.fileType]}
+          </span>
+        </div>
+        <div className="flex items-center gap-2 text-xs text-muted-foreground">
+          <span>{formatFileSize(entry.file.size)}</span>
+          <span aria-hidden>·</span>
+          <UploadStatusLabel entry={entry} />
+        </div>
+        {entry.status === 'uploading' && (
+          <div className="h-1 w-full overflow-hidden rounded-full bg-muted">
+            <div
+              className="h-full bg-primary transition-all"
+              style={{ width: `${entry.progress}%` }}
+              role="progressbar"
+              tabIndex={-1}
+              aria-valuenow={entry.progress}
+              aria-valuemin={0}
+              aria-valuemax={100}
+            />
+          </div>
+        )}
+        {entry.status === 'failed' && entry.error && (
+          <p className="text-xs text-destructive">{entry.error}</p>
+        )}
+      </div>
+      <div className="flex shrink-0 items-center gap-1">
+        {entry.status === 'failed' && (
+          <Button
+            type="button"
+            size="sm"
+            variant="ghost"
+            className="gap-1 text-xs"
+            onClick={() => onRetry(entry.localId)}
+          >
+            <RefreshCwIcon className="h-3.5 w-3.5" aria-hidden />
+            Retry
+          </Button>
+        )}
+        <Button
+          type="button"
+          size="icon"
+          variant="ghost"
+          aria-label={`Remove ${entry.file.name}`}
+          onClick={() => onRemove(entry.localId)}
+        >
+          <XIcon className="h-4 w-4" aria-hidden />
+        </Button>
+      </div>
+    </li>
+  )
+}
+
+function UploadStatusIcon({ status }: { status: UploadStatus }) {
+  if (status === 'uploaded') {
+    return <CheckCircle2Icon className="h-4 w-4 text-emerald-600" aria-hidden />
+  }
+  if (status === 'failed') {
+    return <AlertCircleIcon className="h-4 w-4 text-destructive" aria-hidden />
+  }
+  return <Loader2Icon className="h-4 w-4 animate-spin text-muted-foreground" aria-hidden />
+}
+
+function UploadStatusLabel({ entry }: { entry: UploadEntry }) {
+  if (entry.status === 'queued') return <span>Queued</span>
+  if (entry.status === 'uploading') return <span>Uploading {entry.progress}%</span>
+  if (entry.status === 'uploaded') {
+    return <span className="text-emerald-700 dark:text-emerald-400">Uploaded</span>
+  }
+  return <span className="text-destructive">Failed</span>
 }

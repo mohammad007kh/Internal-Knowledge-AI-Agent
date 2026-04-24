@@ -39,9 +39,7 @@ async function requestUploadUrl(body: UploadUrlRequest): Promise<UploadUrlRespon
   return data
 }
 
-const ALLOWED_UPLOAD_ORIGINS = (
-  process.env.NEXT_PUBLIC_MINIO_ENDPOINT ?? 'http://localhost:9000'
-)
+const ALLOWED_UPLOAD_ORIGINS = (process.env.NEXT_PUBLIC_MINIO_ENDPOINT ?? 'http://localhost:9000')
   .split(',')
   .map((s) => s.trim())
 

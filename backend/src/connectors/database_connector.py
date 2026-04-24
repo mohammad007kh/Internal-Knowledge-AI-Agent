@@ -19,6 +19,65 @@ logger = logging.getLogger(__name__)
 
 @register(SourceType.DATABASE)
 class DatabaseConnector(BaseConnector):
+    """Top-level router for the consolidated ``database`` source type.
+
+    The single ``SourceType.DATABASE`` enum value covers four dialects:
+    PostgreSQL / MySQL / SQL Server (all SQL) and MongoDB (NoSQL).  This
+    router class inspects ``config["db_type"]`` and delegates the entire
+    BaseConnector contract (connect / extract / disconnect / test_connection)
+    to the appropriate concrete implementation:
+
+      * ``"postgresql" | "mysql" | "mssql"`` → :class:`SqlDatabaseConnector`
+        — SQLAlchemy async engine + paginated SELECT.
+      * ``"mongodb"`` → :class:`~src.connectors.mongodb_connector.MongoDBConnector`
+        — Motor client + collection iteration.
+
+    Decision rationale: the registry keys connectors by :class:`SourceType`
+    only.  Adding a sub-discriminator would require registry surgery; routing
+    inside the registered class keeps the registry simple and lets MongoDB
+    stay fully decoupled (no separate registration entry).
+
+    Expected *config* keys (pre-decrypted by SourceService):
+        db_type (str, required) — "postgresql" | "mysql" | "mssql" | "mongodb"
+        plus the dialect-specific keys consumed by the delegate (see each
+        delegate's docstring).
+    """
+
+    def __init__(self, config: dict[str, Any]) -> None:
+        super().__init__(config)
+        db_type = config.get("db_type")
+        if db_type == "mongodb":
+            # Local import — avoids importing motor at module load when the
+            # mongo driver is not installed in this environment.
+            from src.connectors.mongodb_connector import (  # noqa: PLC0415
+                MongoDBConnector,
+            )
+
+            self._delegate: BaseConnector = MongoDBConnector(config)
+        elif db_type in {"postgresql", "mysql", "mssql"}:
+            self._delegate = SqlDatabaseConnector(config)
+        elif db_type is None and "connection_string" in config:
+            # Legacy config (pre-consolidation) — assume SQL dialect.
+            self._delegate = SqlDatabaseConnector(config)
+        else:
+            raise ValueError(
+                f"Unsupported db_type for database connector: {db_type!r}"
+            )
+
+    async def connect(self) -> None:
+        await self._delegate.connect()
+
+    async def disconnect(self) -> None:
+        await self._delegate.disconnect()
+
+    def extract_documents(self) -> AsyncIterator[Document]:  # type: ignore[override]
+        return self._delegate.extract_documents()
+
+    async def test_connection(self) -> bool:
+        return await self._delegate.test_connection()
+
+
+class SqlDatabaseConnector(BaseConnector):
     """
     Connector for arbitrary SQL databases accessible via an asyncpg-compatible
     connection string.

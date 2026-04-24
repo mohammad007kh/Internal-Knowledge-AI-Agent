@@ -4,32 +4,46 @@ import { apiClient, parseErrorResponse } from '@/lib/api-client'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 
 /**
- * Full source type set for T-006 wizard (superset of the legacy 4-type dialog).
+ * Wizard-side source type union.
+ *
+ * Consolidations:
+ *   - Files: pdf/docx/xlsx/csv/txt/markdown → ``file_upload`` (single Files
+ *     card with multi-file upload).
+ *   - Databases: postgresql/mysql/mssql/mongodb → ``database`` (single
+ *     Database card; the specific dialect lives in the connection payload
+ *     as ``db_type``).
+ *
  * See: POST /api/v1/sources
  */
-export type WizardSourceType =
-  | 'postgresql'
-  | 'mysql'
-  | 'mssql'
-  | 'mongodb'
-  | 'pdf'
-  | 'docx'
-  | 'xlsx'
-  | 'csv'
-  | 'txt'
-  | 'markdown'
-  | 'web_url'
-  | 'confluence'
-  | 'sharepoint'
+export type WizardSourceType = 'database' | 'file_upload' | 'web_url' | 'confluence' | 'sharepoint'
+
+export type FileTypeKey = 'pdf' | 'docx' | 'xlsx' | 'csv' | 'txt' | 'markdown'
 
 export type SyncMode = 'manual' | 'scheduled' | 'delta'
 export type RetrievalMode = 'vector_only' | 'text_to_query' | 'hybrid'
+
+/**
+ * One uploaded file inside a consolidated ``file_upload`` source.
+ *
+ * The shape mirrors the backend ``FileRef`` schema in
+ * ``backend/src/schemas/source.py``.
+ */
+export interface UploadedFileRef {
+  object_key: string
+  original_name: string
+  file_type: FileTypeKey
+  size_bytes: number | null
+}
 
 export interface CreateSourcePayload {
   name: string
   source_type: WizardSourceType
   connection: Record<string, unknown> | null
-  object_key: string | null
+  /**
+   * Multi-file payload for ``source_type === 'file_upload'``.  Empty/null
+   * for non-file source types.
+   */
+  files: UploadedFileRef[] | null
   description: string
   sync_mode: SyncMode
   sync_schedule: string | null
@@ -63,8 +77,8 @@ async function createSource(payload: CreateSourcePayload): Promise<CreatedSource
 }
 
 /**
- * Mutation hook for T-006 wizard. Invalidates ['sources'] on success so the
- * sources list page refreshes automatically on navigation.
+ * Mutation hook for the source wizard. Invalidates ['sources'] on success so
+ * the sources list page refreshes automatically on navigation.
  */
 export function useCreateSource() {
   const queryClient = useQueryClient()

@@ -1,6 +1,7 @@
 """MinIO storage service — raw object upload/download (T-046)."""
 from __future__ import annotations
 
+import asyncio
 import io
 import logging
 from datetime import timedelta
@@ -32,6 +33,29 @@ class StorageService:
             secure=settings.MINIO_SECURE,
         )
         self._bucket = settings.MINIO_BUCKET
+        self._bucket_ensured: bool = False
+
+    # ------------------------------------------------------------------ #
+    # Bucket bootstrap
+    # ------------------------------------------------------------------ #
+
+    async def _ensure_bucket(self) -> None:
+        """Ensure the configured bucket exists; create it if missing.
+
+        Result is cached on the instance so subsequent calls are no-ops.
+        Runs the synchronous MinIO calls in a worker thread to avoid
+        blocking the event loop.
+        """
+        if self._bucket_ensured:
+            return
+
+        def _check_and_create() -> None:
+            if not self._client.bucket_exists(self._bucket):
+                self._client.make_bucket(self._bucket)
+                logger.info("StorageService: created bucket %s", self._bucket)
+
+        await asyncio.to_thread(_check_and_create)
+        self._bucket_ensured = True
 
     # ------------------------------------------------------------------ #
     # Public helpers
@@ -49,14 +73,16 @@ class StorageService:
         Returns the object key on success.
         Raises on MinIO error (caller decides how to handle).
         """
-        # minio-py is synchronous — run in the calling coroutine (blocking).
-        # A future task may move this to run_in_executor; sufficient for now.
-        self._client.put_object(
-            bucket_name=self._bucket,
-            object_name=object_key,
-            data=io.BytesIO(data),
-            length=len(data),
-            content_type=content_type,
+        # minio-py is synchronous — offload to a worker thread so the
+        # event loop is not blocked on the HTTP round-trip.
+        await self._ensure_bucket()
+        await asyncio.to_thread(
+            self._client.put_object,
+            self._bucket,
+            object_key,
+            io.BytesIO(data),
+            len(data),
+            content_type,
         )
         logger.info("StorageService: uploaded %d bytes to %s", len(data), object_key)
         return object_key
@@ -76,12 +102,13 @@ class StorageService:
             Bucket name.  Falls back to the instance default when *None*.
         """
         bucket_name = bucket if bucket is not None else self._bucket
-        response: Any = self._client.get_object(
-            bucket_name=bucket_name,
-            object_name=object_key,
+        response: Any = await asyncio.to_thread(
+            self._client.get_object,
+            bucket_name,
+            object_key,
         )
         try:
-            return response.read()  # type: ignore[no-any-return]
+            return await asyncio.to_thread(response.read)  # type: ignore[no-any-return]
         finally:
             response.close()
             response.release_conn()
@@ -108,10 +135,18 @@ class StorageService:
         if expires_minutes < 1:
             raise ValueError("Presigned URL TTL must be at least 1 minute")
         del content_type  # noqa: F841 - accepted for caller symmetry
-        url: str = self._client.presigned_put_object(
-            bucket_name=self._bucket,
-            object_name=object_key,
-            expires=timedelta(minutes=expires_minutes),
+        # Make sure the bucket exists before issuing a presigned URL —
+        # otherwise the browser PUT would 404 against MinIO.  The check is
+        # cheap (single HEAD against MinIO) and runs in a worker thread.
+        await self._ensure_bucket()
+        # ``presigned_put_object`` performs a synchronous HTTP round-trip
+        # internally (region lookup); offload to a worker thread to keep
+        # the event loop free.
+        url: str = await asyncio.to_thread(
+            self._client.presigned_put_object,
+            self._bucket,
+            object_key,
+            timedelta(minutes=expires_minutes),
         )
         # Rewrite the internal MinIO host (e.g. `minio:9000` inside Docker)
         # with the browser-reachable public host (e.g. `localhost:9000`) so
@@ -142,9 +177,10 @@ class StorageService:
         """
         bucket_name = bucket if bucket is not None else self._bucket
         try:
-            self._client.stat_object(
-                bucket_name=bucket_name,
-                object_name=object_key,
+            await asyncio.to_thread(
+                self._client.stat_object,
+                bucket_name,
+                object_key,
             )
             return True
         except Exception:  # noqa: BLE001

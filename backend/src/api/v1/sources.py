@@ -169,14 +169,17 @@ async def create_source(
     """
     is_file = body.source_type in FILE_SOURCE_TYPES
 
-    if is_file and not body.object_key:
+    if is_file and not body.files and not body.object_key:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail={
                 "type": "https://httpstatuses.com/400",
                 "title": "Bad Request",
                 "status": 400,
-                "detail": "object_key required for file source types.",
+                "detail": (
+                    "Provide either 'files' (preferred) or 'object_key' "
+                    "for file source types."
+                ),
             },
         )
     if not is_file and not body.connection:
