@@ -75,6 +75,6 @@ test('reactivate button calls PATCH is_active=true', async () => {
   await screen.findByText('user@example.com')
   await userEvent.click(screen.getByRole('button', { name: /reactivate user@example.com/i }))
   await waitFor(() => {
-    expect(apiClient.patch).toHaveBeenCalledWith('/admin/users/u2', { is_active: true })
+    expect(apiClient.patch).toHaveBeenCalledWith('/users/u2', { is_active: true })
   })
 })

@@ -9,6 +9,7 @@ The ``config`` / ``config_encrypted`` field is never returned in any response.
 
 from __future__ import annotations
 
+import logging
 import uuid
 from datetime import datetime, timezone
 from typing import Any
@@ -38,6 +39,8 @@ from src.schemas.source import (
 )
 from src.schemas.sync_job import SyncJobListResponse, SyncJobResponse
 from src.services.source_service import SourceService
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -322,11 +325,27 @@ async def create_upload_url(
     safe_name = body.filename.replace("/", "_").replace("\\", "_")
     object_key = f"uploads/{now.strftime('%Y/%m')}/{uuid4()}-{safe_name}"
 
-    upload_url = await storage.generate_presigned_put_url(
-        object_key=object_key,
-        content_type=body.content_type,
-        expires_minutes=15,
-    )
+    try:
+        upload_url = await storage.generate_presigned_put_url(
+            object_key=object_key,
+            content_type=body.content_type,
+            expires_minutes=15,
+        )
+    except Exception as exc:  # noqa: BLE001 - convert any MinIO failure to 503
+        logger.exception(
+            "Failed to generate presigned upload URL for object_key=%s",
+            object_key,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={
+                "type": "https://httpstatuses.com/503",
+                "title": "Service Unavailable",
+                "status": 503,
+                "detail": "Object storage is currently unavailable. "
+                "Please try again shortly.",
+            },
+        ) from exc
     return UploadUrlResponse(upload_url=upload_url, object_key=object_key)
 
 

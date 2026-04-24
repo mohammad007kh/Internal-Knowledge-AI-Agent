@@ -64,16 +64,16 @@ async function fetchUsers(page: number, search: string): Promise<UsersResponse> 
     page_size: String(PAGE_SIZE),
   })
   if (search) params.set('search', search)
-  const res = await apiClient.get<UsersResponse>(`/api/v1/admin/users?${params}`)
+  const res = await apiClient.get<UsersResponse>(`/api/v1/users?${params}`)
   return res.data
 }
 
 async function deactivateUser(id: string): Promise<void> {
-  await apiClient.patch(`/api/v1/admin/users/${id}`, { is_active: false })
+  await apiClient.patch(`/api/v1/users/${id}`, { is_active: false })
 }
 
 async function reactivateUser(id: string): Promise<void> {
-  await apiClient.patch(`/api/v1/admin/users/${id}`, { is_active: true })
+  await apiClient.patch(`/api/v1/users/${id}`, { is_active: true })
 }
 
 export function UsersTable() {

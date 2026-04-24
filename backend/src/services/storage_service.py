@@ -113,6 +113,13 @@ class StorageService:
             object_name=object_key,
             expires=timedelta(minutes=expires_minutes),
         )
+        # Rewrite the internal MinIO host (e.g. `minio:9000` inside Docker)
+        # with the browser-reachable public host (e.g. `localhost:9000`) so
+        # the presigned URL works from the user's browser.
+        internal = self._settings.MINIO_ENDPOINT
+        public = self._settings.MINIO_PUBLIC_ENDPOINT
+        if internal and public and internal != public:
+            url = url.replace(internal, public, 1)
         return url
 
     async def object_exists(

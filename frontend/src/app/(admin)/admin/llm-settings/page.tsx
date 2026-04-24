@@ -1,14 +1,14 @@
 'use client'
 
-import { EditStageDialog } from '@/app/(dashboard)/admin/llm-settings/_components/EditStageDialog'
+import { EditStageDialog } from '@/app/(admin)/admin/llm-settings/_components/EditStageDialog'
+import { ErrorState } from '@/components/ui/ErrorState'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { ErrorState } from '@/components/ui/ErrorState'
 import { Skeleton } from '@/components/ui/skeleton'
 import { useLlmSettings, useTestLlmStage } from '@/features/llm-settings/hooks/useLlmSettings'
-import { getErrorMessage } from '@/lib/errors'
 import type { LlmStageConfig } from '@/lib/api/llm-settings'
+import { getErrorMessage } from '@/lib/errors'
 import { CheckCircle2Icon, CpuIcon, PencilIcon, XCircleIcon, ZapIcon } from 'lucide-react'
 import { useState } from 'react'
 import { toast } from 'sonner'
@@ -106,12 +106,7 @@ function StageCard({ stage, onEdit }: StageCardProps) {
           <span>{stage.max_tokens}</span>
         </div>
         <div className="pt-2">
-          <Button
-            size="sm"
-            variant="ghost"
-            onClick={handleTest}
-            disabled={testMutation.isPending}
-          >
+          <Button size="sm" variant="ghost" onClick={handleTest} disabled={testMutation.isPending}>
             <ZapIcon className="mr-1.5 h-3.5 w-3.5" />
             {testMutation.isPending ? 'Testing…' : 'Test connection'}
           </Button>
@@ -142,9 +137,7 @@ export default function LlmSettingsPage() {
         </div>
       )}
 
-      {isError && (
-        <ErrorState message={getErrorMessage(error)} onRetry={() => refetch()} />
-      )}
+      {isError && <ErrorState message={getErrorMessage(error)} onRetry={() => refetch()} />}
 
       {data && (
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">

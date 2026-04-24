@@ -15,7 +15,12 @@ class Settings(BaseSettings):
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 15
     REFRESH_TOKEN_EXPIRE_DAYS: int = 7
     # MinIO
-    MINIO_ENDPOINT: str
+    # MINIO_ENDPOINT is the internal endpoint the backend uses to talk to
+    # MinIO (inside the Docker network this is the service name `minio:9000`).
+    # MINIO_PUBLIC_ENDPOINT is the host-exposed endpoint the browser uses to
+    # follow presigned URLs (e.g. `localhost:9000`).
+    MINIO_ENDPOINT: str = "minio:9000"
+    MINIO_PUBLIC_ENDPOINT: str = "localhost:9000"
     MINIO_ACCESS_KEY: str
     MINIO_SECRET_KEY: str
     MINIO_BUCKET: str = "knowledge-agent"

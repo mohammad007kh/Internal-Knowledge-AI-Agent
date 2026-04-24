@@ -4,7 +4,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 
 from src.core.deps import require_admin
@@ -18,9 +18,9 @@ class UpdatePolicyRequest(BaseModel):
 
 
 class PolicyPublic(BaseModel):
-    id: uuid.UUID
+    id: uuid.UUID | None = None
     content: str
-    created_at: datetime
+    created_at: datetime | None = None
 
 
 def _to_public(p) -> PolicyPublic:
@@ -29,19 +29,19 @@ def _to_public(p) -> PolicyPublic:
 
 @router.get("/", response_model=PolicyPublic)
 async def get_policy(_admin: User = Depends(require_admin)) -> PolicyPublic:
+    """Return the active policy, or an empty placeholder if none exists yet.
+
+    The admin UI treats the company policy as a single editable document, so the
+    "no rows yet" case is a normal first-run state — not an error. Returning an
+    empty PolicyPublic keeps the editor working on a fresh database without a
+    misleading 404.
+    """
     from src.core.container import Container
 
     repo = Container.company_policy_repo()
     policy = await repo.get_active()
     if not policy:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail={
-                "title": "No active policy",
-                "status": 404,
-                "type": "about:blank",
-            },
-        )
+        return PolicyPublic(id=None, content="", created_at=None)
     return _to_public(policy)
 
 
