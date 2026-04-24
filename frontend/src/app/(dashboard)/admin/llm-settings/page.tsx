@@ -56,7 +56,25 @@ function StageCard({ stage, onEdit }: StageCardProps) {
           <div className="space-y-1 min-w-0 flex-1">
             <CardTitle className="flex items-center gap-2 text-base">
               <CpuIcon className="h-4 w-4 text-muted-foreground" />
-              {stage.label}
+              <span className="flex-1">{stage.label}</span>
+              {result && (
+                <span
+                  className={
+                    'flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium ' +
+                    (result.ok
+                      ? 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-400'
+                      : 'bg-destructive/10 text-destructive')
+                  }
+                  title={result.text}
+                >
+                  {result.ok ? (
+                    <CheckCircle2Icon className="h-3 w-3" />
+                  ) : (
+                    <XCircleIcon className="h-3 w-3" />
+                  )}
+                  {result.ok ? 'Healthy' : 'Error'}
+                </span>
+              )}
             </CardTitle>
             <CardDescription className="text-xs">{stage.description}</CardDescription>
           </div>
@@ -87,7 +105,7 @@ function StageCard({ stage, onEdit }: StageCardProps) {
           <span className="text-muted-foreground">Max tokens</span>
           <span>{stage.max_tokens}</span>
         </div>
-        <div className="pt-2 flex items-center gap-2">
+        <div className="pt-2">
           <Button
             size="sm"
             variant="ghost"
@@ -97,21 +115,6 @@ function StageCard({ stage, onEdit }: StageCardProps) {
             <ZapIcon className="mr-1.5 h-3.5 w-3.5" />
             {testMutation.isPending ? 'Testing…' : 'Test connection'}
           </Button>
-          {result && (
-            <span
-              className={
-                'flex items-center gap-1 text-xs ' +
-                (result.ok ? 'text-green-600' : 'text-destructive')
-              }
-            >
-              {result.ok ? (
-                <CheckCircle2Icon className="h-3.5 w-3.5" />
-              ) : (
-                <XCircleIcon className="h-3.5 w-3.5" />
-              )}
-              {result.text}
-            </span>
-          )}
         </div>
       </CardContent>
     </Card>

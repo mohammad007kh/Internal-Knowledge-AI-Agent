@@ -112,6 +112,21 @@ export interface RefreshDescriptionResponse {
   proposed_description: string
 }
 
+export interface SourceDocument {
+  id: string
+  source_id: string
+  is_active: boolean
+  created_at: string
+  updated_at: string
+}
+
+export interface PaginatedDocuments {
+  items: SourceDocument[]
+  total: number
+  limit: number
+  offset: number
+}
+
 export interface SourcePermissionsResponse {
   user_ids: string[]
 }
@@ -187,6 +202,18 @@ export async function deleteSourceApi(sourceId: string): Promise<void> {
 export async function testConnectionApi(sourceId: string): Promise<TestConnectionResponse> {
   const { data } = await apiClient.post<TestConnectionResponse>(
     `/api/v1/sources/${sourceId}/test-connection`
+  )
+  return data
+}
+
+export async function listSourceDocumentsApi(
+  sourceId: string,
+  limit = 50,
+  offset = 0
+): Promise<PaginatedDocuments> {
+  const { data } = await apiClient.get<PaginatedDocuments>(
+    `/api/v1/sources/${sourceId}/documents`,
+    { params: { limit, offset } }
   )
   return data
 }

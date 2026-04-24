@@ -26,7 +26,7 @@ import { UsersTable } from '@/components/admin/UsersTable'
 import { apiClient } from '@/lib/api-client'
 import { getErrorMessage } from '@/lib/errors'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { PlusIcon, Trash2Icon } from 'lucide-react'
+import { MailIcon, PlusIcon, Trash2Icon } from 'lucide-react'
 import Link from 'next/link'
 import { useState } from 'react'
 import { toast } from 'sonner'
@@ -87,9 +87,21 @@ function InvitationsTable() {
 
   if (!invitations?.length) {
     return (
-      <p className="py-8 text-center text-sm text-muted-foreground">
-        No pending invitations.
-      </p>
+      <div className="flex flex-col items-center gap-3 py-12 text-center">
+        <MailIcon className="h-8 w-8 text-muted-foreground/50" aria-hidden />
+        <div className="space-y-1">
+          <p className="font-medium">No pending invitations</p>
+          <p className="text-sm text-muted-foreground">
+            Invite teammates to give them access to the knowledge base.
+          </p>
+        </div>
+        <Button asChild size="sm" className="mt-2">
+          <Link href="/admin/users/new">
+            <PlusIcon className="mr-1.5 h-4 w-4" />
+            Invite user
+          </Link>
+        </Button>
+      </div>
     )
   }
 
@@ -174,6 +186,9 @@ function InvitationsTable() {
 }
 
 export default function UsersPage() {
+  const { data: invitations } = useInvitations()
+  const pendingCount = invitations?.length ?? 0
+
   return (
     <div className="space-y-4 p-6">
       <div className="flex items-center justify-between">
@@ -189,7 +204,17 @@ export default function UsersPage() {
       <Tabs defaultValue="users">
         <TabsList>
           <TabsTrigger value="users">Users</TabsTrigger>
-          <TabsTrigger value="invitations">Invitations</TabsTrigger>
+          <TabsTrigger value="invitations">
+            Invitations
+            {pendingCount > 0 && (
+              <Badge
+                variant="secondary"
+                className="ml-2 h-5 min-w-5 px-1.5 text-xs tabular-nums"
+              >
+                {pendingCount}
+              </Badge>
+            )}
+          </TabsTrigger>
         </TabsList>
         <TabsContent value="users" className="mt-4">
           <UsersTable />

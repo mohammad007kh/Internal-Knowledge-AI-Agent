@@ -1,6 +1,17 @@
 'use client'
 
 import { zodResolver } from '@hookform/resolvers/zod'
+import {
+  BookOpenIcon,
+  ChevronRightIcon,
+  CloudIcon,
+  DatabaseIcon,
+  FileIcon,
+  FileTextIcon,
+  GlobeIcon,
+  TableIcon as TableColumnsIcon,
+} from 'lucide-react'
+import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useState } from 'react'
 import { useForm } from 'react-hook-form'
@@ -22,9 +33,7 @@ import { Input } from '@/components/ui/input'
 import {
   Select,
   SelectContent,
-  SelectGroup,
   SelectItem,
-  SelectLabel,
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
@@ -32,6 +41,29 @@ import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
 import { useCreateSource, type CreateSourcePayload } from '@/hooks/use-create-source'
 import { useUploadFile } from '@/hooks/use-upload-url'
+import { cn } from '@/lib/utils'
+
+const SOURCE_TYPE_OPTIONS = [
+  { value: 'pdf', label: 'PDF', icon: FileTextIcon, category: 'File' },
+  { value: 'docx', label: 'Word', icon: FileTextIcon, category: 'File' },
+  { value: 'xlsx', label: 'Excel', icon: TableColumnsIcon, category: 'File' },
+  { value: 'csv', label: 'CSV', icon: FileIcon, category: 'File' },
+  { value: 'txt', label: 'Text', icon: FileIcon, category: 'File' },
+  { value: 'markdown', label: 'Markdown', icon: FileTextIcon, category: 'File' },
+  { value: 'postgresql', label: 'PostgreSQL', icon: DatabaseIcon, category: 'Database' },
+  { value: 'mysql', label: 'MySQL', icon: DatabaseIcon, category: 'Database' },
+  { value: 'mssql', label: 'SQL Server', icon: DatabaseIcon, category: 'Database' },
+  { value: 'mongodb', label: 'MongoDB', icon: DatabaseIcon, category: 'Database' },
+  { value: 'web_url', label: 'Web URL', icon: GlobeIcon, category: 'Web' },
+  { value: 'confluence', label: 'Confluence', icon: BookOpenIcon, category: 'SaaS' },
+  { value: 'sharepoint', label: 'SharePoint', icon: CloudIcon, category: 'SaaS' },
+] as const
+
+const CRON_PRESETS = [
+  { label: 'Hourly', value: '0 * * * *' },
+  { label: 'Daily', value: '0 2 * * *' },
+  { label: 'Weekly', value: '0 2 * * 1' },
+] as const
 
 const FILE_SOURCE_TYPES = new Set([
   'pdf', 'docx', 'xlsx', 'csv', 'txt', 'markdown',
@@ -145,6 +177,16 @@ export default function NewSourcePage() {
 
   return (
     <div className="mx-auto max-w-2xl space-y-6 p-6">
+      <nav
+        className="flex items-center gap-1 text-sm text-muted-foreground"
+        aria-label="Breadcrumb"
+      >
+        <Link href="/admin/sources" className="hover:text-foreground hover:underline">
+          Sources
+        </Link>
+        <ChevronRightIcon className="h-4 w-4" aria-hidden />
+        <span className="font-medium text-foreground">New Source</span>
+      </nav>
       <div>
         <h1 className="text-2xl font-bold">New Source</h1>
         <p className="mt-1 text-sm text-muted-foreground">
@@ -165,45 +207,41 @@ export default function NewSourcePage() {
                 render={({ field }) => (
                   <FormItem>
                     <FormLabel>Source type</FormLabel>
-                    <Select
-                      onValueChange={(v) => {
-                        field.onChange(v)
-                        setObjectKey(null)
-                        setUploadedFileName(null)
-                        setUploadProgress(null)
-                      }}
-                      value={field.value}
-                    >
-                      <FormControl>
-                        <SelectTrigger>
-                          <SelectValue placeholder="Select a type…" />
-                        </SelectTrigger>
-                      </FormControl>
-                      <SelectContent>
-                        <SelectGroup>
-                          <SelectLabel>File</SelectLabel>
-                          <SelectItem value="pdf">PDF</SelectItem>
-                          <SelectItem value="docx">Word (.docx)</SelectItem>
-                          <SelectItem value="xlsx">Excel (.xlsx)</SelectItem>
-                          <SelectItem value="csv">CSV</SelectItem>
-                          <SelectItem value="txt">Text (.txt)</SelectItem>
-                          <SelectItem value="markdown">Markdown</SelectItem>
-                        </SelectGroup>
-                        <SelectGroup>
-                          <SelectLabel>Database</SelectLabel>
-                          <SelectItem value="postgresql">PostgreSQL</SelectItem>
-                          <SelectItem value="mysql">MySQL</SelectItem>
-                          <SelectItem value="mssql">SQL Server</SelectItem>
-                          <SelectItem value="mongodb">MongoDB</SelectItem>
-                        </SelectGroup>
-                        <SelectGroup>
-                          <SelectLabel>Web / SaaS</SelectLabel>
-                          <SelectItem value="web_url">Web URL</SelectItem>
-                          <SelectItem value="confluence">Confluence</SelectItem>
-                          <SelectItem value="sharepoint">SharePoint</SelectItem>
-                        </SelectGroup>
-                      </SelectContent>
-                    </Select>
+                    <FormControl>
+                      <div
+                        role="radiogroup"
+                        aria-label="Source type"
+                        className="grid grid-cols-3 gap-2 sm:grid-cols-4 md:grid-cols-5"
+                      >
+                        {SOURCE_TYPE_OPTIONS.map((opt) => {
+                          const Icon = opt.icon
+                          const checked = field.value === opt.value
+                          return (
+                            <button
+                              key={opt.value}
+                              type="button"
+                              role="radio"
+                              aria-checked={checked}
+                              onClick={() => {
+                                field.onChange(opt.value)
+                                setObjectKey(null)
+                                setUploadedFileName(null)
+                                setUploadProgress(null)
+                              }}
+                              className={cn(
+                                'flex flex-col items-center gap-1.5 rounded-lg border p-3 text-xs transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+                                checked
+                                  ? 'border-primary bg-primary/5 font-medium text-primary'
+                                  : 'border-border text-muted-foreground'
+                              )}
+                            >
+                              <Icon className="h-5 w-5" aria-hidden />
+                              <span>{opt.label}</span>
+                            </button>
+                          )
+                        })}
+                      </div>
+                    </FormControl>
                     <FormMessage />
                   </FormItem>
                 )}
@@ -367,11 +405,26 @@ export default function NewSourcePage() {
                   render={({ field }) => (
                     <FormItem>
                       <FormLabel>Cron schedule</FormLabel>
+                      <div className="mb-2 flex flex-wrap gap-1.5">
+                        {CRON_PRESETS.map((p) => (
+                          <button
+                            key={p.label}
+                            type="button"
+                            onClick={() => field.onChange(p.value)}
+                            className={cn(
+                              'rounded-full border px-2.5 py-0.5 text-xs transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+                              field.value === p.value && 'border-primary bg-primary/10 text-primary'
+                            )}
+                          >
+                            {p.label}
+                          </button>
+                        ))}
+                      </div>
                       <FormControl>
                         <Input placeholder="0 2 * * *" {...field} />
                       </FormControl>
                       <FormDescription>
-                        Standard cron expression (e.g. <code>0 2 * * *</code> = daily at 2 AM).
+                        Cron expression (UTC). Example: <code>0 2 * * *</code> = daily at 02:00 UTC.
                       </FormDescription>
                       <FormMessage />
                     </FormItem>
@@ -385,13 +438,16 @@ export default function NewSourcePage() {
                 render={({ field }) => (
                   <FormItem className="flex items-center justify-between rounded-lg border p-3">
                     <div className="space-y-0.5">
-                      <FormLabel className="text-sm">Enable citations</FormLabel>
+                      <FormLabel htmlFor="citations-switch" className="text-sm">
+                        Enable citations
+                      </FormLabel>
                       <FormDescription className="text-xs">
                         Include source references in assistant replies.
                       </FormDescription>
                     </div>
                     <FormControl>
                       <Switch
+                        id="citations-switch"
                         checked={field.value}
                         onCheckedChange={field.onChange}
                       />
@@ -412,7 +468,7 @@ export default function NewSourcePage() {
             <Button
               type="button"
               variant="outline"
-              onClick={() => router.back()}
+              onClick={() => router.push('/admin/sources')}
             >
               Cancel
             </Button>

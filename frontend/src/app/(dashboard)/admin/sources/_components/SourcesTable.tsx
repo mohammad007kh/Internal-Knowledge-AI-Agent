@@ -164,7 +164,7 @@ function SourceRowActions({
   )
 }
 
-function SourcesTableSkeleton() {
+export function SourcesTableSkeleton() {
   return (
     <div className="overflow-x-auto">
       <Table>

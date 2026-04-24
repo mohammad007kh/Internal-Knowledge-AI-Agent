@@ -1,5 +1,16 @@
 'use client'
 
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from '@/components/ui/alert-dialog'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -89,12 +100,33 @@ function PolicyEditor() {
           placeholder="Describe what users can and cannot ask about…"
         />
         <div className="flex gap-2">
-          <Button
-            onClick={() => updatePolicy.mutate({ content: draft })}
-            disabled={!isDirty || updatePolicy.isPending}
-          >
-            {updatePolicy.isPending ? 'Saving…' : 'Save policy'}
-          </Button>
+          <AlertDialog>
+            <AlertDialogTrigger asChild>
+              <Button disabled={!isDirty || updatePolicy.isPending}>
+                {updatePolicy.isPending ? 'Saving…' : 'Review & save'}
+              </Button>
+            </AlertDialogTrigger>
+            <AlertDialogContent className="max-w-2xl">
+              <AlertDialogHeader>
+                <AlertDialogTitle>Publish policy change?</AlertDialogTitle>
+                <AlertDialogDescription>
+                  This policy update takes effect immediately for all users. Review the
+                  changes below before publishing.
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <pre className="max-h-64 overflow-auto rounded-md bg-muted p-3 text-xs whitespace-pre-wrap break-words">
+                {draft}
+              </pre>
+              <AlertDialogFooter>
+                <AlertDialogCancel>Keep editing</AlertDialogCancel>
+                <AlertDialogAction
+                  onClick={() => updatePolicy.mutate({ content: draft })}
+                >
+                  Publish changes
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
           {isDirty && (
             <Button
               variant="outline"
@@ -209,8 +241,17 @@ function GuardrailEventsTab() {
                 {data.items.map((event) => (
                   <TableRow
                     key={event.id}
+                    tabIndex={0}
+                    role="button"
+                    aria-label={`View guardrail event from ${formatDate(event.created_at)}`}
                     onClick={() => setSelectedId(event.id)}
-                    className="cursor-pointer"
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault()
+                        setSelectedId(event.id)
+                      }
+                    }}
+                    className="cursor-pointer focus-visible:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
                   >
                     <TableCell className="whitespace-nowrap text-xs text-muted-foreground">
                       {formatDate(event.created_at)}

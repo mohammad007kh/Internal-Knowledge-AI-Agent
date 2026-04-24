@@ -14,6 +14,13 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
+import {
   Table,
   TableBody,
   TableCell,
@@ -28,7 +35,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { type ColumnDef, flexRender, getCoreRowModel, useReactTable } from '@tanstack/react-table'
 import { BanIcon, CheckCircleIcon, PencilIcon, ShieldCheckIcon, UserIcon } from 'lucide-react'
 import Link from 'next/link'
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { toast } from 'sonner'
 
 export interface AdminUser {
@@ -73,6 +80,8 @@ export function UsersTable() {
   const { user: authUser } = useAuth()
   const [page, setPage] = useState(1)
   const [search, setSearch] = useState('')
+  const [roleFilter, setRoleFilter] = useState<'all' | 'admin' | 'user'>('all')
+  const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'inactive'>('all')
   const [deactivatingId, setDeactivatingId] = useState<string | null>(null)
 
   const { data, isLoading } = useQuery({
@@ -81,7 +90,16 @@ export function UsersTable() {
     staleTime: 15_000,
   })
 
-  const users: AdminUser[] = data?.items ?? []
+  const allUsers: AdminUser[] = data?.items ?? []
+  const users = useMemo(() => {
+    return allUsers.filter((u) => {
+      const matchRole = roleFilter === 'all' || u.role === roleFilter
+      const matchStatus =
+        statusFilter === 'all' ||
+        (statusFilter === 'active' ? u.is_active : !u.is_active)
+      return matchRole && matchStatus
+    })
+  }, [allUsers, roleFilter, statusFilter])
   const total = data?.total ?? 0
   const totalPages = Math.ceil(total / PAGE_SIZE)
 
@@ -224,7 +242,7 @@ export function UsersTable() {
 
   return (
     <>
-      <div className="mb-3 max-w-xs">
+      <div className="mb-4 flex flex-wrap items-center gap-2">
         <Input
           placeholder="Search by email or name…"
           value={search}
@@ -232,9 +250,32 @@ export function UsersTable() {
             setSearch(e.target.value)
             setPage(1)
           }}
-          className="h-8 text-xs"
+          className="h-9 max-w-xs"
           aria-label="Search users"
         />
+        <Select value={roleFilter} onValueChange={(v) => setRoleFilter(v as typeof roleFilter)}>
+          <SelectTrigger className="h-9 w-36" aria-label="Filter by role">
+            <SelectValue placeholder="All roles" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All roles</SelectItem>
+            <SelectItem value="admin">Admin</SelectItem>
+            <SelectItem value="user">User</SelectItem>
+          </SelectContent>
+        </Select>
+        <Select
+          value={statusFilter}
+          onValueChange={(v) => setStatusFilter(v as typeof statusFilter)}
+        >
+          <SelectTrigger className="h-9 w-36" aria-label="Filter by status">
+            <SelectValue placeholder="All statuses" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All statuses</SelectItem>
+            <SelectItem value="active">Active</SelectItem>
+            <SelectItem value="inactive">Inactive</SelectItem>
+          </SelectContent>
+        </Select>
       </div>
 
       <div className="rounded-md border border-border">

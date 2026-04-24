@@ -32,6 +32,7 @@ export function ChatLayout() {
         streamingToken={streamingToken}
         isStreaming={isStreaming}
         extraMessages={optimisticMessages}
+        onSend={send}
       />
       {clarification && (
         <ClarificationCard

@@ -31,8 +31,6 @@ export function EditStageDialog({ stage, open, onOpenChange }: EditStageDialogPr
   const [maxTokens, setMaxTokens] = useState(stage.max_tokens)
   const [customPrompt, setCustomPrompt] = useState(stage.custom_prompt ?? '')
 
-  // Reset form state when the dialog reopens for a different stage or the
-  // underlying stage config changes.
   useEffect(() => {
     if (open) {
       setModel(stage.model)
@@ -42,6 +40,20 @@ export function EditStageDialog({ stage, open, onOpenChange }: EditStageDialogPr
       setCustomPrompt(stage.custom_prompt ?? '')
     }
   }, [open, stage])
+
+  const isDirty =
+    model !== stage.model ||
+    apiKey !== '' ||
+    temperature !== stage.temperature ||
+    maxTokens !== stage.max_tokens ||
+    customPrompt !== (stage.custom_prompt ?? '')
+
+  function handleOpenChange(next: boolean) {
+    if (!next && isDirty && !updateMutation.isPending) {
+      if (!window.confirm('You have unsaved changes. Discard them?')) return
+    }
+    onOpenChange(next)
+  }
 
   function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -63,7 +75,7 @@ export function EditStageDialog({ stage, open, onOpenChange }: EditStageDialogPr
   }
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent className="sm:max-w-[520px]">
         <DialogHeader>
           <DialogTitle>Edit {stage.label}</DialogTitle>
@@ -91,32 +103,41 @@ export function EditStageDialog({ stage, open, onOpenChange }: EditStageDialogPr
               autoComplete="new-password"
             />
           </div>
-          <div className="grid grid-cols-2 gap-4">
-            <div className="space-y-2">
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
               <Label htmlFor={`${stage.stage}-temperature`}>Temperature</Label>
-              <Input
-                id={`${stage.stage}-temperature`}
-                type="number"
-                min={0}
-                max={2}
-                step={0.1}
-                value={temperature}
-                onChange={(e) => setTemperature(Number(e.target.value))}
-                required
-              />
+              <span className="text-xs tabular-nums text-muted-foreground">
+                {temperature.toFixed(1)}
+              </span>
             </div>
-            <div className="space-y-2">
-              <Label htmlFor={`${stage.stage}-max-tokens`}>Max Tokens</Label>
-              <Input
-                id={`${stage.stage}-max-tokens`}
-                type="number"
-                min={1}
-                step={1}
-                value={maxTokens}
-                onChange={(e) => setMaxTokens(Number(e.target.value))}
-                required
-              />
+            <input
+              id={`${stage.stage}-temperature`}
+              type="range"
+              min={0}
+              max={2}
+              step={0.1}
+              value={temperature}
+              onChange={(e) => setTemperature(Number(e.target.value))}
+              aria-label="Temperature"
+              className="w-full accent-primary"
+            />
+            <div className="flex justify-between text-[10px] uppercase tracking-wide text-muted-foreground">
+              <span>Precise</span>
+              <span>Balanced</span>
+              <span>Creative</span>
             </div>
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor={`${stage.stage}-max-tokens`}>Max Tokens</Label>
+            <Input
+              id={`${stage.stage}-max-tokens`}
+              type="number"
+              min={1}
+              step={1}
+              value={maxTokens}
+              onChange={(e) => setMaxTokens(Number(e.target.value))}
+              required
+            />
           </div>
           <div className="space-y-2">
             <Label htmlFor={`${stage.stage}-custom-prompt`}>Custom Prompt</Label>
@@ -130,10 +151,10 @@ export function EditStageDialog({ stage, open, onOpenChange }: EditStageDialogPr
             />
           </div>
           <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
+            <Button type="button" variant="outline" onClick={() => handleOpenChange(false)}>
               Cancel
             </Button>
-            <Button type="submit" disabled={updateMutation.isPending}>
+            <Button type="submit" disabled={updateMutation.isPending || !isDirty}>
               {updateMutation.isPending ? 'Saving…' : 'Save'}
             </Button>
           </DialogFooter>

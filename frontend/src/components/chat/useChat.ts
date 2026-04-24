@@ -40,6 +40,8 @@ export function useChat({ sessionId }: { sessionId: string | null }): UseChatRet
 
   const pendingOptimisticIdRef = useRef<string | null>(null)
   const lastHandledMessageIdRef = useRef<string | null>(null)
+  const lastQueryRef = useRef<string>('')
+  const sendRef = useRef<(text: string) => void>(() => {})
 
   const clearOptimistic = useCallback(() => {
     const id = pendingOptimisticIdRef.current
@@ -51,12 +53,14 @@ export function useChat({ sessionId }: { sessionId: string | null }): UseChatRet
   const send = useCallback(
     (text: string) => {
       if (!sessionId || !text.trim()) return
+      const trimmed = text.trim()
+      lastQueryRef.current = trimmed
 
       const optimisticId = `optimistic-${Date.now()}`
       const optimisticMsg: OptimisticMessage = {
         id: optimisticId,
         role: 'user',
-        content: text.trim(),
+        content: trimmed,
         created_at: new Date().toISOString(),
       }
       pendingOptimisticIdRef.current = optimisticId
@@ -65,18 +69,27 @@ export function useChat({ sessionId }: { sessionId: string | null }): UseChatRet
       setLocalGuardrail(null)
       setIsPending(true)
 
-      stream.sendMessage(sessionId, text.trim(), []).catch(() => {
+      stream.sendMessage(sessionId, trimmed, []).catch(() => {
         clearOptimistic()
         setIsPending(false)
         import('sonner')
           .then(({ toast }) => {
-            toast.error('Failed to send message. Please try again.')
+            toast.error('Failed to send message. Please try again.', {
+              action: {
+                label: 'Retry',
+                onClick: () => sendRef.current(lastQueryRef.current),
+              },
+            })
           })
           .catch(() => {})
       })
     },
     [sessionId, stream, clearOptimistic]
   )
+
+  useEffect(() => {
+    sendRef.current = send
+  }, [send])
 
   const abort = useCallback(() => {
     stream.abortStream()
@@ -118,7 +131,12 @@ export function useChat({ sessionId }: { sessionId: string | null }): UseChatRet
     const msg = stream.errorMessage ?? 'Stream error'
     import('sonner')
       .then(({ toast }) => {
-        toast.error(msg)
+        toast.error(msg, {
+          action: {
+            label: 'Retry',
+            onClick: () => sendRef.current(lastQueryRef.current),
+          },
+        })
       })
       .catch(() => {})
   }, [stream.messageType, stream.errorMessage, clearOptimistic])

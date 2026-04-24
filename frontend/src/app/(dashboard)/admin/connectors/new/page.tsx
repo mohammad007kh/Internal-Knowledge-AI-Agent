@@ -2,8 +2,9 @@
 
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useMutation } from '@tanstack/react-query'
+import { EyeIcon, EyeOffIcon } from 'lucide-react'
 import { useRouter } from 'next/navigation'
-import { useState } from 'react'
+import { forwardRef, useState, type ComponentPropsWithoutRef } from 'react'
 import { useForm } from 'react-hook-form'
 import { toast } from 'sonner'
 import { z } from 'zod'
@@ -26,6 +27,37 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { apiClient } from '@/lib/api-client'
+
+type PasswordInputProps = Omit<ComponentPropsWithoutRef<typeof Input>, 'type'> & {
+  toggleLabel?: string
+}
+
+const PasswordInput = forwardRef<HTMLInputElement, PasswordInputProps>(
+  ({ toggleLabel = 'secret', className, ...props }, ref) => {
+    const [visible, setVisible] = useState(false)
+    return (
+      <div className="relative">
+        <Input
+          ref={ref}
+          type={visible ? 'text' : 'password'}
+          autoComplete="new-password"
+          className={`pr-10 ${className ?? ''}`}
+          {...props}
+        />
+        <button
+          type="button"
+          onClick={() => setVisible((v) => !v)}
+          className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground transition-colors hover:text-foreground"
+          aria-label={visible ? `Hide ${toggleLabel}` : `Show ${toggleLabel}`}
+          tabIndex={-1}
+        >
+          {visible ? <EyeOffIcon className="h-4 w-4" /> : <EyeIcon className="h-4 w-4" />}
+        </button>
+      </div>
+    )
+  }
+)
+PasswordInput.displayName = 'PasswordInput'
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -131,7 +163,7 @@ function ConfluenceFields({ form }: { form: ReturnType<typeof useForm<FormValues
           <FormItem>
             <FormLabel>API Token</FormLabel>
             <FormControl>
-              <Input type="password" {...field} value={field.value ?? ''} />
+              <PasswordInput toggleLabel="API token" {...field} value={field.value ?? ''} />
             </FormControl>
             <FormMessage />
           </FormItem>
@@ -194,7 +226,7 @@ function JiraFields({ form }: { form: ReturnType<typeof useForm<FormValues>> }) 
           <FormItem>
             <FormLabel>API Token</FormLabel>
             <FormControl>
-              <Input type="password" {...field} value={field.value ?? ''} />
+              <PasswordInput toggleLabel="API token" {...field} value={field.value ?? ''} />
             </FormControl>
             <FormMessage />
           </FormItem>
@@ -257,7 +289,7 @@ function SharepointFields({ form }: { form: ReturnType<typeof useForm<FormValues
           <FormItem>
             <FormLabel>Client Secret</FormLabel>
             <FormControl>
-              <Input type="password" {...field} value={field.value ?? ''} />
+              <PasswordInput toggleLabel="client secret" {...field} value={field.value ?? ''} />
             </FormControl>
             <FormMessage />
           </FormItem>
@@ -391,7 +423,7 @@ export default function NewConnectorPage() {
 
   const mutation = useMutation({
     mutationFn: async (values: FormValues) => {
-      const res = await apiClient.post<CreateConnectorResponse>('/connectors', values)
+      const res = await apiClient.post<CreateConnectorResponse>('/api/v1/connectors', values)
       return res.data
     },
     onSuccess: (data) => {

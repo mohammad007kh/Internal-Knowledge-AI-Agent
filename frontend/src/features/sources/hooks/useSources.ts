@@ -7,6 +7,7 @@ import {
   deleteSourceApi,
   getSourceApi,
   getSourceStatsApi,
+  listSourceDocumentsApi,
   listSourcesApi,
   listSyncJobsApi,
   refreshDescriptionApi,
@@ -28,6 +29,7 @@ export const sourcesKeys = {
   detail: (id: string) => [...sourcesKeys.all, 'detail', id] as const,
   stats: (id: string) => [...sourcesKeys.all, 'stats', id] as const,
   syncJobs: (id: string) => [...sourcesKeys.all, 'sync-jobs', id] as const,
+  documents: (id: string) => [...sourcesKeys.all, 'documents', id] as const,
 }
 
 // ---------------------------------------------------------------------------
@@ -61,6 +63,14 @@ export function useSyncJobs(sourceId: string | undefined) {
   return useQuery({
     queryKey: sourceId ? sourcesKeys.syncJobs(sourceId) : ['sources', 'sync-jobs', 'empty'],
     queryFn: () => listSyncJobsApi(sourceId as string),
+    enabled: Boolean(sourceId),
+  })
+}
+
+export function useSourceDocuments(sourceId: string | undefined) {
+  return useQuery({
+    queryKey: sourceId ? sourcesKeys.documents(sourceId) : ['sources', 'documents', 'empty'],
+    queryFn: () => listSourceDocumentsApi(sourceId as string),
     enabled: Boolean(sourceId),
   })
 }

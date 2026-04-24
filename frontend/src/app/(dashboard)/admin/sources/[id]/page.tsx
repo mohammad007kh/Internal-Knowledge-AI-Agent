@@ -16,6 +16,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Switch } from '@/components/ui/switch'
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { ErrorState } from '@/components/ui/ErrorState'
 import {
@@ -28,6 +29,7 @@ import {
   useDeleteSource,
   useRefreshDescription,
   useSource,
+  useSourceDocuments,
   useSourceStats,
   useSyncJobs,
   useTriggerSync,
@@ -47,6 +49,7 @@ export default function SourceDetailPage() {
   const { data: source, isLoading, isError, error, refetch } = useSource(id)
   const { data: stats } = useSourceStats(id)
   const { data: syncJobsData } = useSyncJobs(id)
+  const { data: documentsData } = useSourceDocuments(id)
 
   const syncMutation = useTriggerSync()
   const deleteMutation = useDeleteSource()
@@ -58,10 +61,22 @@ export default function SourceDetailPage() {
 
   if (isLoading) {
     return (
-      <div className="space-y-4 p-6">
-        <Skeleton className="h-6 w-48" />
-        <Skeleton className="h-10 w-full max-w-md" />
-        <Skeleton className="h-64 w-full" />
+      <div className="space-y-6 p-6">
+        <Skeleton className="h-4 w-48" />
+        <div className="flex items-start justify-between gap-4">
+          <div className="space-y-2">
+            <Skeleton className="h-8 w-64" />
+            <Skeleton className="h-4 w-96" />
+          </div>
+          <Skeleton className="h-9 w-28" />
+        </div>
+        <Skeleton className="h-10 w-full max-w-sm" />
+        <div className="grid gap-4 sm:grid-cols-3">
+          <Skeleton className="h-24" />
+          <Skeleton className="h-24" />
+          <Skeleton className="h-24" />
+        </div>
+        <Skeleton className="h-32 w-full" />
       </div>
     )
   }
@@ -75,6 +90,7 @@ export default function SourceDetailPage() {
   }
 
   const syncJobs = syncJobsData?.items ?? []
+  const documents = documentsData?.items ?? []
 
   return (
     <div className="space-y-6 p-6">
@@ -116,8 +132,16 @@ export default function SourceDetailPage() {
       </div>
 
       <Tabs defaultValue="overview">
-        <TabsList>
+        <TabsList className="w-full justify-start overflow-x-auto">
           <TabsTrigger value="overview">Overview</TabsTrigger>
+          <TabsTrigger value="documents">
+            Documents
+            {documentsData && (
+              <span className="ml-1.5 rounded-full bg-muted px-1.5 py-0.5 text-xs tabular-nums">
+                {documentsData.total}
+              </span>
+            )}
+          </TabsTrigger>
           <TabsTrigger value="sync">Sync</TabsTrigger>
           <TabsTrigger value="access">Access</TabsTrigger>
           <TabsTrigger value="settings">Settings</TabsTrigger>
@@ -175,6 +199,49 @@ export default function SourceDetailPage() {
               </p>
             </CardContent>
           </Card>
+        </TabsContent>
+
+        {/* DOCUMENTS */}
+        <TabsContent value="documents" className="mt-4">
+          {documents.length === 0 ? (
+            <p className="py-8 text-center text-sm text-muted-foreground">
+              No documents indexed yet. Run a sync to populate this source.
+            </p>
+          ) : (
+            <div className="rounded-md border">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Document ID</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead>Indexed at</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {documents.map((doc) => (
+                    <TableRow key={doc.id}>
+                      <TableCell className="font-mono text-xs text-muted-foreground">
+                        {doc.id}
+                      </TableCell>
+                      <TableCell>
+                        <Badge variant={doc.is_active ? 'default' : 'secondary'}>
+                          {doc.is_active ? 'active' : 'inactive'}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="text-xs text-muted-foreground">
+                        {formatTimestamp(doc.created_at)}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+              {documentsData && documentsData.total > documents.length && (
+                <div className="border-t px-4 py-2 text-xs text-muted-foreground">
+                  Showing {documents.length} of {documentsData.total} documents
+                </div>
+              )}
+            </div>
+          )}
         </TabsContent>
 
         {/* SYNC */}

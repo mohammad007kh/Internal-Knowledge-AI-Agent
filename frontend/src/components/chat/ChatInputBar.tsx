@@ -4,7 +4,7 @@ import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { cn } from '@/lib/utils'
 import { SendHorizontalIcon, SquareIcon } from 'lucide-react'
-import { useCallback, useRef } from 'react'
+import { useCallback, useEffect, useRef } from 'react'
 import { SourceChips } from './SourceChips'
 import { SourceSelector } from './SourceSelector'
 import { useSessionSources } from './useSessionSources'
@@ -51,6 +51,18 @@ export function ChatInputBar({
     onStop?.()
   }, [onStop])
 
+  useEffect(() => {
+    if (!isStreaming) return
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.preventDefault()
+        onStop?.()
+      }
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [isStreaming, onStop])
+
   return (
     <div className="border-t border-border bg-background">
       <SourceChips
@@ -77,7 +89,13 @@ export function ChatInputBar({
         />
         <Textarea
           ref={textareaRef}
-          placeholder={sessionId ? 'Ask a question… (Enter to send)' : 'Select a session first…'}
+          placeholder={
+            isStreaming
+              ? 'Generating… press Esc to stop'
+              : sessionId
+                ? 'Ask a question… (Enter to send)'
+                : 'Select a session first…'
+          }
           className={cn('max-h-40 min-h-[2.75rem] flex-1 resize-none rounded-xl')}
           rows={1}
           maxLength={MAX_CHARS}
