@@ -1,8 +1,11 @@
 from fastapi import APIRouter
 
+from src.api.v1.admin.ai_models import router as admin_ai_models_router
+from src.api.v1.admin.embedders import router as admin_embedders_router
 from src.api.v1.admin.guardrails import router as admin_guardrails_router
 from src.api.v1.admin.llm_settings import router as admin_llm_settings_router
 from src.api.v1.admin.policy import router as admin_policy_router
+from src.api.v1.admin.providers import router as admin_providers_router
 from src.api.v1.analytics import router as analytics_router
 from src.api.v1.auth import router as auth_router
 from src.api.v1.chat import router as chat_router  # T-076
@@ -42,4 +45,19 @@ api_v1_router.include_router(
     admin_guardrails_router,
     prefix="/admin/guardrail-events",
     tags=["admin", "guardrails"],
+)
+api_v1_router.include_router(
+    admin_ai_models_router,
+    prefix="/admin/ai-models",
+    tags=["admin", "ai-models"],
+)
+api_v1_router.include_router(
+    admin_embedders_router,
+    prefix="/admin/embedders",
+    tags=["admin", "embedders"],
+)
+api_v1_router.include_router(
+    admin_providers_router,
+    prefix="/admin/providers",
+    tags=["admin", "providers"],
 )

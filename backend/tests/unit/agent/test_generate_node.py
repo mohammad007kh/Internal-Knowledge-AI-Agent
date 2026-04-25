@@ -2,12 +2,14 @@
 """Unit tests for the generate_response LangGraph node."""
 from __future__ import annotations
 
+import uuid
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from langchain_core.messages import HumanMessage
 
 from src.agent.nodes.generate import generate_response
+from src.services.ai_model_resolver import AIModelClient
 
 
 @pytest.fixture()
@@ -49,11 +51,27 @@ def mock_langfuse():
     return lf
 
 
+def _resolver_for(http_client) -> AsyncMock:
+    """Build a resolver that returns an :class:`AIModelClient` wrapping *http_client*."""
+    resolver = AsyncMock()
+    resolver.resolve.return_value = AIModelClient(
+        ai_model_id=uuid.uuid4(),
+        provider="openai",
+        model_id="gpt-4o-mini",
+        temperature=0.2,
+        max_tokens=1024,
+        custom_prompt=None,
+        capabilities={},
+        http_client=http_client,
+    )
+    return resolver
+
+
 @pytest.mark.asyncio
 async def test_sets_final_answer(base_state, mock_openai_client, mock_langfuse):
     result = await generate_response(
         base_state,
-        openai_client=mock_openai_client,
+        ai_model_resolver=_resolver_for(mock_openai_client),
         langfuse=mock_langfuse,
     )
     assert result["final_answer"] == "You can get a refund within 30 days."
@@ -64,7 +82,7 @@ async def test_sets_final_answer(base_state, mock_openai_client, mock_langfuse):
 async def test_span_emitted(base_state, mock_openai_client, mock_langfuse):
     await generate_response(
         base_state,
-        openai_client=mock_openai_client,
+        ai_model_resolver=_resolver_for(mock_openai_client),
         langfuse=mock_langfuse,
     )
     mock_langfuse.span.assert_called_once()
@@ -83,7 +101,7 @@ async def test_openai_failure_returns_fallback(base_state, mock_langfuse):
 
     result = await generate_response(
         base_state,
-        openai_client=failing_client,
+        ai_model_resolver=_resolver_for(failing_client),
         langfuse=mock_langfuse,
     )
     assert result["error"] == "generation_failed"
@@ -96,7 +114,7 @@ async def test_no_context_uses_fallback_message(base_state, mock_openai_client, 
     base_state["retrieved_chunks"] = []
     result = await generate_response(
         base_state,
-        openai_client=mock_openai_client,
+        ai_model_resolver=_resolver_for(mock_openai_client),
         langfuse=mock_langfuse,
     )
     assert mock_openai_client.chat.completions.create.called

@@ -22,6 +22,7 @@ import { type UseFormReturn, useForm } from 'react-hook-form'
 import { toast } from 'sonner'
 import { z } from 'zod'
 
+import { EmbedderPicker } from '@/components/admin/EmbedderPicker'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import {
@@ -34,6 +35,7 @@ import {
   FormMessage,
 } from '@/components/ui/form'
 import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
 import {
   Select,
   SelectContent,
@@ -636,6 +638,31 @@ export default function NewSourcePage() {
                   No additional configuration is required for this source type yet.
                 </p>
               )}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Embedder</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <div className="space-y-2">
+                <Label htmlFor="source-embedder">Embedder</Label>
+                <EmbedderPicker
+                  id="source-embedder"
+                  value={null}
+                  locked
+                  // v1: locked to the active embedder. The picker renders the
+                  // active embedder read-only and surfaces a link to
+                  // /admin/embedders. The backend defaults `embedder_id` to
+                  // the active embedder when omitted from the create
+                  // payload, so we don't need to wire a controlled value
+                  // through the form here.
+                  onChange={() => {
+                    /* locked — no-op */
+                  }}
+                />
+              </div>
             </CardContent>
           </Card>
 

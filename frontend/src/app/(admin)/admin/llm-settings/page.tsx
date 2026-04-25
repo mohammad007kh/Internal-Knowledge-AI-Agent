@@ -7,16 +7,16 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
 import { useLlmSettings, useTestLlmStage } from '@/features/llm-settings/hooks/useLlmSettings'
+import { useAiModels } from '@/hooks/use-ai-models'
 import type { LlmStageConfig } from '@/lib/api/llm-settings'
 import { getErrorMessage } from '@/lib/errors'
-import { CheckCircle2Icon, CpuIcon, PencilIcon, XCircleIcon, ZapIcon } from 'lucide-react'
+import { cn } from '@/lib/utils'
+import { CheckCircle2Icon, CpuIcon, PencilIcon, PlusIcon, XCircleIcon, ZapIcon } from 'lucide-react'
+import Link from 'next/link'
 import { useState } from 'react'
 import { toast } from 'sonner'
 
-function maskApiKey(hint: string | null): string {
-  if (!hint) return 'Not configured'
-  return `●●●●●●●● ${hint}`
-}
+const SKELETON_KEYS = ['s1', 's2', 's3', 's4', 's5', 's6'] as const
 
 interface StageCardProps {
   stage: LlmStageConfig
@@ -32,10 +32,7 @@ function StageCard({ stage, onEdit }: StageCardProps) {
     testMutation.mutate(stage.stage, {
       onSuccess: (data) => {
         if (data.success) {
-          setResult({
-            ok: true,
-            text: `Connected (${data.latency_ms ?? '—'} ms)`,
-          })
+          setResult({ ok: true, text: `Connected (${data.latency_ms ?? '—'} ms)` })
           toast.success(`${stage.label}: OK (${data.latency_ms ?? '—'} ms)`)
         } else {
           setResult({ ok: false, text: data.error ?? 'Connection failed' })
@@ -49,6 +46,8 @@ function StageCard({ stage, onEdit }: StageCardProps) {
     })
   }
 
+  const aiModel = stage.ai_model
+
   return (
     <Card>
       <CardHeader className="pb-3">
@@ -57,14 +56,14 @@ function StageCard({ stage, onEdit }: StageCardProps) {
             <CardTitle className="flex items-center gap-2 text-base">
               <CpuIcon className="h-4 w-4 text-muted-foreground" />
               <span className="flex-1">{stage.label}</span>
-              {result && (
+              {result ? (
                 <span
-                  className={
-                    'flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium ' +
-                    (result.ok
+                  className={cn(
+                    'flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium',
+                    result.ok
                       ? 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-400'
-                      : 'bg-destructive/10 text-destructive')
-                  }
+                      : 'bg-destructive/10 text-destructive'
+                  )}
                   title={result.text}
                 >
                   {result.ok ? (
@@ -74,7 +73,7 @@ function StageCard({ stage, onEdit }: StageCardProps) {
                   )}
                   {result.ok ? 'Healthy' : 'Error'}
                 </span>
-              )}
+              ) : null}
             </CardTitle>
             <CardDescription className="text-xs">{stage.description}</CardDescription>
           </div>
@@ -89,14 +88,28 @@ function StageCard({ stage, onEdit }: StageCardProps) {
         </div>
       </CardHeader>
       <CardContent className="space-y-3 text-sm">
-        <div className="flex items-center justify-between">
-          <span className="text-muted-foreground">Model</span>
-          <Badge variant="secondary">{stage.model || 'default'}</Badge>
+        <div className="flex items-center justify-between gap-2">
+          <span className="text-muted-foreground">AI Model</span>
+          {aiModel ? (
+            <Link
+              href={`/admin/ai-models?focus=${aiModel.id}`}
+              className="inline-flex max-w-[60%] items-center gap-1.5 truncate text-right hover:underline"
+            >
+              <Badge variant="secondary" className="text-[10px] uppercase tracking-wide">
+                {aiModel.provider}
+              </Badge>
+              <span className="truncate font-medium">{aiModel.name}</span>
+            </Link>
+          ) : (
+            <span className="text-xs italic text-muted-foreground">Not configured</span>
+          )}
         </div>
-        <div className="flex items-center justify-between">
-          <span className="text-muted-foreground">API key</span>
-          <span className="font-mono text-xs">{maskApiKey(stage.api_key_hint)}</span>
-        </div>
+        {aiModel ? (
+          <div className="flex items-center justify-between text-xs text-muted-foreground">
+            <span>Model ID</span>
+            <span className="truncate font-mono">{aiModel.model_id}</span>
+          </div>
+        ) : null}
         <div className="flex items-center justify-between">
           <span className="text-muted-foreground">Temperature</span>
           <span>{stage.temperature}</span>
@@ -106,7 +119,13 @@ function StageCard({ stage, onEdit }: StageCardProps) {
           <span>{stage.max_tokens}</span>
         </div>
         <div className="pt-2">
-          <Button size="sm" variant="ghost" onClick={handleTest} disabled={testMutation.isPending}>
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={handleTest}
+            disabled={testMutation.isPending || !aiModel}
+            title={!aiModel ? 'Assign an AI model before testing' : undefined}
+          >
             <ZapIcon className="mr-1.5 h-3.5 w-3.5" />
             {testMutation.isPending ? 'Testing…' : 'Test connection'}
           </Button>
@@ -116,44 +135,76 @@ function StageCard({ stage, onEdit }: StageCardProps) {
   )
 }
 
+function NoAiModelsCard() {
+  return (
+    <Card className="border-dashed">
+      <CardContent className="flex flex-col items-center gap-3 py-10 text-center">
+        <CpuIcon className="h-10 w-10 text-muted-foreground" aria-hidden />
+        <div className="space-y-1">
+          <p className="text-base font-medium">No AI models configured yet</p>
+          <p className="text-sm text-muted-foreground">
+            Every stage needs one to run. Configure your first AI model to assign it across the
+            pipeline.
+          </p>
+        </div>
+        <Button asChild className="gap-1.5">
+          <Link href="/admin/ai-models?new=1">
+            <PlusIcon className="h-4 w-4" aria-hidden />
+            Configure AI model
+          </Link>
+        </Button>
+      </CardContent>
+    </Card>
+  )
+}
+
 export default function LlmSettingsPage() {
   const { data, isLoading, isError, error, refetch } = useLlmSettings()
+  // Aggressively cached, but also surfaced here so the empty-state CTA can
+  // appear before the user opens any dropdown.
+  const { data: aiModels, isLoading: isLoadingAiModels } = useAiModels({ limit: 1 })
   const [editing, setEditing] = useState<LlmStageConfig | null>(null)
+
+  const noAiModelsConfigured = !isLoadingAiModels && (aiModels?.total ?? 0) === 0
 
   return (
     <div className="space-y-6 p-6">
       <div>
         <h1 className="text-xl font-semibold">LLM Settings</h1>
         <p className="text-sm text-muted-foreground">
-          Configure model, API key, and generation parameters for each pipeline stage.
+          Configure the AI Model and generation parameters for each pipeline stage.
         </p>
       </div>
 
-      {isLoading && (
+      {noAiModelsConfigured ? <NoAiModelsCard /> : null}
+
+      {isLoading ? (
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-          {Array.from({ length: 6 }).map((_, i) => (
-            <Skeleton key={i} className="h-56 w-full" />
+          {SKELETON_KEYS.map((key) => (
+            <Skeleton key={key} className="h-56 w-full" />
           ))}
         </div>
-      )}
+      ) : null}
 
-      {isError && <ErrorState message={getErrorMessage(error)} onRetry={() => refetch()} />}
+      {isError ? <ErrorState message={getErrorMessage(error)} onRetry={() => refetch()} /> : null}
 
-      {data && (
+      {data ? (
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
           {data.map((stage) => (
             <StageCard key={stage.stage} stage={stage} onEdit={setEditing} />
           ))}
         </div>
-      )}
+      ) : null}
 
-      {editing && (
+      {editing ? (
         <EditStageDialog
           stage={editing}
-          open={!!editing}
-          onOpenChange={(open) => !open && setEditing(null)}
+          open={Boolean(editing)}
+          onOpenChange={(open) => {
+            if (!open) setEditing(null)
+          }}
         />
-      )}
+      ) : null}
     </div>
   )
 }

@@ -49,6 +49,12 @@ export interface CreateSourcePayload {
   sync_schedule: string | null
   retrieval_mode: RetrievalMode
   citations_enabled: boolean
+  /**
+   * Embedder pinned to this source. Defaults server-side to the currently
+   * active embedder when omitted (per design doc §7). v1 sources are locked
+   * to the active embedder — the UI surfaces this as read-only.
+   */
+  embedder_id?: string | null
 }
 
 export interface CreatedSource {

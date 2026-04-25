@@ -1,6 +1,7 @@
 """Unit tests for the retrieve_context LangGraph node."""
 from __future__ import annotations
 
+import uuid
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -25,11 +26,20 @@ def base_state():
     }
 
 
+def _factory_with(embedding_service: AsyncMock) -> AsyncMock:
+    """Build a fake :class:`EmbeddingServiceFactory` returning *embedding_service*."""
+    factory = AsyncMock()
+    # ``for_active`` now returns ``(service, embedder_id)`` — see
+    # EmbeddingServiceFactory.for_active().
+    factory.for_active.return_value = (embedding_service, uuid.uuid4())
+    return factory
+
+
 @pytest.mark.asyncio
 class TestRetrieveContext:
     async def test_returns_chunks(self, base_state):
         mock_embedding_service = AsyncMock()
-        mock_embedding_service.embed_texts.return_value = [[0.1] * 1536]
+        mock_embedding_service.embed_query.return_value = [0.1] * 1536
 
         from src.models.chunk import Chunk  # noqa: PLC0415
 
@@ -47,7 +57,7 @@ class TestRetrieveContext:
 
         result = await retrieve_context(
             base_state,
-            embedding_service=mock_embedding_service,
+            embedding_service_factory=_factory_with(mock_embedding_service),
             chunk_repository=mock_chunk_repo,
             db_session=AsyncMock(),
             langfuse=mock_langfuse,
@@ -64,7 +74,7 @@ class TestRetrieveContext:
 
         result = await retrieve_context(
             base_state,
-            embedding_service=AsyncMock(),
+            embedding_service_factory=AsyncMock(),
             chunk_repository=AsyncMock(),
             db_session=AsyncMock(),
             langfuse=mock_langfuse,
@@ -78,7 +88,7 @@ class TestRetrieveContext:
 
         result = await retrieve_context(
             base_state,
-            embedding_service=AsyncMock(),
+            embedding_service_factory=AsyncMock(),
             chunk_repository=AsyncMock(),
             db_session=AsyncMock(),
             langfuse=MagicMock(),

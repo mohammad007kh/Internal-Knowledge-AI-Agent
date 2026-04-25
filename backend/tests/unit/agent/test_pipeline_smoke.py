@@ -1,11 +1,13 @@
 """Smoke test: full pipeline with all external deps mocked."""
 from __future__ import annotations
 
+import uuid
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
 from src.agent.pipeline import build_pipeline, run_pipeline
+from src.services.ai_model_resolver import AIModelClient
 
 
 @pytest.fixture()
@@ -13,7 +15,12 @@ def mocked_pipeline():
     mock_db = AsyncMock()
 
     mock_embedding = AsyncMock()
+    mock_embedding.embed_query.return_value = [0.1] * 1536
     mock_embedding.embed_texts.return_value = [[0.1] * 1536]
+
+    mock_factory = AsyncMock()
+    # ``for_active`` now returns ``(service, embedder_id)``.
+    mock_factory.for_active.return_value = (mock_embedding, uuid.uuid4())
 
     mock_chunk_repo = AsyncMock()
     mock_chunk_repo.similarity_search.return_value = []
@@ -35,17 +42,29 @@ def mocked_pipeline():
     completion.usage.completion_tokens = 10
     mock_openai.chat.completions.create.return_value = completion
 
+    mock_resolver = AsyncMock()
+    mock_resolver.resolve.return_value = AIModelClient(
+        ai_model_id=uuid.uuid4(),
+        provider="openai",
+        model_id="gpt-4o-mini",
+        temperature=0.2,
+        max_tokens=1024,
+        custom_prompt=None,
+        capabilities={},
+        http_client=mock_openai,
+    )
+
     mock_langfuse = MagicMock()
     mock_span = MagicMock()
     mock_langfuse.span.return_value = mock_span
 
     return build_pipeline(
         db_session=mock_db,
-        embedding_service=mock_embedding,
         chunk_repository=mock_chunk_repo,
         chat_session_repository=mock_chat_session_repo,
         chat_message_repository=mock_chat_msg_repo,
-        openai_client=mock_openai,
+        ai_model_resolver=mock_resolver,
+        embedding_service_factory=mock_factory,
         langfuse=mock_langfuse,
     )
 

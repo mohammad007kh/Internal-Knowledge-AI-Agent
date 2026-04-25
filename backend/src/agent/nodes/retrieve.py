@@ -14,7 +14,7 @@ if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
 
     from src.repositories.chunk_repository import ChunkRepository
-    from src.services.embedding_service import EmbeddingService
+    from src.services.embedding_service_factory import EmbeddingServiceFactory
 
 logger = logging.getLogger(__name__)
 
@@ -25,7 +25,7 @@ SIMILARITY_THRESHOLD = 0.4
 async def retrieve_context(
     state: AgentState,
     *,
-    embedding_service: EmbeddingService,
+    embedding_service_factory: EmbeddingServiceFactory,
     chunk_repository: ChunkRepository,
     db_session: AsyncSession,
     langfuse: Langfuse,
@@ -35,16 +35,9 @@ async def retrieve_context(
     Enforces FR-019: only chunks whose source_id appears in
     ``state["source_ids"]`` are ever returned.
 
-    Args:
-        state:             Current LangGraph agent state.
-        embedding_service: Service used to embed the query text.
-        chunk_repository:  Repository for vector similarity lookups.
-        db_session:        SQLAlchemy async session (injected per request).
-        langfuse:          Langfuse client for span tracing.
-
-    Returns:
-        Partial state dict with key ``"retrieved_chunks"`` (list of dicts
-        with keys ``chunk_id``, ``source_id``, ``text``, ``score``).
+    The active embedder record drives both the query embedding and the
+    defensive ``embedder_id`` filter on the SQL similarity search — see
+    §6.3 of the design doc.
     """
     source_ids: list[str] = state.get("source_ids", [])
     query: str = state.get("query", "").strip()
@@ -66,14 +59,18 @@ async def retrieve_context(
     )
 
     try:
-        embeddings = await embedding_service.embed_texts([query])
-        query_embedding: list[float] = embeddings[0]
+        # ``for_active`` returns both the service and the active embedder id
+        # in one call so the retrieve node can apply the defensive
+        # ``embedder_id`` filter without a duplicate DB roundtrip.
+        embedding_service, active_id = await embedding_service_factory.for_active()
+        query_embedding: list[float] = await embedding_service.embed_query(query)
 
         pairs = await chunk_repository.similarity_search(
             db_session,
             query_embedding=query_embedding,
             source_ids=source_ids,
             limit=_RESULT_LIMIT,
+            embedder_id=active_id,
         )
 
         chunks = [

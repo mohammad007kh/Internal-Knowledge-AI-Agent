@@ -9,6 +9,8 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Any
 
+from src.core.config import settings
+
 logger = logging.getLogger(__name__)
 
 
@@ -38,10 +40,19 @@ class GuardrailService:
         guardrail_event_repo: Repository for persisting guardrail audit events.
     """
 
-    def __init__(self, policy_repo: Any, guardrail_event_repo: Any, openai_client: Any = None) -> None:
+    def __init__(
+        self,
+        policy_repo: Any,
+        guardrail_event_repo: Any,
+        openai_client: Any = None,
+        ai_model_resolver: Any = None,
+    ) -> None:
         self._policy_repo = policy_repo
         self._event_repo = guardrail_event_repo
+        # When a resolver is provided we resolve at call time (preferred,
+        # honours admin updates).  ``openai_client`` is the legacy fallback.
         self._openai_client = openai_client
+        self._resolver = ai_model_resolver
 
     # ------------------------------------------------------------------
     # Public interface
@@ -129,12 +140,30 @@ class GuardrailService:
         Returns ``True`` when a violation is detected (the message should be
         blocked), ``False`` when the text is compliant.
 
-        Falls back to ``False`` (allow) when no OpenAI client is configured or
+        Falls back to ``False`` (allow) when no client is configured or
         when the LLM call fails, so that a misconfiguration never silently
         blocks all messages.
         """
-        if self._openai_client is None:
-            logger.warning("_llm_evaluate: no openai_client configured — skipping LLM check")
+        client_obj: Any | None = None
+        # Configurable fallback (settings.DEFAULT_FALLBACK_MODEL) so
+        # self-hosted gateways aren't forced onto OpenAI's gpt-4o-mini name
+        # when the resolver is unavailable.
+        model_id = settings.DEFAULT_FALLBACK_MODEL
+        if self._resolver is not None:
+            try:
+                resolved = await self._resolver.resolve("input_guard")
+                client_obj = resolved.http_client
+                model_id = resolved.model_id
+            except Exception:  # noqa: BLE001
+                logger.warning(
+                    "_llm_evaluate: resolver failed — falling back to %r",
+                    model_id,
+                    exc_info=True,
+                )
+        if client_obj is None:
+            client_obj = self._openai_client
+        if client_obj is None:
+            logger.warning("_llm_evaluate: no LLM client configured — skipping LLM check")
             return False
 
         # Strip closing tags from untrusted inputs to prevent structural injection.
@@ -152,8 +181,8 @@ class GuardrailService:
         )
 
         try:
-            response = await self._openai_client.chat.completions.create(
-                model="gpt-4o-mini",
+            response = await client_obj.chat.completions.create(
+                model=model_id,
                 messages=[{"role": "user", "content": prompt}],
                 max_tokens=10,
                 temperature=0,

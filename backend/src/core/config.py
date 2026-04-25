@@ -37,6 +37,13 @@ class Settings(BaseSettings):
     ENCRYPTION_KEY: str
     # OpenAI
     OPENAI_API_KEY: str = ""
+    # AI Models v2 — enables AIModel/Embedder-driven pipeline.
+    # Defaults to True; gradual-rollout flag is preserved for future deployments.
+    AI_MODELS_V2: bool = True
+    # Fallback model id used when the AIModelResolver cannot resolve a stage
+    # (e.g. guardrail eval before any AIModel/Embedder is provisioned).
+    # Configurable so deployments behind self-hosted gateways can override.
+    DEFAULT_FALLBACK_MODEL: str = "gpt-4o-mini"
     # Email
     SMTP_HOST: str = "localhost"
     SMTP_PORT: int = 587

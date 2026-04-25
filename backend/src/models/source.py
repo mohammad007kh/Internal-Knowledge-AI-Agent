@@ -63,6 +63,13 @@ class Source(Base, UUIDMixin, TimestampMixin):
     # Internal MinIO object key — NEVER exposed in API responses
     file_storage_path: Mapped[str | None] = mapped_column(String, nullable=True)
     next_sync_due_at: Mapped[datetime | None] = mapped_column(nullable=True)
+    # Embedder pinned at Source creation; immutable once chunks exist.
+    embedder_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("embedders.id", ondelete="RESTRICT"),
+        nullable=True,
+        index=True,
+    )
 
     # -- relationships -------------------------------------------------------
     owner: Mapped[User] = relationship(

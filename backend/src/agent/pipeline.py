@@ -1,4 +1,4 @@
-﻿"""LangGraph 8-node pipeline - fully wired and compiled."""
+"""LangGraph 8-node pipeline - fully wired and compiled."""
 from __future__ import annotations
 
 import functools
@@ -10,7 +10,6 @@ from langfuse import Langfuse
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
-from openai import AsyncOpenAI
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.agent.nodes import (
@@ -26,7 +25,8 @@ from src.agent.nodes import (
 from src.agent.state import AgentState
 from src.repositories.chat_repository import ChatMessageRepository, ChatSessionRepository
 from src.repositories.chunk_repository import ChunkRepository
-from src.services.embedding_service import EmbeddingService
+from src.services.ai_model_resolver import AIModelResolver
+from src.services.embedding_service_factory import EmbeddingServiceFactory
 from src.services.guardrail_service import GuardrailService
 
 logger = logging.getLogger(__name__)
@@ -48,11 +48,11 @@ def route_after_guardrail_input(state: AgentState) -> str:
 def build_pipeline(
     *,
     db_session: AsyncSession,
-    embedding_service: EmbeddingService,
     chunk_repository: ChunkRepository,
     chat_session_repository: ChatSessionRepository,
     chat_message_repository: ChatMessageRepository,
-    openai_client: AsyncOpenAI,
+    ai_model_resolver: AIModelResolver,
+    embedding_service_factory: EmbeddingServiceFactory,
     langfuse: Langfuse,
     guardrail_service: GuardrailService | None = None,
 ) -> CompiledStateGraph[Any, Any, Any, Any]:
@@ -70,14 +70,14 @@ def build_pipeline(
     )
     _retrieve_context = functools.partial(
         retrieve_context,
-        embedding_service=embedding_service,
+        embedding_service_factory=embedding_service_factory,
         chunk_repository=chunk_repository,
         db_session=db_session,
         langfuse=langfuse,
     )
     _generate_response = functools.partial(
         generate_response,
-        openai_client=openai_client,
+        ai_model_resolver=ai_model_resolver,
         langfuse=langfuse,
     )
 

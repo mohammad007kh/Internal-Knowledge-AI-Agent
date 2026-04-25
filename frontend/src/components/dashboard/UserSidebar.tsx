@@ -2,6 +2,7 @@
 
 import { AdminPanelButton } from './AdminPanelButton'
 import { MobileHeader, Sidebar } from './Sidebar'
+import { SidebarNavGroup } from './SidebarNavGroup'
 import { SidebarNavLink } from './SidebarNavLink'
 import { ThemeToggleRow } from './ThemeToggleRow'
 import { UserPopover } from './UserPopover'
@@ -12,15 +13,19 @@ const BRAND = 'Knowledge AI'
 export function UserSidebar() {
   const renderNav = (onNavigate?: () => void) => (
     <>
-      {USER_NAV.map((item) => (
-        <SidebarNavLink
-          key={item.href}
-          href={item.href}
-          label={item.label}
-          icon={item.icon}
-          onNavigate={onNavigate}
-        />
-      ))}
+      {USER_NAV.map((item) =>
+        item.children && item.children.length > 0 ? (
+          <SidebarNavGroup key={item.href} item={item} onNavigate={onNavigate} />
+        ) : (
+          <SidebarNavLink
+            key={item.href}
+            href={item.href}
+            label={item.label}
+            icon={item.icon}
+            onNavigate={onNavigate}
+          />
+        )
+      )}
     </>
   )
 
