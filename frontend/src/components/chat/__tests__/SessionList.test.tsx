@@ -95,7 +95,7 @@ test('new session button fires create mutation', async () => {
   render(<SessionList />, { wrapper })
   await screen.findByText('Project alpha')
   await userEvent.click(screen.getByRole('button', { name: /new chat session/i }))
-  expect(apiClient.post).toHaveBeenCalledWith('/chat/sessions', { title: 'New chat' })
+  expect(apiClient.post).toHaveBeenCalledWith('/api/v1/chat/sessions', { title: 'New chat' })
 })
 
 test('shows delete confirmation dialog', async () => {

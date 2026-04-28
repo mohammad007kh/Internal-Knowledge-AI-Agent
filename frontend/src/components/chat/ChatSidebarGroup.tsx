@@ -168,10 +168,16 @@ export function ChatSidebarGroup({ onNavigate }: ChatSidebarGroupProps) {
             <button
               type="button"
               aria-label="All chats"
+              aria-current={onChatRoute ? 'page' : undefined}
               onClick={openAllChats}
-              className="mx-auto flex h-9 w-9 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground"
+              className={cn(
+                'relative mx-auto flex h-9 w-9 items-center justify-center rounded-md transition-colors',
+                onChatRoute
+                  ? 'bg-accent text-accent-foreground before:absolute before:left-0 before:top-1/2 before:h-5 before:w-0.5 before:-translate-y-1/2 before:rounded-r-full before:bg-primary'
+                  : 'text-muted-foreground hover:bg-accent/50 hover:text-foreground'
+              )}
             >
-              <ListIcon className="h-4 w-4" aria-hidden />
+              <ListIcon className={cn('h-4 w-4', onChatRoute && 'text-primary')} aria-hidden />
             </button>
           </TooltipTrigger>
           <TooltipContent side="right">All chats (Ctrl+\)</TooltipContent>
@@ -182,45 +188,52 @@ export function ChatSidebarGroup({ onNavigate }: ChatSidebarGroupProps) {
   }
 
   // --- Expanded sidebar: disclosure with inline recent sessions ---
+  // The disclosure header is a row of independently-focusable controls — a
+  // <button> nested inside another <button> is invalid HTML and breaks
+  // keyboard navigation/screen readers. The toggle wraps the icon+label and
+  // the chevron only; the "+" sits beside it as a sibling.
   return (
     <div className="space-y-1">
-      <button
-        type="button"
-        aria-expanded={expanded}
-        aria-controls="nav-group-chat"
-        onClick={toggle}
+      <div
         className={cn(
-          'flex w-full items-center gap-2.5 rounded-md px-3 py-2.5 text-sm font-medium transition-colors',
+          'flex w-full items-center gap-1 rounded-md pr-1 text-sm font-medium transition-colors',
           onChatRoute
             ? 'text-foreground'
             : 'text-muted-foreground hover:bg-accent/50 hover:text-foreground'
         )}
       >
-        <MessageCircleIcon
-          className={cn('h-4 w-4 shrink-0', onChatRoute && 'text-primary')}
-          aria-hidden
-        />
-        <span className="flex-1 truncate text-left">Chat</span>
+        <button
+          type="button"
+          aria-expanded={expanded}
+          aria-controls="nav-group-chat"
+          onClick={toggle}
+          className="flex flex-1 items-center gap-2.5 rounded-md px-3 py-2.5 text-left"
+        >
+          <MessageCircleIcon
+            className={cn('h-4 w-4 shrink-0', onChatRoute && 'text-primary')}
+            aria-hidden
+          />
+          <span className="flex-1 truncate">Chat</span>
+          <ChevronRightIcon
+            className={cn(
+              'h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform',
+              expanded && 'rotate-90'
+            )}
+            aria-hidden
+          />
+        </button>
         <button
           type="button"
           aria-label="New chat"
           disabled={createMutation.isPending}
-          onClick={(e) => {
-            e.stopPropagation()
-            createMutation.mutate()
-          }}
-          className="-mr-1 flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
+          onClick={() => createMutation.mutate()}
+          // 44x44 hit target on mobile per WCAG 2.5.5; condenses to 24x24
+          // visually on desktop where pointer precision is higher.
+          className="flex h-11 w-11 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground md:h-6 md:w-6"
         >
           <PlusIcon className="h-3.5 w-3.5" aria-hidden />
         </button>
-        <ChevronRightIcon
-          className={cn(
-            'h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform',
-            expanded && 'rotate-90'
-          )}
-          aria-hidden
-        />
-      </button>
+      </div>
 
       {expanded ? (
         <div id="nav-group-chat" className="ml-3 space-y-0.5 border-l border-border/60 pl-2">

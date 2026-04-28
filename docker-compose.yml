@@ -1,13 +1,17 @@
 services:
   frontend:
-    build: ./frontend
+    build:
+      context: ./frontend
+      args:
+        # Next.js inlines NEXT_PUBLIC_* at build time. Pass the host-aware
+        # value through build args so changing HOST_BACKEND_PORT only
+        # requires `docker compose build frontend` (no runtime env needed).
+        NEXT_PUBLIC_API_URL: "http://localhost:${HOST_BACKEND_PORT:-8000}"
     ports:
       - "${HOST_FRONTEND_PORT:-3000}:3000"
     depends_on:
       backend:
         condition: service_healthy
-    environment:
-      - NEXT_PUBLIC_API_URL=http://localhost:${HOST_BACKEND_PORT:-8000}
     healthcheck:
       test: ["CMD", "wget", "-q", "--spider", "http://localhost:3000"]
       interval: 30s
@@ -25,6 +29,14 @@ services:
       redis:
         condition: service_healthy
     env_file: .env
+    environment:
+      # Override .env so presigned URLs always track HOST_MINIO_API_PORT.
+      # Otherwise users who shift the host port would see broken downloads
+      # because MINIO_PUBLIC_ENDPOINT in .env stays at localhost:9000.
+      MINIO_PUBLIC_ENDPOINT: "localhost:${HOST_MINIO_API_PORT:-9000}"
+      # CORS allow-origin must track HOST_FRONTEND_PORT — otherwise the
+      # browser blocks all credentialed requests from a shifted frontend.
+      FRONTEND_URL: "http://localhost:${HOST_FRONTEND_PORT:-3000}"
     command: sh -c "alembic upgrade head && exec uvicorn src.main:app --host 0.0.0.0 --port 8000"
     volumes:
       - ./app_config.yaml:/app/app_config.yaml:ro

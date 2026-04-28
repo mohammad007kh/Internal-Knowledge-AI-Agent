@@ -72,7 +72,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         // Edge middleware think we are still authenticated, which cancels any
         // /login redirect and reloads /chat, triggering another 401 cycle.
         setAccessTokenState(null)
-        Cookies.remove('__access')
+        Cookies.remove('__access', { path: '/' })
       }
     }, refreshIn)
   }, [])
@@ -121,7 +121,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const clearAccessToken = useCallback(() => {
     setAccessTokenState(null)
-    Cookies.remove('__access')
+    Cookies.remove('__access', { path: '/' })
     if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current)
   }, [])
 

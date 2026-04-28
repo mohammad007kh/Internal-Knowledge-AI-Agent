@@ -41,7 +41,19 @@ apiClient.interceptors.request.use((config) => {
 
 // Response interceptor — parse RFC 7807 errors, then on 401 attempt refresh and retry once
 let isRefreshing = false
-let refreshQueue: Array<(token: string) => void> = []
+type QueuedWaiter = {
+  resolve: (token: string) => void
+  reject: (error: unknown) => void
+}
+let refreshQueue: QueuedWaiter[] = []
+
+function flushQueue(token: string | null, error?: unknown): void {
+  for (const waiter of refreshQueue) {
+    if (token) waiter.resolve(token)
+    else waiter.reject(error)
+  }
+  refreshQueue = []
+}
 
 apiClient.interceptors.response.use(
   (response) => response,
@@ -68,10 +80,13 @@ apiClient.interceptors.response.use(
     original._retried = true
 
     if (isRefreshing) {
-      return new Promise((resolve) => {
-        refreshQueue.push((token: string) => {
-          original.headers.Authorization = `Bearer ${token}`
-          resolve(apiClient(original))
+      return new Promise((resolve, reject) => {
+        refreshQueue.push({
+          resolve: (token: string) => {
+            original.headers.Authorization = `Bearer ${token}`
+            resolve(apiClient(original))
+          },
+          reject,
         })
       })
     }
@@ -94,14 +109,16 @@ apiClient.interceptors.response.use(
       // cascade into a navigation loop between /chat and /login.
       setToken(newToken)
 
-      // Flush queued requests
-      for (const cb of refreshQueue) cb(newToken)
-      refreshQueue = []
+      // Flush queued requests with the fresh token
+      flushQueue(newToken)
 
       original.headers.Authorization = `Bearer ${newToken}`
       return apiClient(original)
     } catch (refreshError) {
-      refreshQueue = []
+      // Reject every concurrent waiter so their callers see the failure
+      // immediately instead of hanging on a never-resolved promise (which
+      // surfaces as an infinite UI spinner).
+      flushQueue(null, refreshError)
       // Refresh failed (expired/missing refresh cookie OR rate-limited 429).
       // Clear *both* the in-memory access token and the JS-readable __access
       // cookie. The Edge middleware decides authentication state from the
@@ -110,7 +127,8 @@ apiClient.interceptors.response.use(
       // which remounts and re-triggers the same 401 → refresh → 429 cycle.
       setToken(null)
       if (typeof window !== 'undefined') {
-        Cookies.remove('__access')
+        // Match the path used at set-time so js-cookie reliably clears it.
+        Cookies.remove('__access', { path: '/' })
         if (!window.location.pathname.startsWith('/login')) {
           window.location.href = '/login'
         }
