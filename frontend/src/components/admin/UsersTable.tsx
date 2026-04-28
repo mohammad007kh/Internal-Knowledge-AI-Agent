@@ -52,19 +52,16 @@ export interface AdminUser {
 interface UsersResponse {
   items: AdminUser[]
   total: number
-  page: number
-  page_size: number
+  limit: number
+  offset: number
 }
 
-const PAGE_SIZE = 25
+const PAGE_LIMIT = 25
 
-async function fetchUsers(page: number, search: string): Promise<UsersResponse> {
-  const params = new URLSearchParams({
-    page: String(page),
-    page_size: String(PAGE_SIZE),
+async function fetchUsers(limit: number, offset: number): Promise<UsersResponse> {
+  const res = await apiClient.get<UsersResponse>('/api/v1/users', {
+    params: { limit, offset },
   })
-  if (search) params.set('search', search)
-  const res = await apiClient.get<UsersResponse>(`/api/v1/users?${params}`)
   return res.data
 }
 
@@ -79,30 +76,36 @@ async function reactivateUser(id: string): Promise<void> {
 export function UsersTable() {
   const queryClient = useQueryClient()
   const { user: authUser } = useAuth()
-  const [page, setPage] = useState(1)
+  const [offset, setOffset] = useState(0)
   const [search, setSearch] = useState('')
   const [roleFilter, setRoleFilter] = useState<'all' | 'admin' | 'user'>('all')
   const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'inactive'>('all')
   const [deactivatingId, setDeactivatingId] = useState<string | null>(null)
 
+  const page = Math.floor(offset / PAGE_LIMIT) + 1
+
   const { data, isLoading } = useQuery({
-    queryKey: usersKeys.list(page, search),
-    queryFn: () => fetchUsers(page, search),
+    queryKey: usersKeys.listLegacy(PAGE_LIMIT, offset),
+    queryFn: () => fetchUsers(PAGE_LIMIT, offset),
     staleTime: 15_000,
   })
 
   const allUsers: AdminUser[] = data?.items ?? []
   const users = useMemo(() => {
+    const term = search.trim().toLowerCase()
     return allUsers.filter((u) => {
       const matchRole = roleFilter === 'all' || u.role === roleFilter
       const matchStatus =
-        statusFilter === 'all' ||
-        (statusFilter === 'active' ? u.is_active : !u.is_active)
-      return matchRole && matchStatus
+        statusFilter === 'all' || (statusFilter === 'active' ? u.is_active : !u.is_active)
+      const matchSearch =
+        term.length === 0 ||
+        u.email.toLowerCase().includes(term) ||
+        (u.full_name?.toLowerCase().includes(term) ?? false)
+      return matchRole && matchStatus && matchSearch
     })
-  }, [allUsers, roleFilter, statusFilter])
+  }, [allUsers, roleFilter, statusFilter, search])
   const total = data?.total ?? 0
-  const totalPages = Math.ceil(total / PAGE_SIZE)
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_LIMIT))
 
   const deactivateMutation = useMutation({
     mutationFn: deactivateUser,
@@ -251,7 +254,7 @@ export function UsersTable() {
           value={search}
           onChange={(e) => {
             setSearch(e.target.value)
-            setPage(1)
+            setOffset(0)
           }}
           className="h-9 max-w-xs"
           aria-label="Search users"
@@ -331,20 +334,24 @@ export function UsersTable() {
 
       {totalPages > 1 && (
         <div className="flex items-center justify-between pt-2">
-          <p className="text-xs text-muted-foreground">{total} users total</p>
+          <p className="text-xs text-muted-foreground">
+            {total} users total — page {page} of {totalPages}
+          </p>
           <div className="flex gap-1.5">
             <Button
               size="sm"
               variant="outline"
-              onClick={() => setPage((p) => Math.max(1, p - 1))}
-              disabled={page <= 1}
+              onClick={() => setOffset((o) => Math.max(0, o - PAGE_LIMIT))}
+              disabled={offset <= 0}
             >
               Previous
             </Button>
             <Button
               size="sm"
               variant="outline"
-              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+              onClick={() =>
+                setOffset((o) => Math.min((totalPages - 1) * PAGE_LIMIT, o + PAGE_LIMIT))
+              }
               disabled={page >= totalPages}
             >
               Next

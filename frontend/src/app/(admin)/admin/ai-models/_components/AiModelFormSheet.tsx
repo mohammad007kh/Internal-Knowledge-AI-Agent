@@ -131,8 +131,11 @@ export function AiModelFormSheet({ open, onOpenChange, model }: AiModelFormSheet
         modelId: model.model_id,
         apiKey: '',
         replaceApiKey: false,
-        defaultTemperature: model.default_temperature,
-        defaultMaxTokens: model.default_max_tokens,
+        // Defensive null-coalescing: the backend schema declares these as
+        // non-nullable with defaults, but older records or future schema
+        // changes could leak null — keep the slider/input renderable.
+        defaultTemperature: model.default_temperature ?? EMPTY_FORM.defaultTemperature,
+        defaultMaxTokens: model.default_max_tokens ?? EMPTY_FORM.defaultMaxTokens,
         capabilitiesJson: safeStringify(model.capabilities),
         isActive: model.is_active,
       })

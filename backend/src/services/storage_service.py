@@ -26,11 +26,37 @@ class StorageService:
 
             settings = _default_settings
         self._settings = settings
+        # Internal client — used for all backend-side operations (bucket
+        # bootstrap, server-to-server uploads, downloads).  Reaches MinIO
+        # over the Docker network at MINIO_ENDPOINT (e.g. ``minio:9000``).
         self._client: Minio = Minio(
             endpoint=settings.MINIO_ENDPOINT,
             access_key=settings.MINIO_ACCESS_KEY,
             secret_key=settings.MINIO_SECRET_KEY,
             secure=settings.MINIO_SECURE,
+        )
+        # Signing client — only used to generate presigned URLs that the
+        # browser will hit directly.  It must be constructed with the
+        # browser-reachable host (MINIO_PUBLIC_ENDPOINT, e.g.
+        # ``localhost:9000``) so the SigV4 ``host`` header signed into the
+        # URL matches the ``Host`` header the browser actually sends.
+        # Otherwise MinIO returns ``403 SignatureDoesNotMatch``.
+        #
+        # ``region`` is pinned explicitly: when minio-py generates a
+        # presigned URL it normally performs a ``GetBucketLocation`` round
+        # trip against the configured endpoint to discover the region.
+        # The signing endpoint (e.g. ``localhost:9000``) is not reachable
+        # from inside the backend container, so we must avoid that lookup
+        # by passing the region directly.  ``us-east-1`` is the default
+        # MinIO single-site region and matches the credentials used by
+        # the internal client.
+        public_endpoint = settings.MINIO_PUBLIC_ENDPOINT or settings.MINIO_ENDPOINT
+        self._signing_client: Minio = Minio(
+            endpoint=public_endpoint,
+            access_key=settings.MINIO_ACCESS_KEY,
+            secret_key=settings.MINIO_SECRET_KEY,
+            secure=settings.MINIO_SECURE,
+            region="us-east-1",
         )
         self._bucket = settings.MINIO_BUCKET
         self._bucket_ensured: bool = False
@@ -139,22 +165,19 @@ class StorageService:
         # otherwise the browser PUT would 404 against MinIO.  The check is
         # cheap (single HEAD against MinIO) and runs in a worker thread.
         await self._ensure_bucket()
+        # Sign the URL against the *public* endpoint (the host the browser
+        # will hit).  Using the internal client and rewriting the host
+        # afterwards would invalidate the SigV4 ``host`` header and cause a
+        # ``403 SignatureDoesNotMatch``.
         # ``presigned_put_object`` performs a synchronous HTTP round-trip
         # internally (region lookup); offload to a worker thread to keep
         # the event loop free.
         url: str = await asyncio.to_thread(
-            self._client.presigned_put_object,
+            self._signing_client.presigned_put_object,
             self._bucket,
             object_key,
             timedelta(minutes=expires_minutes),
         )
-        # Rewrite the internal MinIO host (e.g. `minio:9000` inside Docker)
-        # with the browser-reachable public host (e.g. `localhost:9000`) so
-        # the presigned URL works from the user's browser.
-        internal = self._settings.MINIO_ENDPOINT
-        public = self._settings.MINIO_PUBLIC_ENDPOINT
-        if internal and public and internal != public:
-            url = url.replace(internal, public, 1)
         return url
 
     async def object_exists(

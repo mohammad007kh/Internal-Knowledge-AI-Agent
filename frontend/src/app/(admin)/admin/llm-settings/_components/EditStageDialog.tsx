@@ -22,6 +22,7 @@ import {
 } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
 import { useUpdateLlmStage } from '@/features/llm-settings/hooks/useLlmSettings'
 import { useAiModels } from '@/hooks/use-ai-models'
@@ -41,11 +42,29 @@ import { requirementsFor } from './stage-requirements'
 const PROVIDERS_WITHOUT_NATIVE_EMBEDDER: ReadonlySet<string> = new Set(['anthropic'])
 
 /**
+ * Fallback values used to seed the override sliders when:
+ *  - the stage has no override set (`stage.temperature` / `stage.max_tokens`
+ *    are null), and
+ *  - the picked AI Model's defaults haven't loaded yet (or the model is
+ *    unset).
+ *
+ * The user can edit the value once the override toggle is on. These are
+ * sane neutral defaults — see backend `src/api/v1/admin/llm_settings.py`.
+ */
+const FALLBACK_TEMPERATURE = 0.7
+const FALLBACK_MAX_TOKENS = 2048
+
+/**
  * Edit dialog for a pipeline stage.
  *
  * Post-rewire: replaces the inline provider/model/api_key fields with the
  * `AiModelPicker` (Combobox). Per-stage `temperature` / `max_tokens` /
  * `custom_prompt` overrides remain.
+ *
+ * `stage.temperature` and `stage.max_tokens` are nullable post-rewire:
+ * `null` means "inherit from the linked AI Model defaults". The dialog
+ * exposes this via override toggles — when off, the form sends `null` and
+ * the backend resolves the value at runtime.
  */
 
 interface EditStageDialogProps {
@@ -58,16 +77,26 @@ export function EditStageDialog({ stage, open, onOpenChange }: EditStageDialogPr
   const updateMutation = useUpdateLlmStage()
 
   const [aiModelId, setAiModelId] = useState<string | null>(stage.ai_model?.id ?? null)
-  const [temperature, setTemperature] = useState(stage.temperature)
-  const [maxTokens, setMaxTokens] = useState(stage.max_tokens)
+  // `temperature` / `maxTokens` are always non-null numbers in local state
+  // so the slider/input can render unconditionally. The "override" booleans
+  // determine whether the value is sent to the backend or replaced with
+  // `null` (= inherit from the linked AI Model defaults).
+  const [temperature, setTemperature] = useState<number>(stage.temperature ?? FALLBACK_TEMPERATURE)
+  const [maxTokens, setMaxTokens] = useState<number>(stage.max_tokens ?? FALLBACK_MAX_TOKENS)
+  const [overrideTemperature, setOverrideTemperature] = useState<boolean>(
+    stage.temperature !== null
+  )
+  const [overrideMaxTokens, setOverrideMaxTokens] = useState<boolean>(stage.max_tokens !== null)
   const [customPrompt, setCustomPrompt] = useState(stage.custom_prompt ?? '')
   const [confirmDiscard, setConfirmDiscard] = useState(false)
 
   useEffect(() => {
     if (open) {
       setAiModelId(stage.ai_model?.id ?? null)
-      setTemperature(stage.temperature)
-      setMaxTokens(stage.max_tokens)
+      setTemperature(stage.temperature ?? FALLBACK_TEMPERATURE)
+      setMaxTokens(stage.max_tokens ?? FALLBACK_MAX_TOKENS)
+      setOverrideTemperature(stage.temperature !== null)
+      setOverrideMaxTokens(stage.max_tokens !== null)
       setCustomPrompt(stage.custom_prompt ?? '')
       setConfirmDiscard(false)
     }
@@ -106,10 +135,21 @@ export function EditStageDialog({ stage, open, onOpenChange }: EditStageDialogPr
     llmFamily !== embedderFamily &&
     !PROVIDERS_WITHOUT_NATIVE_EMBEDDER.has(llmProviderKey ?? '')
 
+  // Defaults sourced from the picked AI Model when available. Used to
+  // display "Default (X)" hints when the override toggle is off, so the
+  // admin sees what value the backend will actually use.
+  const modelDefaultTemperature = pickedModel?.default_temperature ?? null
+  const modelDefaultMaxTokens = pickedModel?.default_max_tokens ?? null
+
+  // What gets sent to the backend on save. `null` preserves the "inherit
+  // from AI Model defaults" semantic.
+  const effectiveTemperature: number | null = overrideTemperature ? temperature : null
+  const effectiveMaxTokens: number | null = overrideMaxTokens ? maxTokens : null
+
   const isDirty =
     aiModelId !== (stage.ai_model?.id ?? null) ||
-    temperature !== stage.temperature ||
-    maxTokens !== stage.max_tokens ||
+    effectiveTemperature !== stage.temperature ||
+    effectiveMaxTokens !== stage.max_tokens ||
     customPrompt !== (stage.custom_prompt ?? '')
 
   function handleOpenChange(next: boolean) {
@@ -131,8 +171,10 @@ export function EditStageDialog({ stage, open, onOpenChange }: EditStageDialogPr
         stage: stage.stage,
         body: {
           ai_model_id: aiModelId,
-          temperature,
-          max_tokens: maxTokens,
+          // `null` preserves the "inherit from AI Model defaults" semantic
+          // when the admin hasn't explicitly opted into an override.
+          temperature: effectiveTemperature,
+          max_tokens: effectiveMaxTokens,
           custom_prompt: customPrompt ? customPrompt : null,
         },
       },
@@ -211,9 +253,24 @@ export function EditStageDialog({ stage, open, onOpenChange }: EditStageDialogPr
             <div className="space-y-3">
               <div className="flex items-center justify-between">
                 <Label htmlFor={`${stage.stage}-temperature`}>Temperature</Label>
-                <span className="text-xs tabular-nums text-muted-foreground">
-                  {temperature.toFixed(1)}
-                </span>
+                <div className="flex items-center gap-2">
+                  {overrideTemperature ? (
+                    <span className="text-xs tabular-nums text-muted-foreground">
+                      {temperature.toFixed(1)}
+                    </span>
+                  ) : (
+                    <span className="text-xs italic text-muted-foreground">
+                      {modelDefaultTemperature !== null
+                        ? `Model default (${modelDefaultTemperature.toFixed(1)})`
+                        : 'Model default'}
+                    </span>
+                  )}
+                  <Switch
+                    checked={overrideTemperature}
+                    onCheckedChange={setOverrideTemperature}
+                    aria-label="Override temperature"
+                  />
+                </div>
               </div>
               <input
                 id={`${stage.stage}-temperature`}
@@ -224,7 +281,8 @@ export function EditStageDialog({ stage, open, onOpenChange }: EditStageDialogPr
                 value={temperature}
                 onChange={(e) => setTemperature(Number(e.target.value))}
                 aria-label="Temperature"
-                className="w-full accent-primary"
+                disabled={!overrideTemperature}
+                className="w-full accent-primary disabled:cursor-not-allowed disabled:opacity-50"
               />
               <div className="flex justify-between text-[10px] uppercase tracking-wide text-muted-foreground">
                 <span>Precise</span>
@@ -233,7 +291,23 @@ export function EditStageDialog({ stage, open, onOpenChange }: EditStageDialogPr
               </div>
             </div>
             <div className="space-y-2">
-              <Label htmlFor={`${stage.stage}-max-tokens`}>Max Tokens</Label>
+              <div className="flex items-center justify-between">
+                <Label htmlFor={`${stage.stage}-max-tokens`}>Max Tokens</Label>
+                <div className="flex items-center gap-2">
+                  {!overrideMaxTokens ? (
+                    <span className="text-xs italic text-muted-foreground">
+                      {modelDefaultMaxTokens !== null
+                        ? `Model default (${modelDefaultMaxTokens})`
+                        : 'Model default'}
+                    </span>
+                  ) : null}
+                  <Switch
+                    checked={overrideMaxTokens}
+                    onCheckedChange={setOverrideMaxTokens}
+                    aria-label="Override max tokens"
+                  />
+                </div>
+              </div>
               <Input
                 id={`${stage.stage}-max-tokens`}
                 type="number"
@@ -241,7 +315,8 @@ export function EditStageDialog({ stage, open, onOpenChange }: EditStageDialogPr
                 step={1}
                 value={maxTokens}
                 onChange={(e) => setMaxTokens(Number(e.target.value))}
-                required
+                disabled={!overrideMaxTokens}
+                required={overrideMaxTokens}
               />
             </div>
             <div className="space-y-2">

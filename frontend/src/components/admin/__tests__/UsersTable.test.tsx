@@ -31,7 +31,7 @@ const { mockUsers } = vi.hoisted(() => {
 vi.mock('@/lib/api-client', () => ({
   apiClient: {
     get: vi.fn().mockResolvedValue({
-      data: { items: mockUsers, total: 2, page: 1, page_size: 25 },
+      data: { items: mockUsers, total: 2, limit: 25, offset: 0 },
     }),
     patch: vi.fn().mockResolvedValue({ data: {} }),
   },
@@ -75,6 +75,6 @@ test('reactivate button calls PATCH is_active=true', async () => {
   await screen.findByText('user@example.com')
   await userEvent.click(screen.getByRole('button', { name: /reactivate user@example.com/i }))
   await waitFor(() => {
-    expect(apiClient.patch).toHaveBeenCalledWith('/users/u2', { is_active: true })
+    expect(apiClient.patch).toHaveBeenCalledWith('/api/v1/users/u2', { is_active: true })
   })
 })

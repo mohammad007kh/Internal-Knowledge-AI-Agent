@@ -38,11 +38,15 @@ export interface LlmStageConfig {
   /**
    * Legacy fields retained for backward compatibility while PR 2 ships the
    * pipeline rewire. UI prefers `ai_model` when present.
+   *
+   * `temperature` and `max_tokens` are nullable post-rewire: ``null`` means
+   * "inherit from the linked AI Model defaults". The backend resolves them
+   * at runtime — see `src/api/v1/admin/llm_settings.py`.
    */
   model: string
   api_key_hint: string | null
-  temperature: number
-  max_tokens: number
+  temperature: number | null
+  max_tokens: number | null
   custom_prompt: string | null
 }
 
@@ -54,8 +58,16 @@ export interface LlmStageConfig {
  */
 export interface UpdateLlmStageRequest {
   ai_model_id: string
-  temperature?: number
-  max_tokens?: number
+  /**
+   * `null` (or omitted) tells the backend to inherit
+   * `default_temperature` from the linked AI Model.
+   */
+  temperature?: number | null
+  /**
+   * `null` (or omitted) tells the backend to inherit
+   * `default_max_tokens` from the linked AI Model.
+   */
+  max_tokens?: number | null
   custom_prompt?: string | null
 }
 

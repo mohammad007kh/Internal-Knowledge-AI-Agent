@@ -112,11 +112,23 @@ function StageCard({ stage, onEdit }: StageCardProps) {
         ) : null}
         <div className="flex items-center justify-between">
           <span className="text-muted-foreground">Temperature</span>
-          <span>{stage.temperature}</span>
+          <span>
+            {stage.temperature !== null ? (
+              stage.temperature
+            ) : (
+              <span className="italic text-muted-foreground">Model default</span>
+            )}
+          </span>
         </div>
         <div className="flex items-center justify-between">
           <span className="text-muted-foreground">Max tokens</span>
-          <span>{stage.max_tokens}</span>
+          <span>
+            {stage.max_tokens !== null ? (
+              stage.max_tokens
+            ) : (
+              <span className="italic text-muted-foreground">Model default</span>
+            )}
+          </span>
         </div>
         <div className="pt-2">
           <Button
