@@ -62,15 +62,15 @@ export default function AiModelsPage() {
   }
 
   return (
-    <div className="space-y-6 p-6">
+    <div className="space-y-4 p-4 md:space-y-6 md:p-6">
       <header className="flex flex-wrap items-start justify-between gap-3">
-        <div>
+        <div className="min-w-0">
           <h1 className="text-xl font-semibold">AI Models</h1>
           <p className="text-sm text-muted-foreground">
             Manage LLM endpoint records. Each pipeline stage references one of these.
           </p>
         </div>
-        <Button className="gap-1.5" onClick={openNewSheet}>
+        <Button className="w-full gap-1.5 sm:w-auto" onClick={openNewSheet}>
           <PlusIcon className="h-4 w-4" aria-hidden />
           New AI model
         </Button>
@@ -87,8 +87,8 @@ export default function AiModelsPage() {
         />
       ) : (
         <div className="space-y-4">
-          <div className="flex items-center gap-2">
-            <div className="relative flex-1 max-w-sm">
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="relative w-full sm:max-w-sm sm:flex-1">
               <SearchIcon
                 className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground"
                 aria-hidden
@@ -115,7 +115,7 @@ export default function AiModelsPage() {
               ))}
             </div>
           ) : (
-            <div className="rounded-md border">
+            <div className="overflow-x-auto rounded-md border">
               <AiModelsTable items={items} onEdit={openEditSheet} onDelete={openDeleteDialog} />
             </div>
           )}

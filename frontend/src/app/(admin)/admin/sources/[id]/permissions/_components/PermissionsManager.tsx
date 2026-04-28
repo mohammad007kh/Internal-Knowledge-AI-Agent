@@ -90,7 +90,7 @@ export function PermissionsManager({ sourceId }: PermissionsManagerProps) {
   return (
     <div className="space-y-6">
       <div className="space-y-2">
-        <div className="flex gap-2">
+        <div className="flex flex-col gap-2 sm:flex-row">
           <Input
             type="email"
             placeholder="User email address"
@@ -102,10 +102,14 @@ export function PermissionsManager({ sourceId }: PermissionsManagerProps) {
             onKeyDown={(e) => {
               if (e.key === 'Enter') handleGrant()
             }}
-            className="max-w-sm"
+            className="w-full sm:max-w-sm"
             aria-invalid={!!lookupError}
           />
-          <Button onClick={handleGrant} disabled={!email.trim() || isPending}>
+          <Button
+            className="w-full sm:w-auto"
+            onClick={handleGrant}
+            disabled={!email.trim() || isPending}
+          >
             <UserPlus className="mr-2 h-4 w-4" />
             {isPending ? 'Granting…' : 'Grant'}
           </Button>
@@ -120,18 +124,15 @@ export function PermissionsManager({ sourceId }: PermissionsManagerProps) {
           {userIds.map((userId) => (
             <li
               key={userId}
-              className="flex items-center justify-between rounded-md border px-4 py-2"
+              className="flex items-center justify-between gap-2 rounded-md border px-3 py-2 sm:px-4"
             >
-              <span
-                className="text-sm"
-                title={userId}
-              >
-                {emailMap[userId] ?? userId.slice(0, 8) + '…'}
+              <span className="min-w-0 flex-1 truncate text-sm" title={userId}>
+                {emailMap[userId] ?? `${userId.slice(0, 8)}…`}
               </span>
               <Button
                 variant="ghost"
                 size="sm"
-                className="text-destructive hover:text-destructive"
+                className="shrink-0 text-destructive hover:text-destructive"
                 onClick={() => revokeMutation.mutate(userId)}
                 disabled={revokeMutation.isPending && revokeMutation.variables === userId}
               >

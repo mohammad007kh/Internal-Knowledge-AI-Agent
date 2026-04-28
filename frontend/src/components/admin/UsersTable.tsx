@@ -133,7 +133,11 @@ export function UsersTable() {
       accessorKey: 'email',
       header: 'Email',
       cell: ({ row }) => (
-        <Link href={`/admin/users/${row.original.id}`} className="font-medium hover:underline">
+        <Link
+          href={`/admin/users/${row.original.id}`}
+          className="block max-w-[180px] truncate font-medium hover:underline sm:max-w-[260px]"
+          title={row.original.email}
+        >
           {row.original.email}
         </Link>
       ),
@@ -203,34 +207,34 @@ export function UsersTable() {
           <Button
             size="icon"
             variant="ghost"
-            className="h-7 w-7"
+            className="h-9 w-9"
             asChild
             aria-label={`Edit ${row.original.email}`}
           >
             <Link href={`/admin/users/${row.original.id}`}>
-              <PencilIcon className="h-3.5 w-3.5" />
+              <PencilIcon className="h-4 w-4" />
             </Link>
           </Button>
           {row.original.is_active && row.original.id !== authUser?.id ? (
             <Button
               size="icon"
               variant="ghost"
-              className="h-7 w-7 text-destructive hover:bg-destructive/10"
+              className="h-9 w-9 text-destructive hover:bg-destructive/10"
               onClick={() => setDeactivatingId(row.original.id)}
               aria-label={`Deactivate ${row.original.email}`}
             >
-              <BanIcon className="h-3.5 w-3.5" />
+              <BanIcon className="h-4 w-4" />
             </Button>
           ) : !row.original.is_active ? (
             <Button
               size="icon"
               variant="ghost"
-              className="h-7 w-7 text-green-600"
+              className="h-9 w-9 text-green-600"
               onClick={() => reactivateMutation.mutate(row.original.id)}
               disabled={reactivateMutation.isPending}
               aria-label={`Reactivate ${row.original.email}`}
             >
-              <CheckCircleIcon className="h-3.5 w-3.5" />
+              <CheckCircleIcon className="h-4 w-4" />
             </Button>
           ) : null}
         </div>
@@ -248,7 +252,7 @@ export function UsersTable() {
 
   return (
     <>
-      <div className="mb-4 flex flex-wrap items-center gap-2">
+      <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
         <Input
           placeholder="Search by email or name…"
           value={search}
@@ -256,36 +260,41 @@ export function UsersTable() {
             setSearch(e.target.value)
             setOffset(0)
           }}
-          className="h-9 max-w-xs"
+          className="h-9 w-full sm:max-w-xs"
           aria-label="Search users"
         />
-        <Select value={roleFilter} onValueChange={(v) => setRoleFilter(v as typeof roleFilter)}>
-          <SelectTrigger className="h-9 w-36" aria-label="Filter by role">
-            <SelectValue placeholder="All roles" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All roles</SelectItem>
-            <SelectItem value="admin">Admin</SelectItem>
-            <SelectItem value="user">User</SelectItem>
-          </SelectContent>
-        </Select>
-        <Select
-          value={statusFilter}
-          onValueChange={(v) => setStatusFilter(v as typeof statusFilter)}
-        >
-          <SelectTrigger className="h-9 w-36" aria-label="Filter by status">
-            <SelectValue placeholder="All statuses" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All statuses</SelectItem>
-            <SelectItem value="active">Active</SelectItem>
-            <SelectItem value="inactive">Inactive</SelectItem>
-          </SelectContent>
-        </Select>
+        <div className="flex gap-2">
+          <Select value={roleFilter} onValueChange={(v) => setRoleFilter(v as typeof roleFilter)}>
+            <SelectTrigger className="h-9 flex-1 sm:w-36 sm:flex-none" aria-label="Filter by role">
+              <SelectValue placeholder="All roles" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All roles</SelectItem>
+              <SelectItem value="admin">Admin</SelectItem>
+              <SelectItem value="user">User</SelectItem>
+            </SelectContent>
+          </Select>
+          <Select
+            value={statusFilter}
+            onValueChange={(v) => setStatusFilter(v as typeof statusFilter)}
+          >
+            <SelectTrigger
+              className="h-9 flex-1 sm:w-36 sm:flex-none"
+              aria-label="Filter by status"
+            >
+              <SelectValue placeholder="All statuses" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All statuses</SelectItem>
+              <SelectItem value="active">Active</SelectItem>
+              <SelectItem value="inactive">Inactive</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
       </div>
 
-      <div className="rounded-md border border-border">
-        <Table>
+      <div className="overflow-x-auto rounded-md border border-border">
+        <Table className="min-w-[640px]">
           <TableHeader>
             {table.getHeaderGroups().map((hg) => (
               <TableRow key={hg.id}>

@@ -176,9 +176,11 @@ function ProfileSection({
           <p className="mt-1 text-xs text-muted-foreground">Used for sign-in and notifications.</p>
         </div>
         <div className="sm:col-span-2">
-          <div className="flex items-center gap-2 rounded-md border bg-muted/40 px-3 py-2 text-sm">
-            <MailIcon className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
-            <span className="font-medium">{data.email}</span>
+          <div className="flex min-w-0 items-center gap-2 rounded-md border bg-muted/40 px-3 py-2 text-sm">
+            <MailIcon className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+            <span className="min-w-0 truncate font-medium" title={data.email}>
+              {data.email}
+            </span>
           </div>
         </div>
       </div>
@@ -390,12 +392,12 @@ export default function ProfilePage() {
 
   if (isLoading) {
     return (
-      <div className="space-y-6 p-6">
+      <div className="space-y-4 p-4 md:space-y-6 md:p-6">
         <div className="space-y-2">
           <Skeleton className="h-8 w-48" />
           <Skeleton className="h-4 w-72" />
         </div>
-        <div className="grid gap-8 lg:grid-cols-[220px_1fr]">
+        <div className="grid gap-6 lg:grid-cols-[220px_1fr] lg:gap-8">
           <Skeleton className="h-40 w-full" />
           <Skeleton className="h-96 w-full" />
         </div>
@@ -405,7 +407,7 @@ export default function ProfilePage() {
 
   if (isError || !data) {
     return (
-      <div className="p-6">
+      <div className="p-4 md:p-6">
         <ErrorState message={getErrorMessage(error)} onRetry={() => refetch()} />
       </div>
     )
@@ -464,15 +466,15 @@ export default function ProfilePage() {
   const activeNavItem = NAV_ITEMS.find((item) => item.id === activeTab) ?? NAV_ITEMS[0]
 
   return (
-    <div className="mx-auto w-full max-w-5xl space-y-8 p-6">
+    <div className="mx-auto w-full max-w-5xl space-y-6 p-4 md:space-y-8 md:p-6">
       <header className="space-y-1">
-        <h1 className="text-2xl font-semibold tracking-tight">Settings</h1>
+        <h1 className="text-xl font-semibold tracking-tight md:text-2xl">Settings</h1>
         <p className="text-sm text-muted-foreground">
           Manage your account, preferences, and security from one place.
         </p>
       </header>
 
-      <div className="grid gap-8 lg:grid-cols-[220px_1fr]">
+      <div className="grid gap-6 lg:grid-cols-[220px_1fr] lg:gap-8">
         <aside className="lg:sticky lg:top-6 lg:self-start">
           <SidebarNav active={activeTab} onSelect={setActiveTab} />
           <p className="mt-3 hidden text-xs text-muted-foreground lg:block">
@@ -481,7 +483,7 @@ export default function ProfilePage() {
         </aside>
 
         <Card>
-          <CardContent className="p-6 sm:p-8">
+          <CardContent className="p-4 sm:p-6 md:p-8">
             {activeTab === 'profile' && (
               <ProfileSection
                 data={data}

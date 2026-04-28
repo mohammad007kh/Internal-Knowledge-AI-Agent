@@ -85,7 +85,7 @@ export function EmbeddersTable({ items, onEdit, onDelete, onActivate }: Embedder
 
   if (items.length === 0) {
     return (
-      <Table>
+      <Table className="min-w-[1100px]">
         <TableHeader>
           <TableRow>
             <TableHead>Name</TableHead>
@@ -111,7 +111,7 @@ export function EmbeddersTable({ items, onEdit, onDelete, onActivate }: Embedder
   }
 
   return (
-    <Table>
+    <Table className="min-w-[1100px]">
       <TableHeader>
         <TableRow>
           <TableHead>Name</TableHead>

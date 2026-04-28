@@ -8,15 +8,20 @@ export default function ConnectorsPage() {
   const router = useRouter()
 
   return (
-    <div className="space-y-6 p-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold">Connectors</h1>
+    <div className="space-y-4 p-4 md:space-y-6 md:p-6">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="min-w-0">
+          <h1 className="text-xl font-bold md:text-2xl">Connectors</h1>
           <p className="text-muted-foreground mt-1 text-sm">
             Manage data source connectors and their credentials.
           </p>
         </div>
-        <Button onClick={() => router.push('/admin/connectors/new')}>Add Connector</Button>
+        <Button
+          className="w-full sm:w-auto"
+          onClick={() => router.push('/admin/connectors/new')}
+        >
+          Add Connector
+        </Button>
       </div>
       <ConnectorsTable />
     </div>

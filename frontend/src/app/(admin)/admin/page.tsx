@@ -12,8 +12,8 @@ export const metadata: Metadata = {
 
 export default function AdminPage() {
   return (
-    <div className="space-y-6 p-6">
-      <h1 className="text-2xl font-semibold">System Health &amp; Analytics</h1>
+    <div className="space-y-4 p-4 md:space-y-6 md:p-6">
+      <h1 className="text-xl font-semibold md:text-2xl">System Health &amp; Analytics</h1>
 
       <Suspense fallback={<div className="h-28 animate-pulse rounded-md bg-muted" />}>
         <HealthCards />
@@ -23,7 +23,7 @@ export default function AdminPage() {
         <MetricsCards />
       </Suspense>
 
-      <div className="grid gap-6 lg:grid-cols-2">
+      <div className="grid gap-4 md:gap-6 lg:grid-cols-2">
         <Suspense fallback={<div className="h-64 animate-pulse rounded-md bg-muted" />}>
           <QueryVolumeChart />
         </Suspense>

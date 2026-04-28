@@ -109,13 +109,13 @@ function InvitationsTable() {
 
   return (
     <>
-      <div className="rounded-md border">
-        <Table>
+      <div className="overflow-x-auto rounded-md border">
+        <Table className="min-w-[640px]">
           <TableHeader>
             <TableRow>
               <TableHead>Email</TableHead>
               <TableHead>Role</TableHead>
-              <TableHead>Invited by</TableHead>
+              <TableHead className="hidden md:table-cell">Invited by</TableHead>
               <TableHead>Expires</TableHead>
               <TableHead className="text-right">Actions</TableHead>
             </TableRow>
@@ -123,7 +123,9 @@ function InvitationsTable() {
           <TableBody>
             {invitations.map((inv) => (
               <TableRow key={inv.id}>
-                <TableCell className="font-medium">{inv.email}</TableCell>
+                <TableCell className="max-w-[180px] truncate font-medium" title={inv.email}>
+                  {inv.email}
+                </TableCell>
                 <TableCell>
                   <Badge
                     variant="outline"
@@ -136,7 +138,7 @@ function InvitationsTable() {
                     {inv.role}
                   </Badge>
                 </TableCell>
-                <TableCell className="text-sm text-muted-foreground">
+                <TableCell className="hidden text-sm text-muted-foreground md:table-cell">
                   {inv.invited_by_email ?? '—'}
                 </TableCell>
                 <TableCell className="text-sm text-muted-foreground">
@@ -151,7 +153,7 @@ function InvitationsTable() {
                     aria-label={`Revoke invitation for ${inv.email}`}
                   >
                     <Trash2Icon className="mr-1 h-4 w-4" />
-                    Revoke
+                    <span className="hidden sm:inline">Revoke</span>
                   </Button>
                 </TableCell>
               </TableRow>
@@ -192,10 +194,10 @@ export default function UsersPage() {
   const pendingCount = invitations?.length ?? 0
 
   return (
-    <div className="space-y-4 p-6">
-      <div className="flex items-center justify-between">
+    <div className="space-y-4 p-4 md:p-6">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <h1 className="text-xl font-semibold">Users</h1>
-        <Button asChild size="sm">
+        <Button asChild size="sm" className="w-full sm:w-auto">
           <Link href="/admin/users/new">
             <PlusIcon className="mr-1.5 h-4 w-4" />
             Invite user

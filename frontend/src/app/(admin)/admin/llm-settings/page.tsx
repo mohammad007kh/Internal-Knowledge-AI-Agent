@@ -78,24 +78,25 @@ function StageCard({ stage, onEdit }: StageCardProps) {
             <CardDescription className="text-xs">{stage.description}</CardDescription>
           </div>
           <Button
-            size="sm"
+            size="icon"
             variant="outline"
             onClick={() => onEdit(stage)}
             aria-label={`Edit ${stage.label}`}
+            className="h-9 w-9 shrink-0"
           >
-            <PencilIcon className="h-3.5 w-3.5" />
+            <PencilIcon className="h-4 w-4" />
           </Button>
         </div>
       </CardHeader>
       <CardContent className="space-y-3 text-sm">
         <div className="flex items-center justify-between gap-2">
-          <span className="text-muted-foreground">AI Model</span>
+          <span className="shrink-0 text-muted-foreground">AI Model</span>
           {aiModel ? (
             <Link
               href={`/admin/ai-models?focus=${aiModel.id}`}
-              className="inline-flex max-w-[60%] items-center gap-1.5 truncate text-right hover:underline"
+              className="inline-flex min-w-0 max-w-[60%] items-center gap-1.5 text-right hover:underline"
             >
-              <Badge variant="secondary" className="text-[10px] uppercase tracking-wide">
+              <Badge variant="secondary" className="shrink-0 text-[10px] uppercase tracking-wide">
                 {aiModel.provider}
               </Badge>
               <span className="truncate font-medium">{aiModel.name}</span>
@@ -105,9 +106,11 @@ function StageCard({ stage, onEdit }: StageCardProps) {
           )}
         </div>
         {aiModel ? (
-          <div className="flex items-center justify-between text-xs text-muted-foreground">
-            <span>Model ID</span>
-            <span className="truncate font-mono">{aiModel.model_id}</span>
+          <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
+            <span className="shrink-0">Model ID</span>
+            <span className="min-w-0 truncate font-mono" title={aiModel.model_id}>
+              {aiModel.model_id}
+            </span>
           </div>
         ) : null}
         <div className="flex items-center justify-between">
@@ -180,7 +183,7 @@ export default function LlmSettingsPage() {
   const noAiModelsConfigured = !isLoadingAiModels && (aiModels?.total ?? 0) === 0
 
   return (
-    <div className="space-y-6 p-6">
+    <div className="space-y-4 p-4 md:space-y-6 md:p-6">
       <div>
         <h1 className="text-xl font-semibold">LLM Settings</h1>
         <p className="text-sm text-muted-foreground">
@@ -191,7 +194,7 @@ export default function LlmSettingsPage() {
       {noAiModelsConfigured ? <NoAiModelsCard /> : null}
 
       {isLoading ? (
-        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {SKELETON_KEYS.map((key) => (
             <Skeleton key={key} className="h-56 w-full" />
           ))}
@@ -201,7 +204,7 @@ export default function LlmSettingsPage() {
       {isError ? <ErrorState message={getErrorMessage(error)} onRetry={() => refetch()} /> : null}
 
       {data ? (
-        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {data.map((stage) => (
             <StageCard key={stage.stage} stage={stage} onEdit={setEditing} />
           ))}

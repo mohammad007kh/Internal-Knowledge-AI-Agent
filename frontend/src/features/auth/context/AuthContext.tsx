@@ -67,7 +67,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setAccessTokenState(data.access_token)
         scheduleRefresh(data.access_token)
       } catch {
+        // Scheduled refresh failed — drop both the in-memory token *and* the
+        // JS-readable __access cookie. Leaving a stale cookie behind makes the
+        // Edge middleware think we are still authenticated, which cancels any
+        // /login redirect and reloads /chat, triggering another 401 cycle.
         setAccessTokenState(null)
+        Cookies.remove('__access')
       }
     }, refreshIn)
   }, [])

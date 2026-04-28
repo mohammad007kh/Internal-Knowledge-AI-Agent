@@ -497,7 +497,7 @@ export default function NewSourcePage() {
   }
 
   return (
-    <div className="mx-auto max-w-2xl space-y-6 p-6">
+    <div className="mx-auto max-w-2xl space-y-4 p-4 md:space-y-6 md:p-6">
       <nav
         className="flex items-center gap-1 text-sm text-muted-foreground"
         aria-label="Breadcrumb"
@@ -509,7 +509,7 @@ export default function NewSourcePage() {
         <span className="font-medium text-foreground">New Source</span>
       </nav>
       <div>
-        <h1 className="text-2xl font-bold">New Source</h1>
+        <h1 className="text-xl font-bold md:text-2xl">New Source</h1>
         <p className="mt-1 text-sm text-muted-foreground">
           Connect a knowledge source to index documents for AI retrieval.
         </p>
@@ -532,7 +532,7 @@ export default function NewSourcePage() {
                       <div
                         role="radiogroup"
                         aria-label="Source type"
-                        className="grid grid-cols-3 gap-2 sm:grid-cols-4 md:grid-cols-5"
+                        className="grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-5"
                       >
                         {SOURCE_TYPE_OPTIONS.map((opt) => {
                           const Icon = opt.icon
@@ -777,9 +777,10 @@ export default function NewSourcePage() {
             </CardContent>
           </Card>
 
-          <div className="flex gap-3">
+          <div className="flex flex-col gap-2 sm:flex-row sm:gap-3">
             <Button
               type="submit"
+              className="w-full sm:w-auto"
               disabled={
                 createSource.isPending ||
                 (isFileType && (uploadSummary.inFlight > 0 || uploadSummary.uploaded === 0))
@@ -787,7 +788,12 @@ export default function NewSourcePage() {
             >
               {createSource.isPending ? 'Creating…' : 'Create source'}
             </Button>
-            <Button type="button" variant="outline" onClick={() => router.push('/admin/sources')}>
+            <Button
+              type="button"
+              variant="outline"
+              className="w-full sm:w-auto"
+              onClick={() => router.push('/admin/sources')}
+            >
               Cancel
             </Button>
           </div>

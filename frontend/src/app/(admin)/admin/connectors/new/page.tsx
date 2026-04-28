@@ -446,9 +446,9 @@ export default function NewConnectorPage() {
   }
 
   return (
-    <div className="mx-auto max-w-lg space-y-6 p-6">
+    <div className="mx-auto max-w-lg space-y-4 p-4 md:space-y-6 md:p-6">
       <div>
-        <h1 className="text-2xl font-bold">Add Connector</h1>
+        <h1 className="text-xl font-bold md:text-2xl">Add Connector</h1>
         <p className="text-muted-foreground mt-1 text-sm">Configure a new data source connector.</p>
       </div>
 
@@ -496,11 +496,20 @@ export default function NewConnectorPage() {
           {selectedType === 'file' && <FileFields form={form} />}
 
           {/* Actions */}
-          <div className="flex justify-end gap-3 pt-2">
-            <Button onClick={() => router.back()} type="button" variant="outline">
+          <div className="flex flex-col-reverse gap-2 pt-2 sm:flex-row sm:justify-end sm:gap-3">
+            <Button
+              className="w-full sm:w-auto"
+              onClick={() => router.back()}
+              type="button"
+              variant="outline"
+            >
               Cancel
             </Button>
-            <Button disabled={mutation.isPending || !selectedType} type="submit">
+            <Button
+              className="w-full sm:w-auto"
+              disabled={mutation.isPending || !selectedType}
+              type="submit"
+            >
               {mutation.isPending ? 'Creating…' : 'Create Connector'}
             </Button>
           </div>

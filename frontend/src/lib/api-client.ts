@@ -1,5 +1,6 @@
-import { getToken } from '@/lib/token-store'
+import { getToken, setToken } from '@/lib/token-store'
 import axios from 'axios'
+import Cookies from 'js-cookie'
 
 const BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000'
 
@@ -86,6 +87,13 @@ apiClient.interceptors.response.use(
 
       const newToken = data.access_token
 
+      // Persist refreshed token to the in-memory store so subsequent requests
+      // (including raw fetch() callers like the chat SSE stream) pick it up
+      // immediately. Without this, every new request re-enters the 401 cycle
+      // and re-triggers a refresh — which can hit the backend rate-limit and
+      // cascade into a navigation loop between /chat and /login.
+      setToken(newToken)
+
       // Flush queued requests
       for (const cb of refreshQueue) cb(newToken)
       refreshQueue = []
@@ -94,8 +102,18 @@ apiClient.interceptors.response.use(
       return apiClient(original)
     } catch (refreshError) {
       refreshQueue = []
-      if (typeof window !== 'undefined' && !window.location.pathname.startsWith('/login')) {
-        window.location.href = '/login'
+      // Refresh failed (expired/missing refresh cookie OR rate-limited 429).
+      // Clear *both* the in-memory access token and the JS-readable __access
+      // cookie. The Edge middleware decides authentication state from the
+      // cookie — if we leave it in place while navigating to /login, the
+      // middleware sees a valid JWT and immediately redirects back to /chat,
+      // which remounts and re-triggers the same 401 → refresh → 429 cycle.
+      setToken(null)
+      if (typeof window !== 'undefined') {
+        Cookies.remove('__access')
+        if (!window.location.pathname.startsWith('/login')) {
+          window.location.href = '/login'
+        }
       }
       return Promise.reject(parseErrorResponse(refreshError))
     } finally {

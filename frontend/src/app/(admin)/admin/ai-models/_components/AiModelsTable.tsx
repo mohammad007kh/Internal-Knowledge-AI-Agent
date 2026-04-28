@@ -84,7 +84,7 @@ export function AiModelsTable({ items, onEdit, onDelete }: AiModelsTableProps) {
 
   if (items.length === 0) {
     return (
-      <Table>
+      <Table className="min-w-[1024px]">
         <TableHeader>
           <TableRow>
             <TableHead>Name</TableHead>
@@ -109,7 +109,7 @@ export function AiModelsTable({ items, onEdit, onDelete }: AiModelsTableProps) {
   }
 
   return (
-    <Table>
+    <Table className="min-w-[1024px]">
       <TableHeader>
         <TableRow>
           <TableHead>Name</TableHead>

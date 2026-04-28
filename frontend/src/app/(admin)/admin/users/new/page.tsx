@@ -69,7 +69,7 @@ export default function InviteUserPage() {
   })
 
   return (
-    <div className="max-w-lg p-6">
+    <div className="max-w-lg p-4 md:p-6">
       <h1 className="mb-6 text-xl font-semibold">Invite User</h1>
       <Form {...form}>
         <form
@@ -132,11 +132,16 @@ export default function InviteUserPage() {
             )}
           />
 
-          <div className="flex justify-end gap-2 pt-2">
-            <Button type="button" variant="outline" onClick={() => router.back()}>
+          <div className="flex flex-col-reverse gap-2 pt-2 sm:flex-row sm:justify-end">
+            <Button
+              type="button"
+              variant="outline"
+              className="w-full sm:w-auto"
+              onClick={() => router.back()}
+            >
               Cancel
             </Button>
-            <Button type="submit" disabled={mutation.isPending}>
+            <Button type="submit" className="w-full sm:w-auto" disabled={mutation.isPending}>
               {mutation.isPending ? 'Sending…' : 'Send invite'}
             </Button>
           </div>

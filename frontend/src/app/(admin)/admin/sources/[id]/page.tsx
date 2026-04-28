@@ -61,7 +61,7 @@ export default function SourceDetailPage() {
 
   if (isLoading) {
     return (
-      <div className="space-y-6 p-6">
+      <div className="space-y-4 p-4 md:space-y-6 md:p-6">
         <Skeleton className="h-4 w-48" />
         <div className="flex items-start justify-between gap-4">
           <div className="space-y-2">
@@ -83,7 +83,7 @@ export default function SourceDetailPage() {
 
   if (isError || !source) {
     return (
-      <div className="p-6">
+      <div className="p-4 md:p-6">
         <ErrorState message={getErrorMessage(error)} onRetry={() => refetch()} />
       </div>
     )
@@ -93,7 +93,7 @@ export default function SourceDetailPage() {
   const documents = documentsData?.items ?? []
 
   return (
-    <div className="space-y-6 p-6">
+    <div className="space-y-4 p-4 md:space-y-6 md:p-6">
       {/* Breadcrumb */}
       <nav className="flex items-center gap-1 text-sm text-muted-foreground" aria-label="Breadcrumb">
         <Link href="/admin/sources" className="hover:text-foreground hover:underline">
@@ -104,14 +104,14 @@ export default function SourceDetailPage() {
       </nav>
 
       {/* Header */}
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div className="space-y-1">
-          <h1 className="text-2xl font-bold">{source.name}</h1>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0 flex-1 space-y-1">
+          <h1 className="break-words text-xl font-bold md:text-2xl">{source.name}</h1>
           {source.description && (
             <p className="text-sm text-muted-foreground">{source.description}</p>
           )}
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <StatusBadge status={source.status} />
           <Button
             variant="outline"
@@ -208,8 +208,8 @@ export default function SourceDetailPage() {
               No documents indexed yet. Run a sync to populate this source.
             </p>
           ) : (
-            <div className="rounded-md border">
-              <Table>
+            <div className="overflow-x-auto rounded-md border">
+              <Table className="min-w-[560px]">
                 <TableHeader>
                   <TableRow>
                     <TableHead>Document ID</TableHead>
@@ -220,7 +220,10 @@ export default function SourceDetailPage() {
                 <TableBody>
                   {documents.map((doc) => (
                     <TableRow key={doc.id}>
-                      <TableCell className="font-mono text-xs text-muted-foreground">
+                      <TableCell
+                        className="max-w-[180px] truncate font-mono text-xs text-muted-foreground"
+                        title={doc.id}
+                      >
                         {doc.id}
                       </TableCell>
                       <TableCell>
@@ -275,9 +278,12 @@ export default function SourceDetailPage() {
             ) : (
               <div className="divide-y rounded-md border">
                 {syncJobs.map((job) => (
-                  <div className="flex items-center justify-between px-4 py-3" key={job.id}>
-                    <div className="space-y-0.5">
-                      <div className="flex items-center gap-2">
+                  <div
+                    className="flex flex-col gap-1 px-3 py-3 sm:flex-row sm:items-center sm:justify-between sm:gap-3 sm:px-4"
+                    key={job.id}
+                  >
+                    <div className="min-w-0 space-y-0.5">
+                      <div className="flex flex-wrap items-center gap-2">
                         <StatusBadge status={job.status} />
                         {job.documents_indexed > 0 && (
                           <span className="text-xs text-muted-foreground">
@@ -286,7 +292,7 @@ export default function SourceDetailPage() {
                         )}
                       </div>
                       {job.error_message && (
-                        <p className="text-xs text-destructive">{job.error_message}</p>
+                        <p className="break-words text-xs text-destructive">{job.error_message}</p>
                       )}
                     </div>
                     <span className="shrink-0 text-xs text-muted-foreground">

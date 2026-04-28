@@ -65,8 +65,8 @@ export function SourcesToolbar({
 
   return (
     <div className="flex flex-col gap-3">
-      <div className="flex flex-wrap items-center gap-2">
-        <div className="relative max-w-sm flex-1">
+      <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
+        <div className="relative w-full sm:max-w-sm sm:flex-1">
           <SearchIcon
             className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground"
             aria-hidden
@@ -81,14 +81,19 @@ export function SourcesToolbar({
           />
         </div>
 
-        <span className="text-xs text-muted-foreground tabular-nums">{countLabel}</span>
+        <span className="hidden text-xs text-muted-foreground tabular-nums sm:inline">
+          {countLabel}
+        </span>
 
-        <div className="ml-auto flex items-center gap-2">
+        <div className="flex items-center gap-2 sm:ml-auto">
           <Select
             value={statusFilter}
             onValueChange={(value) => onStatusFilterChange(value as StatusFilter)}
           >
-            <SelectTrigger className="h-9 w-[160px] text-sm" aria-label="Filter by status">
+            <SelectTrigger
+              className="h-9 flex-1 text-sm sm:w-[160px] sm:flex-none"
+              aria-label="Filter by status"
+            >
               <SelectValue placeholder="Status" />
             </SelectTrigger>
             <SelectContent>
@@ -106,7 +111,7 @@ export function SourcesToolbar({
             size="sm"
             onClick={onSyncAll}
             disabled={!canSyncAll}
-            className="gap-1.5"
+            className="shrink-0 gap-1.5"
             aria-label={
               syncCandidateCount > 0
                 ? `Sync all ${syncCandidateCount} eligible sources`
@@ -118,12 +123,17 @@ export function SourcesToolbar({
             ) : (
               <RefreshCwIcon className="h-4 w-4" aria-hidden />
             )}
-            Sync all
+            <span>Sync all</span>
           </Button>
         </div>
+        <span className="text-xs text-muted-foreground tabular-nums sm:hidden">{countLabel}</span>
       </div>
 
-      <div className="flex flex-wrap items-center gap-1.5" role="group" aria-label="Filter by type">
+      <div
+        className="-mx-1 flex items-center gap-1.5 overflow-x-auto px-1 sm:mx-0 sm:flex-wrap sm:overflow-visible sm:px-0"
+        role="group"
+        aria-label="Filter by type"
+      >
         {TYPE_CHIPS.map((chip) => {
           const isActive = chip.value === typeFilter
           return (
@@ -133,7 +143,7 @@ export function SourcesToolbar({
               onClick={() => onTypeFilterChange(chip.value)}
               aria-pressed={isActive}
               className={cn(
-                'inline-flex h-7 items-center rounded-full border px-3 text-xs font-medium transition-colors',
+                'inline-flex h-8 shrink-0 items-center rounded-full border px-3 text-xs font-medium transition-colors sm:h-7',
                 'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2',
                 isActive
                   ? 'border-primary/40 bg-primary/10 text-primary'

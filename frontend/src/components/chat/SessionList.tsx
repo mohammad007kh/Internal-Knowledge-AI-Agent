@@ -186,7 +186,17 @@ function SessionItem({
   )
 }
 
-export function SessionList() {
+export interface SessionListProps {
+  /**
+   * Optional callback fired after a session is selected (clicked in the list).
+   * Used by `<SessionListSheet>` to close the slide-over once the user picks
+   * a chat. Not invoked when a new session is created via the "+" button —
+   * that path keeps focus on the rename input.
+   */
+  onSelect?: (sessionId: string) => void
+}
+
+export function SessionList({ onSelect }: SessionListProps = {}) {
   const { sessionId, setSessionId, abortStream } = useSelectedSession()
   const queryClient = useQueryClient()
 
@@ -320,7 +330,10 @@ export function SessionList() {
                 isActive={session.id === sessionId}
                 isEditing={editingId === session.id}
                 editTitle={editTitle}
-                onSelect={() => setSessionId(session.id)}
+                onSelect={() => {
+                  setSessionId(session.id)
+                  onSelect?.(session.id)
+                }}
                 onStartEdit={() => startEdit(session)}
                 onEditChange={setEditTitle}
                 onCommitEdit={() => commitEdit(session.id)}

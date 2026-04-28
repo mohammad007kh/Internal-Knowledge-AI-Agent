@@ -554,14 +554,15 @@ export default function ConnectorDetailPage() {
   const connectorType = connector.connector_type
 
   return (
-    <div className="mx-auto max-w-2xl space-y-6 p-6">
+    <div className="mx-auto max-w-2xl space-y-4 p-4 md:space-y-6 md:p-6">
       {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold">{connector.name}</h1>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="min-w-0">
+          <h1 className="break-words text-xl font-semibold md:text-2xl">{connector.name}</h1>
           <p className="text-muted-foreground mt-1 text-sm capitalize">{connectorType} connector</p>
         </div>
         <Button
+          className="w-full sm:w-auto"
           variant="outline"
           onClick={() => testMutation.mutate()}
           disabled={testMutation.isPending}
@@ -603,12 +604,21 @@ export default function ConnectorDetailPage() {
             {connectorType === 'file' && <FileFields form={form} />}
 
             {/* Actions */}
-            <div className="flex gap-3 pt-2">
-              <Button type="submit" disabled={saveMutation.isPending}>
-                {saveMutation.isPending ? 'Saving…' : 'Save Changes'}
-              </Button>
-              <Button type="button" variant="outline" onClick={() => router.back()}>
+            <div className="flex flex-col-reverse gap-2 pt-2 sm:flex-row sm:gap-3">
+              <Button
+                type="button"
+                variant="outline"
+                className="w-full sm:w-auto"
+                onClick={() => router.back()}
+              >
                 Cancel
+              </Button>
+              <Button
+                type="submit"
+                className="w-full sm:w-auto"
+                disabled={saveMutation.isPending}
+              >
+                {saveMutation.isPending ? 'Saving…' : 'Save Changes'}
               </Button>
             </div>
           </form>

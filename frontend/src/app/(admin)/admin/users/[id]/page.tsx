@@ -100,12 +100,12 @@ export default function UserDetailPage() {
   }
 
   return (
-    <div className="max-w-xl space-y-8 p-6">
+    <div className="max-w-xl space-y-6 p-4 md:space-y-8 md:p-6">
       {/* Header */}
-      <div className="flex items-start justify-between">
-        <div>
-          <h1 className="text-xl font-semibold">{user.full_name ?? user.email}</h1>
-          <p className="text-sm text-muted-foreground">{user.email}</p>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0 flex-1">
+          <h1 className="break-words text-xl font-semibold">{user.full_name ?? user.email}</h1>
+          <p className="break-all text-sm text-muted-foreground">{user.email}</p>
         </div>
         <Badge variant={user.is_active ? 'outline' : 'secondary'}>
           {user.is_active ? 'Active' : 'Inactive'}
@@ -170,12 +170,23 @@ export default function UserDetailPage() {
                 </FormItem>
               )}
             />
-            <div className="flex gap-2">
-              <Button type="submit" size="sm" disabled={updateMutation.isPending}>
-                Save changes
-              </Button>
-              <Button type="button" size="sm" variant="ghost" onClick={() => router.back()}>
+            <div className="flex flex-col-reverse gap-2 sm:flex-row">
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
+                className="w-full sm:w-auto"
+                onClick={() => router.back()}
+              >
                 Cancel
+              </Button>
+              <Button
+                type="submit"
+                size="sm"
+                className="w-full sm:w-auto"
+                disabled={updateMutation.isPending}
+              >
+                Save changes
               </Button>
             </div>
           </form>
@@ -187,10 +198,11 @@ export default function UserDetailPage() {
       {/* Account status */}
       <section aria-label="Account status">
         <h2 className="mb-2 text-sm font-medium">Account</h2>
-        <div className="flex flex-wrap gap-2">
+        <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
           <Button
             variant={user.is_active ? 'destructive' : 'outline'}
             size="sm"
+            className="w-full sm:w-auto"
             disabled={toggleActiveMutation.isPending}
             onClick={() => toggleActiveMutation.mutate(!user.is_active)}
           >
@@ -199,6 +211,7 @@ export default function UserDetailPage() {
           <Button
             variant="outline"
             size="sm"
+            className="w-full sm:w-auto"
             disabled={resetPasswordMutation.isPending}
             onClick={() => resetPasswordMutation.mutate()}
           >

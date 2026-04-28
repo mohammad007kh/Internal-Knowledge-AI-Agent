@@ -108,10 +108,10 @@ function PolicyEditor() {
           className="font-mono text-sm"
           placeholder="Describe what users can and cannot ask about…"
         />
-        <div className="flex gap-2">
+        <div className="flex flex-col gap-2 sm:flex-row">
           <AlertDialog>
             <AlertDialogTrigger asChild>
-              <Button disabled={!isDirty || updatePolicy.isPending}>
+              <Button className="w-full sm:w-auto" disabled={!isDirty || updatePolicy.isPending}>
                 {updatePolicy.isPending ? 'Saving…' : 'Review & save'}
               </Button>
             </AlertDialogTrigger>
@@ -139,6 +139,7 @@ function PolicyEditor() {
           {isDirty && (
             <Button
               variant="outline"
+              className="w-full sm:w-auto"
               onClick={() => setDraft(data?.content ?? '')}
               disabled={updatePolicy.isPending}
             >
@@ -236,8 +237,8 @@ function GuardrailEventsTab() {
 
       {data && data.items.length > 0 && (
         <>
-          <div className="rounded-md border">
-            <Table>
+          <div className="overflow-x-auto rounded-md border">
+            <Table className="min-w-[720px]">
               <TableHeader>
                 <TableRow>
                   <TableHead>Time</TableHead>
@@ -358,7 +359,7 @@ function GuardrailEventsTab() {
 
 export default function PolicyPage() {
   return (
-    <div className="space-y-6 p-6">
+    <div className="space-y-4 p-4 md:space-y-6 md:p-6">
       <div>
         <h1 className="text-xl font-semibold">Policy &amp; guardrails</h1>
         <p className="text-sm text-muted-foreground">

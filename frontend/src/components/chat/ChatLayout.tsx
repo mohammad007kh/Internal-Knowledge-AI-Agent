@@ -1,17 +1,23 @@
 'use client'
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { useMediaQuery } from '@/hooks/useMediaQuery'
 import { ChatInputBar } from './ChatInputBar'
 import { ClarificationCard } from './ClarificationCard'
 import { GuardrailCard } from './GuardrailCard'
 import { MessageThread } from './MessageThread'
 import { useSelectedSession } from './SelectedSessionContext'
-import { SessionList } from './SessionList'
 import { useChat } from './useChat'
 
+/**
+ * Single-pane chat surface.
+ *
+ * The previous 3-column layout (app sidebar | sessions rail | chat) wasted
+ * ~280px on a sessions list that was empty for first-time users and
+ * duplicated chrome on every viewport. Sessions now live in the user shell
+ * sidebar (`<ChatSidebarGroup>`) with a slide-over panel for the full list,
+ * which mirrors the ChatGPT/Claude.ai mental model and gives the message
+ * canvas full width.
+ */
 export function ChatLayout() {
   const { sessionId } = useSelectedSession()
-  const isDesktop = useMediaQuery('(min-width: 768px)')
   const {
     send,
     abort,
@@ -25,8 +31,8 @@ export function ChatLayout() {
     dismissGuardrail,
   } = useChat({ sessionId })
 
-  const chatPane = (
-    <div className="flex flex-1 flex-col overflow-hidden">
+  return (
+    <div className="flex h-[calc(100vh-3.5rem)] flex-col bg-background md:h-screen">
       <MessageThread
         sessionId={sessionId}
         streamingToken={streamingToken}
@@ -52,44 +58,6 @@ export function ChatLayout() {
         isStreaming={isStreaming}
         sessionId={sessionId}
       />
-    </div>
-  )
-
-  if (isDesktop) {
-    return (
-      <div className="grid h-[calc(100vh-4rem)] grid-cols-[280px_1fr] divide-x divide-border bg-background">
-        <aside className="flex flex-col overflow-hidden">
-          <SessionList />
-        </aside>
-        <main className="flex flex-col overflow-hidden">{chatPane}</main>
-      </div>
-    )
-  }
-
-  return (
-    <div className="flex h-[calc(100vh-4rem)] flex-col">
-      <Tabs defaultValue="chat" className="flex flex-1 flex-col overflow-hidden">
-        <TabsList className="mx-4 mt-2 shrink-0">
-          <TabsTrigger value="sessions" className="flex-1">
-            Sessions
-          </TabsTrigger>
-          <TabsTrigger value="chat" className="flex-1">
-            Chat
-          </TabsTrigger>
-        </TabsList>
-        <TabsContent
-          value="sessions"
-          className="flex-1 overflow-hidden data-[state=inactive]:hidden"
-        >
-          <SessionList />
-        </TabsContent>
-        <TabsContent
-          value="chat"
-          className="flex flex-1 flex-col overflow-hidden data-[state=inactive]:hidden"
-        >
-          {chatPane}
-        </TabsContent>
-      </Tabs>
     </div>
   )
 }

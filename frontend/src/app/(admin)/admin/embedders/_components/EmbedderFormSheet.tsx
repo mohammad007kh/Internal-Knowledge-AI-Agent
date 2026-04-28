@@ -286,11 +286,11 @@ export function EmbedderFormSheet({ open, onOpenChange, embedder }: EmbedderForm
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent
         side="right"
-        className="flex w-full max-w-xl flex-col overflow-hidden p-0 sm:max-w-xl"
+        className="flex w-full max-w-full flex-col overflow-hidden p-0 sm:max-w-xl"
       >
-        <header className="border-b border-border px-6 py-4">
+        <header className="border-b border-border px-4 py-4 sm:px-6">
           <SheetTitle>{isEdit ? `Edit ${embedder?.name}` : 'New embedder'}</SheetTitle>
-          <p className="mt-1 text-sm text-muted-foreground">
+          <p className="mt-1 pr-8 text-sm text-muted-foreground">
             Embedder endpoint records. Activating one triggers a re-embed batch job.
           </p>
         </header>
@@ -300,7 +300,7 @@ export function EmbedderFormSheet({ open, onOpenChange, embedder }: EmbedderForm
           className="flex flex-1 flex-col overflow-y-auto"
           autoComplete="off"
         >
-          <div className="space-y-6 px-6 py-5">
+          <div className="space-y-6 px-4 py-5 sm:px-6">
             {/* Identity */}
             <section className="space-y-3">
               <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
@@ -489,16 +489,17 @@ export function EmbedderFormSheet({ open, onOpenChange, embedder }: EmbedderForm
             </section>
           </div>
 
-          <footer className="mt-auto flex items-center justify-end gap-2 border-t border-border px-6 py-4">
+          <footer className="mt-auto flex flex-col-reverse items-stretch gap-2 border-t border-border px-4 py-4 sm:flex-row sm:items-center sm:justify-end sm:px-6">
             <Button
               type="button"
               variant="outline"
+              className="w-full sm:w-auto"
               onClick={() => onOpenChange(false)}
               disabled={isSaving}
             >
               Cancel
             </Button>
-            <Button type="submit" disabled={isSaving}>
+            <Button type="submit" className="w-full sm:w-auto" disabled={isSaving}>
               {isSaving ? 'Saving…' : isEdit ? 'Save changes' : 'Create embedder'}
             </Button>
           </footer>
