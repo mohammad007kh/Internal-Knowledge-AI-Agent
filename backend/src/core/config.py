@@ -1,7 +1,11 @@
+import logging
 import os
 
 import yaml  # type: ignore[import-untyped]
+from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+_logger = logging.getLogger(__name__)
 
 
 class Settings(BaseSettings):
@@ -65,11 +69,47 @@ class Settings(BaseSettings):
     RATE_LIMIT_AUTH_REFRESH_WINDOW: int = 60
     RATE_LIMIT_API_LIMIT: int = 200
     RATE_LIMIT_API_WINDOW: int = 60
+    # Account lockout (per-email-hash, sliding window) — layered on top of
+    # the per-IP rate limit to defeat distributed credential-stuffing botnets.
+    LOCKOUT_ENABLED: bool = True
+    # Fail-closed when Redis is unreachable. Defaults to True in production
+    # and is auto-relaxed to False when ENVIRONMENT == "development" so local
+    # contributors aren't blocked when Redis is down. Override explicitly via
+    # env var if the auto behaviour isn't what you want.
+    LOCKOUT_REQUIRE_REDIS: bool = True
+    LOCKOUT_MAX_FAILS: int = 10
+    LOCKOUT_WINDOW_SECS: int = 900       # 15-min sliding window
+    LOCKOUT_DURATION_SECS: int = 1800    # 30-min lockout after threshold
     # App config (loaded from YAML)
     upload_max_size_bytes: int = 52428800
     upload_supported_formats: list[str] = ["pdf", "docx", "xlsx", "csv", "txt", "md"]
 
     model_config = SettingsConfigDict(env_file=".env", case_sensitive=True)
+
+    @model_validator(mode="after")
+    def _relax_lockout_redis_in_dev(self) -> "Settings":
+        """In development, default LOCKOUT_REQUIRE_REDIS to False unless the
+        operator has explicitly set the env var.
+
+        Pydantic Settings supplies env values via attribute assignment, so we
+        only flip the default when the env var is *not* present in the process
+        environment. This keeps prod fail-closed while making dev forgiving.
+        """
+        if (
+            self.ENVIRONMENT == "development"
+            and "LOCKOUT_REQUIRE_REDIS" not in os.environ
+        ):
+            object.__setattr__(self, "LOCKOUT_REQUIRE_REDIS", False)
+        _logger.info(
+            "Account lockout config: enabled=%s require_redis=%s "
+            "max_fails=%d window_secs=%d duration_secs=%d",
+            self.LOCKOUT_ENABLED,
+            self.LOCKOUT_REQUIRE_REDIS,
+            self.LOCKOUT_MAX_FAILS,
+            self.LOCKOUT_WINDOW_SECS,
+            self.LOCKOUT_DURATION_SECS,
+        )
+        return self
 
     def model_post_init(self, __context: object) -> None:
         config_path = os.environ.get("APP_CONFIG_PATH", "app_config.yaml")

@@ -23,6 +23,7 @@ from src.repositories.source_repository import SourceRepository
 from src.repositories.sync_job_repository import SyncJobRepository
 from src.repositories.guardrail_event_repository import GuardrailEventRepository
 from src.repositories.user_repository import UserRepository
+from src.services.account_lockout import AccountLockout
 from src.services.ai_model_resolver import AIModelResolver
 from src.services.auth_service import AuthService
 from src.services.chat_session_service import ChatSessionService
@@ -112,6 +113,14 @@ class Container(containers.DeclarativeContainer):
     # ── Services ────────────────────────────────────────────────────
     password_service = providers.Factory(PasswordService)
     email_service = providers.Factory(EmailService)
+    # AccountLockout is constructed with a None redis_client; the service
+    # re-resolves the live client from src.core.redis on every call so it
+    # picks up the singleton initialised during the lifespan startup hook.
+    account_lockout: providers.Singleton[AccountLockout] = providers.Singleton(
+        AccountLockout,
+        redis_client=None,
+        settings=config,
+    )
     user_service = providers.Factory(
         UserService,
         user_repo=user_repo,
@@ -126,6 +135,7 @@ class Container(containers.DeclarativeContainer):
         refresh_repo=refresh_token_repo,
         user_service=user_service,
         password_service=password_service,
+        lockout=account_lockout,
     )
     source_service = providers.Factory(
         SourceService,
