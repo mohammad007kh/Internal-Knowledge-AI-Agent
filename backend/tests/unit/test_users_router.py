@@ -31,6 +31,7 @@ from fastapi.testclient import TestClient
 
 from src.api.middleware.error_handler import register_exception_handlers
 from src.api.v1.users import AdminOnly, _get_user_service, router
+from src.core.database import get_db
 from src.core.deps import get_current_user
 from src.core.exceptions import ConflictError, ForbiddenError, NotFoundError
 from src.models.user import User, UserRole
@@ -76,6 +77,30 @@ def mock_user_service() -> AsyncMock:
     return AsyncMock(spec=UserService)
 
 
+def _fake_db_session() -> MagicMock:
+    """Return a stub :class:`AsyncSession` for unit tests.
+
+    Audit-log emit calls go through :class:`AdminAuditLogRepository`
+    which issues ``session.add`` (sync) + ``session.flush`` (async) and
+    ``session.execute`` for repository reads.  We use a :class:`MagicMock`
+    so that ``add`` is sync and explicitly mark async methods as
+    :class:`AsyncMock` so ``await`` works.
+
+    ``execute`` returns a result whose ``scalar_one_or_none`` returns
+    ``None`` — the audit code tolerates a missing prior user (the role
+    lookup just records ``"from": None``).
+    """
+    db = MagicMock()
+    db.execute = AsyncMock()
+    db.execute.return_value.scalar_one_or_none = MagicMock(return_value=None)
+    db.execute.return_value.scalar_one = MagicMock(return_value=0)
+    db.execute.return_value.scalars = MagicMock()
+    db.flush = AsyncMock()
+    db.commit = AsyncMock()
+    db.refresh = AsyncMock()
+    return db
+
+
 @pytest.fixture()
 def client(mock_user_service: AsyncMock, admin_user: User):
     """TestClient with admin role bypassed.  All endpoints pass role check."""
@@ -85,6 +110,7 @@ def client(mock_user_service: AsyncMock, admin_user: User):
 
     app.dependency_overrides[AdminOnly] = lambda: admin_user
     app.dependency_overrides[_get_user_service] = lambda: mock_user_service
+    app.dependency_overrides[get_db] = _fake_db_session
 
     with TestClient(app, raise_server_exceptions=False) as tc:
         yield tc
@@ -106,6 +132,7 @@ def non_admin_client(mock_user_service: AsyncMock):
 
     app.dependency_overrides[get_current_user] = lambda: regular_user
     app.dependency_overrides[_get_user_service] = lambda: mock_user_service
+    app.dependency_overrides[get_db] = _fake_db_session
 
     with TestClient(app, raise_server_exceptions=False) as tc:
         yield tc

@@ -9,8 +9,10 @@ from __future__ import annotations
 import secrets
 
 from fastapi import APIRouter, Depends, Request, Response, status
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.config import settings
+from src.core.database import get_db
 from src.core.deps import require_authenticated
 from src.core.exceptions import UnauthorizedError
 from src.core.security import (
@@ -19,6 +21,7 @@ from src.core.security import (
     set_refresh_cookie,
 )
 from src.models.user import User
+from src.repositories.admin_audit_log_repository import AdminAuditLogRepository
 from src.schemas.auth import (
     AcceptInvitationRequest,
     ChangePasswordRequest,
@@ -27,6 +30,7 @@ from src.schemas.auth import (
     PasswordResetRequest,
     TokenResponse,
 )
+from src.services.audit_service import emit_audit
 from src.services.auth_service import AuthService
 
 router = APIRouter()
@@ -88,11 +92,43 @@ def _token_response(
 @router.post("/login", response_model=TokenResponse, status_code=status.HTTP_200_OK)
 async def login(
     body: LoginRequest,
+    request: Request,
     response: Response,
     auth_service: AuthService = Depends(_get_auth_service),
+    db: AsyncSession = Depends(get_db),
 ) -> TokenResponse:
     """Authenticate with email / password and receive tokens."""
-    access, refresh, mcp = await auth_service.login(body.email, body.password)
+    audit_repo = AdminAuditLogRepository(db)
+    try:
+        access, refresh, mcp = await auth_service.login(body.email, body.password)
+    except UnauthorizedError:
+        await emit_audit(
+            audit_repo,
+            admin_user_id=None,
+            action="login_failure",
+            resource_type="user",
+            resource_id=None,
+            request=request,
+            metadata={"email": body.email, "reason": "invalid_credentials"},
+        )
+        await db.commit()
+        raise
+
+    # Resolve user id for the audit row (login succeeded so the user exists).
+    from src.repositories.user_repository import UserRepository  # noqa: PLC0415
+
+    authenticated_user = await UserRepository(db).get_by_email(body.email)
+    user_id = authenticated_user.id if authenticated_user is not None else None
+    await emit_audit(
+        audit_repo,
+        admin_user_id=user_id,
+        action="login_success",
+        resource_type="user",
+        resource_id=user_id,
+        request=request,
+        metadata={},
+    )
+    await db.commit()
     return _token_response(response, access, refresh, mcp)
 
 

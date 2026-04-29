@@ -10,10 +10,13 @@ from __future__ import annotations
 
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.core.database import get_db
 from src.core.deps import get_current_user, require_role
 from src.models.user import User, UserRole
+from src.repositories.admin_audit_log_repository import AdminAuditLogRepository
 from src.schemas.invitation import InvitationListResponse, InvitationPublic
 from src.schemas.user import (
     InvitationCreateRequest,
@@ -24,6 +27,7 @@ from src.schemas.user import (
     UserResponse,
     UserUpdateRequest,
 )
+from src.services.audit_service import emit_audit
 from src.services.source_permission_service import SourcePermissionService
 from src.services.user_service import UserService
 
@@ -80,11 +84,23 @@ async def list_users(
 @router.post("/invitations", status_code=status.HTTP_201_CREATED)
 async def invite_user(
     body: InvitationCreateRequest,
+    request: Request,
     admin: User = Depends(AdminOnly),
     user_svc: UserService = Depends(_get_user_service),
+    db: AsyncSession = Depends(get_db),
 ) -> dict[str, str]:
     """Send an invitation email to a new user."""
-    await user_svc.invite(admin, body.email, body.role)
+    invitation, _raw_token = await user_svc.invite(admin, body.email, body.role)
+    await emit_audit(
+        AdminAuditLogRepository(db),
+        admin_user_id=admin.id,
+        action="user.invite",
+        resource_type="user",
+        resource_id=invitation.id,
+        request=request,
+        metadata={"email": body.email, "role": body.role.value},
+    )
+    await db.commit()
     return {"detail": "Invitation sent"}
 
 
@@ -276,22 +292,50 @@ async def get_user_by_id(
 async def change_user_role(
     user_id: UUID,
     body: RoleChangeRequest,
+    request: Request,
     admin: User = Depends(AdminOnly),
     user_svc: UserService = Depends(_get_user_service),
+    db: AsyncSession = Depends(get_db),
 ) -> UserResponse:
     """Change a user's role."""
+    from src.repositories.user_repository import UserRepository  # noqa: PLC0415
+
+    target_before = await UserRepository(db).get_by_id(user_id)
+    old_role = target_before.role.value if target_before is not None else None
     updated = await user_svc.change_role(admin, user_id, body.role)
+    await emit_audit(
+        AdminAuditLogRepository(db),
+        admin_user_id=admin.id,
+        action="user.role_change",
+        resource_type="user",
+        resource_id=updated.id,
+        request=request,
+        metadata={"from": old_role, "to": body.role.value},
+    )
+    await db.commit()
     return UserResponse.model_validate(updated)
 
 
 @router.delete("/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def deactivate_user(
     user_id: UUID,
+    request: Request,
     admin: User = Depends(AdminOnly),
     user_svc: UserService = Depends(_get_user_service),
+    db: AsyncSession = Depends(get_db),
 ) -> None:
     """Soft-deactivate a user and revoke their refresh tokens."""
     await user_svc.deactivate_user(admin, user_id)
+    await emit_audit(
+        AdminAuditLogRepository(db),
+        admin_user_id=admin.id,
+        action="user.deactivate",
+        resource_type="user",
+        resource_id=user_id,
+        request=request,
+        metadata={},
+    )
+    await db.commit()
 
 
 @router.patch("/{user_id}", response_model=UserResponse, summary="Activate or deactivate a user")

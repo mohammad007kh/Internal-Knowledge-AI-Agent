@@ -15,7 +15,7 @@ from datetime import datetime, timezone
 from typing import Any
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import Response
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -23,6 +23,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.core.database import get_db
 from src.core.deps import get_current_user, require_admin
 from src.models.user import User, UserRole
+from src.repositories.admin_audit_log_repository import AdminAuditLogRepository
 from src.schemas.source import (
     FILE_SOURCE_TYPES,
     DocumentListResponse,
@@ -38,6 +39,7 @@ from src.schemas.source import (
     TestConnectionResponse,
 )
 from src.schemas.sync_job import SyncJobListResponse, SyncJobResponse
+from src.services.audit_service import emit_audit
 from src.services.source_service import SourceService
 
 logger = logging.getLogger(__name__)
@@ -159,8 +161,10 @@ def _make_list_item(source: object) -> SourceListItem:
 )
 async def create_source(
     body: SourceCreateRequest,
+    request: Request,
     current_user: User = Depends(get_current_user),
     service: SourceService = Depends(_get_source_service),
+    db: AsyncSession = Depends(get_db),
 ) -> SourcePublicResponse:
     """Create a source from the wizard's structured request body.
 
@@ -218,6 +222,22 @@ async def create_source(
             },
         ) from exc
 
+    source_type_str = (
+        source.source_type.value
+        if hasattr(source.source_type, "value")
+        else str(source.source_type)
+    )
+    await emit_audit(
+        AdminAuditLogRepository(db),
+        admin_user_id=current_user.id,
+        action="source.create",
+        resource_type="source",
+        resource_id=source.id,
+        request=request,
+        metadata={"name": source.name, "type": source_type_str},
+    )
+    await db.commit()
+
     # Kick off initial ingestion (best-effort — failures don't abort the response).
     try:
         from celery import current_app as _celery  # noqa: PLC0415
@@ -229,7 +249,7 @@ async def create_source(
     return SourcePublicResponse(
         id=str(source.id),
         name=source.name,
-        source_type=str(source.source_type.value if hasattr(source.source_type, "value") else source.source_type),
+        source_type=source_type_str,
         source_mode=source.source_mode,
         retrieval_mode=source.retrieval_mode,
         description=source.description,
@@ -424,8 +444,10 @@ async def get_source(
 async def update_source(
     source_id: uuid.UUID,
     payload: SourceUpdate,
+    request: Request,
     current_user: User = Depends(get_current_user),
     service: SourceService = Depends(_get_source_service),
+    db: AsyncSession = Depends(get_db),
 ) -> SourceResponse:
     """Update only the provided fields.
 
@@ -434,6 +456,17 @@ async def update_source(
     source = await service.get_source(source_id)
     _assert_ownership_or_admin(source.owner_id, current_user)
     updated = await service.update_source(source_id, payload)
+    changed_fields = list(payload.model_dump(exclude_unset=True).keys())
+    await emit_audit(
+        AdminAuditLogRepository(db),
+        admin_user_id=current_user.id,
+        action="source.update",
+        resource_type="source",
+        resource_id=updated.id,
+        request=request,
+        metadata={"changed_fields": changed_fields},
+    )
+    await db.commit()
     return SourceResponse.model_validate(updated)
 
 
@@ -449,8 +482,10 @@ async def update_source(
 )
 async def delete_source(
     source_id: uuid.UUID,
+    request: Request,
     current_user: User = Depends(get_current_user),
     service: SourceService = Depends(_get_source_service),
+    db: AsyncSession = Depends(get_db),
 ) -> Response:
     """Set ``is_active = False``.
 
@@ -459,6 +494,17 @@ async def delete_source(
     """
     source = await service.get_source(source_id)
     _assert_ownership_or_admin(source.owner_id, current_user)
+    # Capture identifiers BEFORE deletion so the audit row keeps the resource_id.
+    await emit_audit(
+        AdminAuditLogRepository(db),
+        admin_user_id=current_user.id,
+        action="source.delete",
+        resource_type="source",
+        resource_id=source.id,
+        request=request,
+        metadata={"name": source.name},
+    )
+    await db.commit()
     await service.delete_source(source_id)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
