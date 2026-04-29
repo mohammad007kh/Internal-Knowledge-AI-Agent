@@ -17,12 +17,22 @@ RUN apt-get update && \
     apt-get install -y --no-install-recommends gcc libpq-dev curl && \
     rm -rf /var/lib/apt/lists/*
 
+# Create the unprivileged runtime user before copying the application.
+# uid=1000 mirrors the frontend image's `nextjs` user pattern.
+RUN groupadd -r appuser && useradd -r -g appuser -u 1000 appuser
+
 # Install Python dependencies first (layer cache optimisation).
 COPY pyproject.toml .
 RUN pip install --no-cache-dir -e ".[dev]"
 
 # Copy application source.
 COPY . .
+
+# COPY runs as root by default — flip ownership to the runtime user so
+# alembic / uvicorn can read the source tree without root privileges.
+RUN chown -R appuser:appuser /app
+
+USER appuser
 
 EXPOSE 8000
 

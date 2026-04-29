@@ -24,7 +24,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-_STAGE = "generate_response"
+_STAGE = "synthesizer"
 _MAX_RETRIES = 3
 
 

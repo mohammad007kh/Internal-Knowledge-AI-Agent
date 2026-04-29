@@ -69,13 +69,17 @@ def _resolver_for(http_client) -> AsyncMock:
 
 @pytest.mark.asyncio
 async def test_sets_final_answer(base_state, mock_openai_client, mock_langfuse):
+    resolver = _resolver_for(mock_openai_client)
     result = await generate_response(
         base_state,
-        ai_model_resolver=_resolver_for(mock_openai_client),
+        ai_model_resolver=resolver,
         langfuse=mock_langfuse,
     )
     assert result["final_answer"] == "You can get a refund within 30 days."
     assert "error" not in result or result["error"] is None
+    # A.1 — resolver must be queried with the seeded slot name "synthesizer"
+    # so admin overrides on /admin/llm-settings actually apply.
+    resolver.resolve.assert_awaited_once_with("synthesizer")
 
 
 @pytest.mark.asyncio

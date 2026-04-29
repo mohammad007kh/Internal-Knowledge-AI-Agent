@@ -89,10 +89,12 @@ def build_pipeline(
         _guardrail_input = functools.partial(
             guardrail_input,
             guardrail_service=guardrail_service,
+            ai_model_resolver=ai_model_resolver,
         )
         _guardrail_output = functools.partial(
             guardrail_output,
             guardrail_service=guardrail_service,
+            ai_model_resolver=ai_model_resolver,
         )
         workflow.add_node("guardrail_input", _guardrail_input)
         workflow.add_node("guardrail_output", _guardrail_output)

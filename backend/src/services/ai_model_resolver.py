@@ -1,9 +1,9 @@
 """AIModelResolver — singleton with TTL cache for stage → AIModelClient lookups.
 
-Pipeline nodes call ``await resolver.resolve("generate_response")`` at node
-entry to obtain an immutable :class:`AIModelClient` carrying the
-``AsyncOpenAI`` HTTP pool plus the resolved temperature / max_tokens /
-capabilities for the stage.
+Pipeline nodes call ``await resolver.resolve("synthesizer")`` (or any
+other seeded stage slot) at node entry to obtain an immutable
+:class:`AIModelClient` carrying the ``AsyncOpenAI`` HTTP pool plus the
+resolved temperature / max_tokens / capabilities for the stage.
 
 The resolver:
 

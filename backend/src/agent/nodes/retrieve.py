@@ -79,6 +79,9 @@ async def retrieve_context(
                 "source_id": str(chunk.source_id),
                 "text": chunk.chunk_text,
                 "score": round(score, 4),
+                "document_title": (chunk.metadata_ or {}).get("document_title"),
+                "page_number": (chunk.metadata_ or {}).get("page_number"),
+                "source_name": (chunk.metadata_ or {}).get("source_name"),
             }
             for chunk, score in pairs
             if score < SIMILARITY_THRESHOLD
