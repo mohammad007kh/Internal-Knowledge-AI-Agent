@@ -17,6 +17,8 @@ from src.core.database import get_db
 from src.core.deps import get_current_user, require_role
 from src.models.user import User, UserRole
 from src.repositories.admin_audit_log_repository import AdminAuditLogRepository
+from src.repositories.invitation_repository import InvitationRepository
+from src.repositories.user_repository import UserRepository
 from src.schemas.invitation import InvitationListResponse, InvitationPublic
 from src.schemas.user import (
     InvitationCreateRequest,
@@ -113,11 +115,10 @@ async def list_invitations(
     limit: int = Query(20, ge=1, le=100),
     offset: int = Query(0, ge=0),
     _admin: User = Depends(AdminOnly),
+    db: AsyncSession = Depends(get_db),
 ) -> InvitationListResponse:
     """Return paginated pending (not accepted, not expired) invitations. Admin-only."""
-    from src.core.container import Container  # noqa: PLC0415
-
-    repo = Container.invitation_repo()
+    repo = InvitationRepository(db)
     items, total = await repo.list_pending(limit=limit, offset=offset)
     return InvitationListResponse(
         items=[InvitationPublic.from_orm_row(i) for i in items],
@@ -135,15 +136,14 @@ async def list_invitations(
 async def revoke_invitation(
     invitation_id: UUID,
     _admin: User = Depends(AdminOnly),
+    db: AsyncSession = Depends(get_db),
 ) -> Response:
     """Hard-delete a pending invitation. Admin-only.
 
     Returns 404 if the invitation does not exist and 409 if it has already
     been accepted (already-accepted invitations are retained for audit).
     """
-    from src.core.container import Container  # noqa: PLC0415
-
-    repo = Container.invitation_repo()
+    repo = InvitationRepository(db)
     invite = await repo.get_by_id(invitation_id)
     if invite is None:
         raise HTTPException(
@@ -172,12 +172,10 @@ async def lookup_user(
     email: str = Query(..., description="Email address to look up"),
     admin: User = Depends(AdminOnly),
     user_svc: UserService = Depends(_get_user_service),
+    db: AsyncSession = Depends(get_db),
 ) -> UserResponse:
     """Return id, email, full_name for a user matching *email*. Admin-only."""
-    from src.core.container import Container  # noqa: PLC0415
-    from src.repositories.user_repository import UserRepository  # noqa: PLC0415
-
-    repo: UserRepository = Container.user_repo()
+    repo = UserRepository(db)
     user = await repo.get_by_email(email)
     if user is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found.")
@@ -204,6 +202,7 @@ async def get_me(
 async def update_me(
     body: UserUpdateRequest,
     current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
 ) -> UserPublic:
     """Partial update of the authenticated user's own profile.
 
@@ -248,7 +247,7 @@ async def update_me(
             ) from exc
         new_hash = password_service.hash_password(body.new_password)
 
-    user_repo = Container.user_repo()
+    user_repo = UserRepository(db)
     updated = await user_repo.update_me(
         user_id=current_user.id,
         full_name=body.full_name,
@@ -276,12 +275,10 @@ async def get_user_by_id(
     user_id: UUID,
     admin: User = Depends(AdminOnly),
     user_svc: UserService = Depends(_get_user_service),
+    db: AsyncSession = Depends(get_db),
 ) -> UserResponse:
     """Return user details for a given user ID. Admin-only."""
-    from src.core.container import Container  # noqa: PLC0415
-    from src.repositories.user_repository import UserRepository  # noqa: PLC0415
-
-    repo: UserRepository = Container.user_repo()
+    repo = UserRepository(db)
     user = await repo.get_by_id(user_id)
     if user is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found.")
@@ -344,16 +341,15 @@ async def update_user(
     body: UpdateUserRequest,
     admin: User = Depends(AdminOnly),
     user_svc: UserService = Depends(_get_user_service),
+    db: AsyncSession = Depends(get_db),
 ) -> UserResponse:
     """Toggle ``is_active`` for a user. Admin-only."""
-    from src.core.container import Container  # noqa: PLC0415
-    from src.repositories.user_repository import UserRepository  # noqa: PLC0415
-
-    repo: UserRepository = Container.user_repo()
+    repo = UserRepository(db)
     if body.is_active is not None:
         updated = await repo.set_active(user_id, body.is_active)
         if updated is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found.")
+        await db.commit()
         return UserResponse.model_validate(updated)
     # No-op: return current user
     user = await repo.get_by_id(user_id)

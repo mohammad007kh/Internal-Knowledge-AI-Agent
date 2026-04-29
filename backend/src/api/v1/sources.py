@@ -543,18 +543,31 @@ async def test_connection(
 # ---------------------------------------------------------------------------
 
 
-def _get_document_repo():  # type: ignore[no-untyped-def]
-    """Resolve DocumentRepository from the DI container."""
-    from src.core.container import Container  # noqa: PLC0415
+def _get_document_repo(  # type: ignore[no-untyped-def]
+    db: AsyncSession = Depends(get_db),
+):
+    """Build a request-scoped :class:`DocumentRepository`.
 
-    return Container.document_repo()
+    Switched away from ``Container.document_repo()`` because the container
+    factory hands back a repo bound to a *new* session whose lifetime is
+    tied to garbage collection — the connection-pool leak this slice fixes.
+    """
+    from src.repositories.document_repository import DocumentRepository  # noqa: PLC0415
+
+    return DocumentRepository(db)
 
 
 def _get_sync_job_repo():  # type: ignore[no-untyped-def]
-    """Resolve SyncJobRepository from the DI container."""
-    from src.core.container import Container  # noqa: PLC0415
+    """Return a stateless :class:`SyncJobRepository`.
 
-    return Container.sync_job_repo()
+    The repo's methods accept the active :class:`AsyncSession` per call,
+    so we can hand back a single instance not bound to any session.  This
+    avoids the leak from ``Container.sync_job_repo()`` opening a fresh
+    session that nothing closes.
+    """
+    from src.repositories.sync_job_repository import SyncJobRepository  # noqa: PLC0415
+
+    return SyncJobRepository()
 
 
 @router.get(
@@ -624,6 +637,7 @@ async def get_source_stats(
     source_id: uuid.UUID,
     _admin: User = Depends(require_admin),
     service: SourceService = Depends(_get_source_service),
+    db: AsyncSession = Depends(get_db),
 ) -> SourceStatsResponse:
     """Return document/chunk/sync-job counts + ``last_synced_at`` for a source.
 
@@ -632,9 +646,9 @@ async def get_source_stats(
     # Ensure the source exists (raises NotFoundError → 404 via error handler).
     await service.get_source(source_id)
 
-    from src.core.container import Container  # noqa: PLC0415
+    from src.repositories.source_repository import SourceRepository  # noqa: PLC0415
 
-    repo = Container.source_repo()
+    repo = SourceRepository(db)
     stats = await repo.get_stats(source_id)
     return SourceStatsResponse(**stats)
 

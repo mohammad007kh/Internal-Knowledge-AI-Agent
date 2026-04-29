@@ -6,9 +6,12 @@ from datetime import datetime
 
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.core.database import get_db
 from src.core.deps import require_admin
 from src.models.user import User
+from src.repositories.company_policy_repository import CompanyPolicyRepository
 
 router = APIRouter()
 
@@ -28,7 +31,10 @@ def _to_public(p) -> PolicyPublic:
 
 
 @router.get("/", response_model=PolicyPublic)
-async def get_policy(_admin: User = Depends(require_admin)) -> PolicyPublic:
+async def get_policy(
+    _admin: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+) -> PolicyPublic:
     """Return the active policy, or an empty placeholder if none exists yet.
 
     The admin UI treats the company policy as a single editable document, so the
@@ -36,9 +42,7 @@ async def get_policy(_admin: User = Depends(require_admin)) -> PolicyPublic:
     empty PolicyPublic keeps the editor working on a fresh database without a
     misleading 404.
     """
-    from src.core.container import Container
-
-    repo = Container.company_policy_repo()
+    repo = CompanyPolicyRepository(db)
     policy = await repo.get_active()
     if not policy:
         return PolicyPublic(id=None, content="", created_at=None)
@@ -49,9 +53,8 @@ async def get_policy(_admin: User = Depends(require_admin)) -> PolicyPublic:
 async def update_policy(
     body: UpdatePolicyRequest,
     admin: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
 ) -> PolicyPublic:
-    from src.core.container import Container
-
-    repo = Container.company_policy_repo()
+    repo = CompanyPolicyRepository(db)
     policy = await repo.create_version(body.content, admin.id)
     return _to_public(policy)

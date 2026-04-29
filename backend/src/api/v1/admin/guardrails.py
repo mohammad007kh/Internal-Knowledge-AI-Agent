@@ -7,9 +7,12 @@ from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.core.database import get_db
 from src.core.deps import require_admin
 from src.models.user import User
+from src.repositories.guardrail_event_repository import GuardrailEventRepository
 
 router = APIRouter()
 
@@ -68,10 +71,9 @@ async def list_events(
     guard_type: Literal["input", "output"] | None = Query(None),
     action: Literal["blocked", "logged"] | None = Query(None),
     _admin: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
 ) -> GuardrailEventListResponse:
-    from src.core.container import Container
-
-    repo = Container.guardrail_event_repo()
+    repo = GuardrailEventRepository(db)
     blocked_filter: bool | None = None
     if action == "blocked":
         blocked_filter = True
@@ -95,10 +97,9 @@ async def list_events(
 async def get_event(
     event_id: uuid.UUID,
     _admin: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
 ) -> GuardrailEventDetail:
-    from src.core.container import Container
-
-    repo = Container.guardrail_event_repo()
+    repo = GuardrailEventRepository(db)
     event = await repo.get_by_id(event_id)
     if not event:
         raise HTTPException(
