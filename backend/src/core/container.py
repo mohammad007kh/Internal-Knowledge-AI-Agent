@@ -220,6 +220,10 @@ class Container(containers.DeclarativeContainer):
         embedding_service_factory=embedding_service_factory,
         langfuse=langfuse,
         guardrail_service=guardrail_service,
+        # Pipeline v2 needs SourceRepository to look up name/type/description
+        # for the source_router and text_to_query nodes.  When omitted the
+        # builder falls back to v1 (legacy single-shot) automatically.
+        source_repository=source_repo,
     )
 
 

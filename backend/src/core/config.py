@@ -80,6 +80,16 @@ class Settings(BaseSettings):
     LOCKOUT_MAX_FAILS: int = 10
     LOCKOUT_WINDOW_SECS: int = 900       # 15-min sliding window
     LOCKOUT_DURATION_SECS: int = 1800    # 30-min lockout after threshold
+    # Pipeline v2 — wires the 4 dead admin slots
+    # (clarification_detector, query_analyzer, source_router, text_to_query)
+    # plus the optional reflector retry loop. Falls back to v1 (the legacy
+    # input_guard → clarify(heuristic) → retrieve → synthesizer → output_guard)
+    # when set to False. Toggle is read at pipeline build time so a quick
+    # restart rolls back to v1 in <30s.
+    PIPELINE_V2_ENABLED: bool = True
+    # Reflector self-critic — costly per Constitution; OFF by default.
+    PIPELINE_REFLECTOR_ENABLED: bool = False
+    PIPELINE_REFLECTOR_MAX_RETRIES: int = 1
     # App config (loaded from YAML)
     upload_max_size_bytes: int = 52428800
     upload_supported_formats: list[str] = ["pdf", "docx", "xlsx", "csv", "txt", "md"]
