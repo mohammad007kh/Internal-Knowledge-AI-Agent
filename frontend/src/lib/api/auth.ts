@@ -5,6 +5,7 @@ import { apiClient } from '@/lib/api-client'
 export interface LoginRequest {
   email: string
   password: string
+  remember_me?: boolean
 }
 
 export interface TokenResponse {

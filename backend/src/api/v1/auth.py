@@ -73,10 +73,12 @@ def _token_response(
     access_token: str,
     refresh_token: str,
     must_change_password: bool,
+    *,
+    remember_me: bool = False,
 ) -> TokenResponse:
     """Build a :class:`TokenResponse` and attach refresh / CSRF cookies."""
-    set_refresh_cookie(response, refresh_token)
-    set_csrf_cookie(response, secrets.token_urlsafe(32))
+    set_refresh_cookie(response, refresh_token, remember_me=remember_me)
+    set_csrf_cookie(response, secrets.token_urlsafe(32), remember_me=remember_me)
     return TokenResponse(
         access_token=access_token,
         expires_in=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
@@ -129,7 +131,7 @@ async def login(
         metadata={},
     )
     await db.commit()
-    return _token_response(response, access, refresh, mcp)
+    return _token_response(response, access, refresh, mcp, remember_me=body.remember_me)
 
 
 @router.post("/refresh", response_model=TokenResponse, status_code=status.HTTP_200_OK)

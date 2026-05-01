@@ -18,6 +18,12 @@ class Settings(BaseSettings):
     JWT_ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 15
     REFRESH_TOKEN_EXPIRE_DAYS: int = 7
+    # When the login form sets remember_me=true, the refresh cookie's max-age
+    # is extended to this many days instead of REFRESH_TOKEN_EXPIRE_DAYS.
+    # The token itself still rotates on every refresh; this only controls
+    # how long the browser persists the cookie before the user must
+    # re-authenticate from scratch.
+    REFRESH_TOKEN_REMEMBER_ME_DAYS: int = 30
     # MinIO
     # MINIO_ENDPOINT is the internal endpoint the backend uses to talk to
     # MinIO (inside the Docker network this is the service name `minio:9000`).
