@@ -9,7 +9,9 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, Response, status
 from fastapi.responses import StreamingResponse
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.core.database import get_db
 from src.core.deps import get_current_user
 from src.core.problem_details import problem
 from src.models.chat import MessageRole
@@ -42,15 +44,19 @@ def _get_db_session_factory() -> Any:
 
 
 def _get_chat_session_repo() -> ChatSessionRepository:
-    from src.core.container import Container  # noqa: PLC0415
+    """Return a stateless ChatSessionRepository.
 
-    return Container.chat_session_repo()
+    The repo's methods accept the active :class:`AsyncSession` per call,
+    so the constructor argument is unused and we no longer route through
+    :class:`Container` (which would hand back a repo bound to a brand-new,
+    non-request-scoped session — the connection-pool leak this slice fixes).
+    """
+    return ChatSessionRepository()
 
 
 def _get_chat_message_repo() -> ChatMessageRepository:
-    from src.core.container import Container  # noqa: PLC0415
-
-    return Container.chat_message_repo()
+    """Return a stateless ChatMessageRepository.  See :func:`_get_chat_session_repo`."""
+    return ChatMessageRepository()
 
 
 def _get_pipeline() -> Any:
@@ -94,69 +100,85 @@ def _assert_session_owner(session_obj: Any, user: User) -> None:
 async def create_session(
     body: ChatSessionCreate,
     current_user: User = Depends(get_current_user),
-    db_session_factory: Any = Depends(_get_db_session_factory),
-    chat_session_repo: ChatSessionRepository = Depends(_get_chat_session_repo),
+    db: AsyncSession = Depends(get_db),
     chat_session_service: Any = Depends(_get_chat_session_service),
 ) -> ChatSessionResponse:
     """Create a new chat session for the authenticated user."""
-    async with db_session_factory() as db:
-        session_obj = await chat_session_service.create_session(
-            db,
-            user_id=str(current_user.id),
-            title=body.title,
-            source_ids=body.source_ids,
-        )
-        return ChatSessionResponse.model_validate(session_obj)
+    session_obj = await chat_session_service.create_session(
+        db,
+        user_id=str(current_user.id),
+        title=body.title,
+        source_ids=body.source_ids,
+    )
+    await db.commit()
+    return ChatSessionResponse.model_validate(session_obj)
 
 
 @router.get("/sessions", response_model=ChatSessionListResponse)
 async def list_sessions(
     current_user: User = Depends(get_current_user),
-    db_session_factory: Any = Depends(_get_db_session_factory),
+    db: AsyncSession = Depends(get_db),
     chat_session_repo: ChatSessionRepository = Depends(_get_chat_session_repo),
 ) -> ChatSessionListResponse:
     """List all chat sessions for the authenticated user."""
-    async with db_session_factory() as db:
-        sessions = await chat_session_repo.list_for_user(db, current_user.id)
-        session_responses = [ChatSessionResponse.model_validate(s) for s in sessions]
-        return ChatSessionListResponse(sessions=session_responses, total=len(session_responses))
+    sessions = await chat_session_repo.list_for_user(db, current_user.id)
+    session_responses = [ChatSessionResponse.model_validate(s) for s in sessions]
+    return ChatSessionListResponse(sessions=session_responses, total=len(session_responses))
 
 
 @router.get("/sessions/{session_id}")
 async def get_session(
     session_id: uuid.UUID,
     current_user: User = Depends(get_current_user),
-    db_session_factory: Any = Depends(_get_db_session_factory),
+    db: AsyncSession = Depends(get_db),
     chat_session_repo: ChatSessionRepository = Depends(_get_chat_session_repo),
     chat_message_repo: ChatMessageRepository = Depends(_get_chat_message_repo),
 ) -> dict[str, Any]:
     """Retrieve a chat session with its last 50 messages."""
-    async with db_session_factory() as db:
-        session_obj = await chat_session_repo.get(db, session_id)
-        _assert_session_owner(session_obj, current_user)
+    session_obj = await chat_session_repo.get(db, session_id)
+    _assert_session_owner(session_obj, current_user)
 
-        messages = await chat_message_repo.list_for_session(db, chat_session_id=session_id)
-        last_50 = messages[-50:]
+    messages = await chat_message_repo.list_for_session(db, chat_session_id=session_id)
+    last_50 = messages[-50:]
 
-        return {
-            "session": ChatSessionResponse.model_validate(session_obj),
-            "messages": [ChatMessageResponse.model_validate(m) for m in last_50],
-        }
+    return {
+        "session": ChatSessionResponse.model_validate(session_obj),
+        "messages": [ChatMessageResponse.model_validate(m) for m in last_50],
+    }
+
+
+@router.patch("/sessions/{session_id}", response_model=ChatSessionResponse)
+async def rename_session(
+    session_id: uuid.UUID,
+    body: dict,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+    chat_session_repo: ChatSessionRepository = Depends(_get_chat_session_repo),
+) -> ChatSessionResponse:
+    """Rename a chat session. Body: {"title": "..."}."""
+    title = body.get("title", "")
+    if not title or not isinstance(title, str) or len(title) > 255:
+        raise problem(status=400, title="Bad Request", detail="title must be 1–255 characters.")
+    session_obj = await chat_session_repo.get(db, session_id)
+    _assert_session_owner(session_obj, current_user)
+    updated = await chat_session_repo.rename(db, session_id, title.strip())
+    await db.commit()
+    return ChatSessionResponse.model_validate(updated)
 
 
 @router.delete("/sessions/{session_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_session(
     session_id: uuid.UUID,
     current_user: User = Depends(get_current_user),
-    db_session_factory: Any = Depends(_get_db_session_factory),
+    db: AsyncSession = Depends(get_db),
     chat_session_repo: ChatSessionRepository = Depends(_get_chat_session_repo),
 ) -> Response:
     """Soft-delete a chat session belonging to the authenticated user."""
-    async with db_session_factory() as db:
-        session_obj = await chat_session_repo.get(db, session_id)
-        _assert_session_owner(session_obj, current_user)
+    session_obj = await chat_session_repo.get(db, session_id)
+    _assert_session_owner(session_obj, current_user)
 
-        await chat_session_repo.soft_delete(db, session_id)
+    await chat_session_repo.soft_delete(db, session_id)
+    await db.commit()
 
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
@@ -166,6 +188,7 @@ async def send_message(
     session_id: uuid.UUID,
     body: ChatRequest,
     current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
     db_session_factory: Any = Depends(_get_db_session_factory),
     chat_session_repo: ChatSessionRepository = Depends(_get_chat_session_repo),
     chat_message_repo: ChatMessageRepository = Depends(_get_chat_message_repo),
@@ -175,24 +198,25 @@ async def send_message(
 ) -> StreamingResponse:
     """Stream an AI response for a user query within a chat session."""
 
-    # Verify ownership and resolve source_ids
-    async with db_session_factory() as db:
-        session_obj = await chat_session_repo.get(db, session_id)
-        _assert_session_owner(session_obj, current_user)
-        source_ids = await chat_session_service.get_source_ids_for_session(
-            db,
-            session=session_obj,
-            user_id=str(current_user.id),
-            override_ids=body.source_ids,
-        )
+    # Verify ownership and resolve source_ids on the request-scoped session.
+    session_obj = await chat_session_repo.get(db, session_id)
+    _assert_session_owner(session_obj, current_user)
+    source_ids = await chat_session_service.get_source_ids_for_session(
+        db,
+        session=session_obj,
+        user_id=str(current_user.id),
+        override_ids=body.source_ids,
+    )
 
-        # Persist the user message
-        await chat_message_repo.create(
-            db,
-            chat_session_id=session_id,
-            role=MessageRole.USER,
-            content=body.query,
-        )
+    # Persist the user message before the response stream begins so the
+    # follow-up generator (which opens fresh sessions) sees a consistent state.
+    await chat_message_repo.create(
+        db,
+        chat_session_id=session_id,
+        role=MessageRole.USER,
+        content=body.query,
+    )
+    await db.commit()
 
     # Start Langfuse trace
     trace_id: str = langfuse_tracing.start_trace(
@@ -246,6 +270,23 @@ async def send_message(
                     final_answer = output.get("final_answer", final_answer)
                     sources = output.get("sources", sources)
 
+        except GeneratorExit:
+            # Client disconnected — persist partial message so the session has a record.
+            async with db_session_factory() as db:
+                try:
+                    await chat_message_repo.create(
+                        db,
+                        chat_session_id=session_id,
+                        role=MessageRole.ASSISTANT,
+                        content=final_answer,
+                        is_partial=True,
+                    )
+                    await db.commit()
+                except Exception:  # noqa: BLE001
+                    logger.exception("Failed to persist partial message for session %s", session_id)
+            langfuse_tracing.end_trace(trace_id, output="[aborted]")
+            return
+
         except Exception as exc:  # noqa: BLE001
             # Check for GraphInterrupt first (if import succeeded)
             if GraphInterrupt is not None and isinstance(exc, GraphInterrupt):
@@ -267,8 +308,10 @@ async def send_message(
                     chat_session_id=session_id,
                     role=MessageRole.ASSISTANT,
                     content=final_answer,
+                    is_partial=False,
                 )
                 message_id = str(assistant_msg.id)
+                await db.commit()
             except Exception:  # noqa: BLE001
                 logger.exception("Failed to persist assistant message for session %s", session_id)
 

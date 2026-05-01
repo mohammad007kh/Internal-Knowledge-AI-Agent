@@ -22,6 +22,11 @@ def _get_rules() -> list[tuple[str, int, int]]:
 
     Reads from ``settings`` at call time so environment-driven changes take
     effect without requiring a module reload.
+
+    First-match wins, so longer / more-specific prefixes are listed first.
+    The per-IP cap on ``/admin/.../test-connection`` provides a defence-in-depth
+    backstop on top of the per-admin Redis check inside the endpoints themselves
+    (security §9.4).
     """
     return [
         (
@@ -33,6 +38,16 @@ def _get_rules() -> list[tuple[str, int, int]]:
             "/api/v1/auth/refresh",
             settings.RATE_LIMIT_AUTH_REFRESH_LIMIT,
             settings.RATE_LIMIT_AUTH_REFRESH_WINDOW,
+        ),
+        (
+            "/api/v1/admin/ai-models/test-connection",
+            10,
+            60,
+        ),
+        (
+            "/api/v1/admin/embedders/test-connection",
+            10,
+            60,
         ),
         (
             "/api/v1/",

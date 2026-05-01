@@ -1,7 +1,11 @@
+import logging
 import os
 
 import yaml  # type: ignore[import-untyped]
+from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+_logger = logging.getLogger(__name__)
 
 
 class Settings(BaseSettings):
@@ -15,11 +19,16 @@ class Settings(BaseSettings):
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 15
     REFRESH_TOKEN_EXPIRE_DAYS: int = 7
     # MinIO
-    MINIO_ENDPOINT: str
+    # MINIO_ENDPOINT is the internal endpoint the backend uses to talk to
+    # MinIO (inside the Docker network this is the service name `minio:9000`).
+    # MINIO_PUBLIC_ENDPOINT is the host-exposed endpoint the browser uses to
+    # follow presigned URLs (e.g. `localhost:9000`).
+    MINIO_ENDPOINT: str = "minio:9000"
+    MINIO_PUBLIC_ENDPOINT: str = "localhost:9000"
     MINIO_ACCESS_KEY: str
     MINIO_SECRET_KEY: str
     MINIO_BUCKET: str = "knowledge-agent"
-    MINIO_SECURE: bool = True
+    MINIO_SECURE: bool = False
     COOKIE_SECURE: bool = True
     # Langfuse
     LANGFUSE_SECRET_KEY: str = ""
@@ -32,6 +41,13 @@ class Settings(BaseSettings):
     ENCRYPTION_KEY: str
     # OpenAI
     OPENAI_API_KEY: str = ""
+    # AI Models v2 — enables AIModel/Embedder-driven pipeline.
+    # Defaults to True; gradual-rollout flag is preserved for future deployments.
+    AI_MODELS_V2: bool = True
+    # Fallback model id used when the AIModelResolver cannot resolve a stage
+    # (e.g. guardrail eval before any AIModel/Embedder is provisioned).
+    # Configurable so deployments behind self-hosted gateways can override.
+    DEFAULT_FALLBACK_MODEL: str = "gpt-4o-mini"
     # Email
     SMTP_HOST: str = "localhost"
     SMTP_PORT: int = 587
@@ -53,11 +69,57 @@ class Settings(BaseSettings):
     RATE_LIMIT_AUTH_REFRESH_WINDOW: int = 60
     RATE_LIMIT_API_LIMIT: int = 200
     RATE_LIMIT_API_WINDOW: int = 60
+    # Account lockout (per-email-hash, sliding window) — layered on top of
+    # the per-IP rate limit to defeat distributed credential-stuffing botnets.
+    LOCKOUT_ENABLED: bool = True
+    # Fail-closed when Redis is unreachable. Defaults to True in production
+    # and is auto-relaxed to False when ENVIRONMENT == "development" so local
+    # contributors aren't blocked when Redis is down. Override explicitly via
+    # env var if the auto behaviour isn't what you want.
+    LOCKOUT_REQUIRE_REDIS: bool = True
+    LOCKOUT_MAX_FAILS: int = 10
+    LOCKOUT_WINDOW_SECS: int = 900       # 15-min sliding window
+    LOCKOUT_DURATION_SECS: int = 1800    # 30-min lockout after threshold
+    # Pipeline v2 — wires the 4 dead admin slots
+    # (clarification_detector, query_analyzer, source_router, text_to_query)
+    # plus the optional reflector retry loop. Falls back to v1 (the legacy
+    # input_guard → clarify(heuristic) → retrieve → synthesizer → output_guard)
+    # when set to False. Toggle is read at pipeline build time so a quick
+    # restart rolls back to v1 in <30s.
+    PIPELINE_V2_ENABLED: bool = True
+    # Reflector self-critic — costly per Constitution; OFF by default.
+    PIPELINE_REFLECTOR_ENABLED: bool = False
+    PIPELINE_REFLECTOR_MAX_RETRIES: int = 1
     # App config (loaded from YAML)
     upload_max_size_bytes: int = 52428800
     upload_supported_formats: list[str] = ["pdf", "docx", "xlsx", "csv", "txt", "md"]
 
     model_config = SettingsConfigDict(env_file=".env", case_sensitive=True)
+
+    @model_validator(mode="after")
+    def _relax_lockout_redis_in_dev(self) -> "Settings":
+        """In development, default LOCKOUT_REQUIRE_REDIS to False unless the
+        operator has explicitly set the env var.
+
+        Pydantic Settings supplies env values via attribute assignment, so we
+        only flip the default when the env var is *not* present in the process
+        environment. This keeps prod fail-closed while making dev forgiving.
+        """
+        if (
+            self.ENVIRONMENT == "development"
+            and "LOCKOUT_REQUIRE_REDIS" not in os.environ
+        ):
+            object.__setattr__(self, "LOCKOUT_REQUIRE_REDIS", False)
+        _logger.info(
+            "Account lockout config: enabled=%s require_redis=%s "
+            "max_fails=%d window_secs=%d duration_secs=%d",
+            self.LOCKOUT_ENABLED,
+            self.LOCKOUT_REQUIRE_REDIS,
+            self.LOCKOUT_MAX_FAILS,
+            self.LOCKOUT_WINDOW_SECS,
+            self.LOCKOUT_DURATION_SECS,
+        )
+        return self
 
     def model_post_init(self, __context: object) -> None:
         config_path = os.environ.get("APP_CONFIG_PATH", "app_config.yaml")

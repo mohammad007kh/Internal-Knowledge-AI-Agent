@@ -79,6 +79,26 @@ class ServiceUnavailableError(AppError):
     title = "Service Unavailable"
 
 
+class AccountLockedError(AppError):
+    """Raised when an account is locked due to repeated failed login attempts.
+
+    Maps to HTTP 423 Locked. The handler attaches a ``Retry-After`` header
+    derived from ``extra["retry_after_seconds"]`` when present.
+    """
+
+    status_code = 423
+    error_type = "account_locked"
+    title = "Account Locked"
+
+
+class RedisUnavailableError(AppError):
+    """Raised when Redis is required but unreachable (fail-closed lockout)."""
+
+    status_code = 503
+    error_type = "redis_unavailable"
+    title = "Service Unavailable"
+
+
 class EmbeddingDimensionError(ValueError):
     """Raised when an embedding vector has an unexpected number of dimensions."""
 

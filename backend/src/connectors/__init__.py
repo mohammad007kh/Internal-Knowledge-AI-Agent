@@ -14,7 +14,10 @@ from src.connectors.base import BaseConnector, Document
 
 # Concrete implementations — side-effect imports trigger @register()
 from src.connectors.confluence_connector import ConfluenceConnector  # noqa: F401
-from src.connectors.database_connector import DatabaseConnector  # noqa: F401
+from src.connectors.database_connector import (  # noqa: F401
+    DatabaseConnector,
+    SqlDatabaseConnector,
+)
 from src.connectors.file_upload_connector import FileUploadConnector  # noqa: F401
 from src.connectors.registry import CONNECTOR_REGISTRY, get_connector, register
 from src.connectors.sharepoint_connector import SharePointConnector  # noqa: F401
@@ -28,6 +31,7 @@ __all__ = [
     "register",
     "ConfluenceConnector",
     "DatabaseConnector",
+    "SqlDatabaseConnector",
     "FileUploadConnector",
     "SharePointConnector",
     "WebUrlConnector",

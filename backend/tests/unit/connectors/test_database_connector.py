@@ -13,7 +13,12 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from src.connectors.base import Document
-from src.connectors.database_connector import DatabaseConnector
+
+# Tests target the SQL-only implementation directly (the public
+# ``DatabaseConnector`` is now a thin db_type-router that delegates here).
+from src.connectors.database_connector import (
+    SqlDatabaseConnector as DatabaseConnector,
+)
 
 # ---------------------------------------------------------------------------
 # Constants

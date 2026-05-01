@@ -1,11 +1,12 @@
 # Development overrides: bind mounts for hot-reload
 # This file is automatically merged by `docker compose up`
 # Do NOT commit secrets or prod-only settings here.
+#
+# To remap host ports (avoid clashes with other projects), set
+# HOST_DB_PORT / HOST_BACKEND_PORT / HOST_FRONTEND_PORT / HOST_REDIS_PORT
+# / HOST_MINIO_API_PORT / HOST_MINIO_CONSOLE_PORT / HOST_LANGFUSE_PORT
+# in .env — see .env.example.
 services:
-  db:
-    ports:
-      - "5434:5432"
-
   backend:
     volumes:
       - ./backend/src:/app/src

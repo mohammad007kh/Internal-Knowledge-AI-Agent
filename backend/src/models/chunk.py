@@ -55,6 +55,13 @@ class Chunk(UUIDMixin, TimestampMixin, Base):
         nullable=False,
         server_default="{}",
     )
+    # Defensive FK — protects v1.1 transition to multi-embedder corpora.
+    embedder_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("embedders.id", ondelete="RESTRICT"),
+        nullable=True,
+        index=True,
+    )
 
     # -- relationships -------------------------------------------------------
     document: Mapped[Document] = relationship(

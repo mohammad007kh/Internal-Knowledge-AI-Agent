@@ -1,12 +1,17 @@
-"""LLM configuration service stub — manages per-slot and per-source LLM settings.
+"""LLM configuration service — manages per-slot and per-source LLM settings.
 
 Implements FR-LLM-* requirements.
+
+Encryption is delegated to :mod:`src.core.crypto`, replacing the previous
+no-op stub that historically stored plaintext API keys (security CRITICAL,
+fixed as part of the AI Models & Embedders rollout).
 """
 from __future__ import annotations
 
 import uuid
 from typing import Any
 
+from src.core.crypto import encrypt as _fernet_encrypt
 from src.core.exceptions import NotFoundError
 
 
@@ -161,14 +166,9 @@ class LLMConfigService:
 
 
 def _encrypt_value(plain_text: str) -> bytes:
-    """Stub encryption — replace with a real Fernet/KMS call in production.
+    """Encrypt *plain_text* with the project Fernet key.
 
-    Args:
-        plain_text: Value to encrypt.
-
-    Returns:
-        Encrypted bytes.
+    Delegates to :func:`src.core.crypto.encrypt` — the single source of truth
+    for symmetric secret storage across the codebase.
     """
-    # NOTE: This is intentionally a no-op stub.  The real implementation
-    # will delegate to a KMS or Fernet-based encryption helper.
-    return plain_text.encode()
+    return _fernet_encrypt(plain_text)

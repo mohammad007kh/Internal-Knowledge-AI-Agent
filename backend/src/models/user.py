@@ -65,6 +65,9 @@ class User(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
     last_login_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+    show_citations_preference: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True
+    )
 
     # -- relationships -------------------------------------------------------
     refresh_tokens: Mapped[list[UserRefreshToken]] = relationship(

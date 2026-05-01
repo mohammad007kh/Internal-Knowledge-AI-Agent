@@ -14,6 +14,13 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
+import {
   Table,
   TableBody,
   TableCell,
@@ -22,13 +29,14 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { useAuth } from '@/features/auth/context/AuthContext'
+import { usersKeys } from '@/features/users/hooks/useUsersQueries'
 import { apiClient } from '@/lib/api-client'
 import { cn } from '@/lib/utils'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { type ColumnDef, flexRender, getCoreRowModel, useReactTable } from '@tanstack/react-table'
 import { BanIcon, CheckCircleIcon, PencilIcon, ShieldCheckIcon, UserIcon } from 'lucide-react'
 import Link from 'next/link'
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { toast } from 'sonner'
 
 export interface AdminUser {
@@ -44,51 +52,66 @@ export interface AdminUser {
 interface UsersResponse {
   items: AdminUser[]
   total: number
-  page: number
-  page_size: number
+  limit: number
+  offset: number
 }
 
-const PAGE_SIZE = 25
+const PAGE_LIMIT = 25
 
-async function fetchUsers(page: number, search: string): Promise<UsersResponse> {
-  const params = new URLSearchParams({
-    page: String(page),
-    page_size: String(PAGE_SIZE),
+async function fetchUsers(limit: number, offset: number): Promise<UsersResponse> {
+  const res = await apiClient.get<UsersResponse>('/api/v1/users', {
+    params: { limit, offset },
   })
-  if (search) params.set('search', search)
-  const res = await apiClient.get<UsersResponse>(`/api/v1/admin/users?${params}`)
   return res.data
 }
 
 async function deactivateUser(id: string): Promise<void> {
-  await apiClient.patch(`/api/v1/admin/users/${id}`, { is_active: false })
+  await apiClient.patch(`/api/v1/users/${id}`, { is_active: false })
 }
 
 async function reactivateUser(id: string): Promise<void> {
-  await apiClient.patch(`/api/v1/admin/users/${id}`, { is_active: true })
+  await apiClient.patch(`/api/v1/users/${id}`, { is_active: true })
 }
 
 export function UsersTable() {
   const queryClient = useQueryClient()
   const { user: authUser } = useAuth()
-  const [page, setPage] = useState(1)
+  const [offset, setOffset] = useState(0)
   const [search, setSearch] = useState('')
+  const [roleFilter, setRoleFilter] = useState<'all' | 'admin' | 'user'>('all')
+  const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'inactive'>('all')
   const [deactivatingId, setDeactivatingId] = useState<string | null>(null)
 
+  const page = Math.floor(offset / PAGE_LIMIT) + 1
+
   const { data, isLoading } = useQuery({
-    queryKey: ['admin-users', page, search],
-    queryFn: () => fetchUsers(page, search),
+    queryKey: usersKeys.listLegacy(PAGE_LIMIT, offset),
+    queryFn: () => fetchUsers(PAGE_LIMIT, offset),
     staleTime: 15_000,
   })
 
-  const users: AdminUser[] = data?.items ?? []
+  const allUsers: AdminUser[] = data?.items ?? []
+  const users = useMemo(() => {
+    const term = search.trim().toLowerCase()
+    return allUsers.filter((u) => {
+      const matchRole = roleFilter === 'all' || u.role === roleFilter
+      const matchStatus =
+        statusFilter === 'all' || (statusFilter === 'active' ? u.is_active : !u.is_active)
+      const matchSearch =
+        term.length === 0 ||
+        u.email.toLowerCase().includes(term) ||
+        (u.full_name?.toLowerCase().includes(term) ?? false)
+      return matchRole && matchStatus && matchSearch
+    })
+  }, [allUsers, roleFilter, statusFilter, search])
   const total = data?.total ?? 0
-  const totalPages = Math.ceil(total / PAGE_SIZE)
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_LIMIT))
 
   const deactivateMutation = useMutation({
     mutationFn: deactivateUser,
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['admin-users'] })
+      queryClient.invalidateQueries({ queryKey: usersKeys.all })
+      queryClient.invalidateQueries({ queryKey: ['admin', 'analytics'] })
       setDeactivatingId(null)
       toast.success('User deactivated.')
     },
@@ -98,7 +121,8 @@ export function UsersTable() {
   const reactivateMutation = useMutation({
     mutationFn: reactivateUser,
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['admin-users'] })
+      queryClient.invalidateQueries({ queryKey: usersKeys.all })
+      queryClient.invalidateQueries({ queryKey: ['admin', 'analytics'] })
       toast.success('User reactivated.')
     },
     onError: () => toast.error('Failed to reactivate user.'),
@@ -109,7 +133,11 @@ export function UsersTable() {
       accessorKey: 'email',
       header: 'Email',
       cell: ({ row }) => (
-        <Link href={`/admin/users/${row.original.id}`} className="font-medium hover:underline">
+        <Link
+          href={`/admin/users/${row.original.id}`}
+          className="block max-w-[180px] truncate font-medium hover:underline sm:max-w-[260px]"
+          title={row.original.email}
+        >
           {row.original.email}
         </Link>
       ),
@@ -179,34 +207,34 @@ export function UsersTable() {
           <Button
             size="icon"
             variant="ghost"
-            className="h-7 w-7"
+            className="h-9 w-9"
             asChild
             aria-label={`Edit ${row.original.email}`}
           >
             <Link href={`/admin/users/${row.original.id}`}>
-              <PencilIcon className="h-3.5 w-3.5" />
+              <PencilIcon className="h-4 w-4" />
             </Link>
           </Button>
           {row.original.is_active && row.original.id !== authUser?.id ? (
             <Button
               size="icon"
               variant="ghost"
-              className="h-7 w-7 text-destructive hover:bg-destructive/10"
+              className="h-9 w-9 text-destructive hover:bg-destructive/10"
               onClick={() => setDeactivatingId(row.original.id)}
               aria-label={`Deactivate ${row.original.email}`}
             >
-              <BanIcon className="h-3.5 w-3.5" />
+              <BanIcon className="h-4 w-4" />
             </Button>
           ) : !row.original.is_active ? (
             <Button
               size="icon"
               variant="ghost"
-              className="h-7 w-7 text-green-600"
+              className="h-9 w-9 text-green-600"
               onClick={() => reactivateMutation.mutate(row.original.id)}
               disabled={reactivateMutation.isPending}
               aria-label={`Reactivate ${row.original.email}`}
             >
-              <CheckCircleIcon className="h-3.5 w-3.5" />
+              <CheckCircleIcon className="h-4 w-4" />
             </Button>
           ) : null}
         </div>
@@ -224,21 +252,49 @@ export function UsersTable() {
 
   return (
     <>
-      <div className="mb-3 max-w-xs">
+      <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
         <Input
           placeholder="Search by email or name…"
           value={search}
           onChange={(e) => {
             setSearch(e.target.value)
-            setPage(1)
+            setOffset(0)
           }}
-          className="h-8 text-xs"
+          className="h-9 w-full sm:max-w-xs"
           aria-label="Search users"
         />
+        <div className="flex gap-2">
+          <Select value={roleFilter} onValueChange={(v) => setRoleFilter(v as typeof roleFilter)}>
+            <SelectTrigger className="h-9 flex-1 sm:w-36 sm:flex-none" aria-label="Filter by role">
+              <SelectValue placeholder="All roles" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All roles</SelectItem>
+              <SelectItem value="admin">Admin</SelectItem>
+              <SelectItem value="user">User</SelectItem>
+            </SelectContent>
+          </Select>
+          <Select
+            value={statusFilter}
+            onValueChange={(v) => setStatusFilter(v as typeof statusFilter)}
+          >
+            <SelectTrigger
+              className="h-9 flex-1 sm:w-36 sm:flex-none"
+              aria-label="Filter by status"
+            >
+              <SelectValue placeholder="All statuses" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All statuses</SelectItem>
+              <SelectItem value="active">Active</SelectItem>
+              <SelectItem value="inactive">Inactive</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
       </div>
 
-      <div className="rounded-md border border-border">
-        <Table>
+      <div className="overflow-x-auto rounded-md border border-border">
+        <Table className="min-w-[640px]">
           <TableHeader>
             {table.getHeaderGroups().map((hg) => (
               <TableRow key={hg.id}>
@@ -287,20 +343,24 @@ export function UsersTable() {
 
       {totalPages > 1 && (
         <div className="flex items-center justify-between pt-2">
-          <p className="text-xs text-muted-foreground">{total} users total</p>
+          <p className="text-xs text-muted-foreground">
+            {total} users total — page {page} of {totalPages}
+          </p>
           <div className="flex gap-1.5">
             <Button
               size="sm"
               variant="outline"
-              onClick={() => setPage((p) => Math.max(1, p - 1))}
-              disabled={page <= 1}
+              onClick={() => setOffset((o) => Math.max(0, o - PAGE_LIMIT))}
+              disabled={offset <= 0}
             >
               Previous
             </Button>
             <Button
               size="sm"
               variant="outline"
-              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+              onClick={() =>
+                setOffset((o) => Math.min((totalPages - 1) * PAGE_LIMIT, o + PAGE_LIMIT))
+              }
               disabled={page >= totalPages}
             >
               Next
@@ -321,10 +381,11 @@ export function UsersTable() {
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
             <AlertDialogAction
+              disabled={deactivateMutation.isPending}
               onClick={() => deactivatingId && deactivateMutation.mutate(deactivatingId)}
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
             >
-              Deactivate
+              {deactivateMutation.isPending ? 'Deactivating…' : 'Deactivate'}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
