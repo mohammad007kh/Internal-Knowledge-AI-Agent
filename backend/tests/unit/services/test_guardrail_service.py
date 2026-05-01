@@ -71,7 +71,7 @@ class TestEvaluateInput:
         mock_policy_repo.list_active = AsyncMock(return_value=[p1, p2])
 
         # Only p2 triggers
-        async def side_effect(self, text, rule_text):
+        async def side_effect(self, text, rule_text, **_kwargs):
             return rule_text == "Policy B"
 
         with patch.object(GuardrailService, "_llm_evaluate", new=side_effect):

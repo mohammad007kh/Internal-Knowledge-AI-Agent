@@ -31,6 +31,7 @@ from fastapi.testclient import TestClient
 
 from src.api.middleware.error_handler import register_exception_handlers
 from src.api.v1.auth import _get_auth_service, router
+from src.core.database import get_db
 from src.core.deps import require_authenticated
 from src.core.exceptions import (
     BadRequestError,
@@ -73,6 +74,23 @@ def current_user() -> User:
     return _make_user()
 
 
+def _fake_db_session() -> MagicMock:
+    """Stub :class:`AsyncSession` for unit tests.
+
+    Provides ``execute`` (async) returning a result with ``scalar_one_or_none``
+    that returns ``None`` (so the audit-log code's user lookup is benign),
+    plus ``flush``, ``commit``, ``add`` shaped to match SQLAlchemy's API.
+    """
+    db = MagicMock()
+    db.execute = AsyncMock()
+    db.execute.return_value.scalar_one_or_none = MagicMock(return_value=None)
+    db.execute.return_value.scalar_one = MagicMock(return_value=0)
+    db.flush = AsyncMock()
+    db.commit = AsyncMock()
+    db.refresh = AsyncMock()
+    return db
+
+
 @pytest.fixture()
 def client(mock_auth_service: AsyncMock, current_user: User):
     """TestClient wired to a minimal FastAPI app with dependency overrides."""
@@ -82,6 +100,7 @@ def client(mock_auth_service: AsyncMock, current_user: User):
 
     app.dependency_overrides[_get_auth_service] = lambda: mock_auth_service
     app.dependency_overrides[require_authenticated] = lambda: current_user
+    app.dependency_overrides[get_db] = _fake_db_session
 
     with TestClient(app, raise_server_exceptions=False) as tc:
         yield tc

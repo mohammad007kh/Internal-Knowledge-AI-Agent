@@ -3,10 +3,12 @@
 import { apiClient } from '@/lib/api-client'
 import { cn } from '@/lib/utils'
 import { useQuery } from '@tanstack/react-query'
-import { BotIcon, UserIcon } from 'lucide-react'
+import { BotIcon, CopyIcon, SparklesIcon, UserIcon } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
+import { toast } from 'sonner'
 import { CitationPanel } from './CitationPanel'
 import { FeedbackButtons } from './FeedbackButtons'
+import { MarkdownLite } from './MarkdownLite'
 import type { Citation, Message, SessionMessagesResponse } from './types'
 
 interface MessageThreadProps {
@@ -14,10 +16,17 @@ interface MessageThreadProps {
   streamingToken?: string
   isStreaming?: boolean
   extraMessages?: Message[]
+  onSend?: (text: string) => void
 }
 
+const SUGGESTED_PROMPTS: string[] = [
+  'Summarize the latest updates from my indexed sources.',
+  'What are the most referenced documents this week?',
+  'Draft a status update based on recent notes.',
+]
+
 async function fetchMessages(id: string): Promise<SessionMessagesResponse> {
-  const res = await apiClient.get<SessionMessagesResponse>(`/chat/sessions/${id}`)
+  const res = await apiClient.get<SessionMessagesResponse>(`/api/v1/chat/sessions/${id}`)
   return res.data
 }
 
@@ -26,8 +35,11 @@ export function MessageThread({
   streamingToken = '',
   isStreaming = false,
   extraMessages = [],
+  onSend,
 }: MessageThreadProps) {
   const bottomRef = useRef<HTMLDivElement>(null)
+  const scrollRef = useRef<HTMLDivElement>(null)
+  const [pinned, setPinned] = useState(true)
   const [openCitation, setOpenCitation] = useState<Citation | null>(null)
 
   const { data } = useQuery({
@@ -40,10 +52,17 @@ export function MessageThread({
   const persisted: Message[] = data?.messages ?? []
   const allMessages: Message[] = [...persisted, ...extraMessages]
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: scroll on message count or token change
+  const handleScroll = () => {
+    const el = scrollRef.current
+    if (!el) return
+    const dist = el.scrollHeight - el.scrollTop - el.clientHeight
+    setPinned(dist < 80)
+  }
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: scroll when pinned and content grows
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [allMessages.length, streamingToken])
+    if (pinned) bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [allMessages.length, streamingToken, pinned])
 
   if (!sessionId) {
     return (
@@ -58,15 +77,37 @@ export function MessageThread({
   return (
     <>
       <div
+        ref={scrollRef}
+        onScroll={handleScroll}
         className="flex flex-1 flex-col gap-4 overflow-y-auto px-4 py-4"
         role="log"
         aria-live="polite"
         aria-label="Conversation"
       >
         {allMessages.length === 0 && !isStreaming && (
-          <p className="mt-8 text-center text-sm text-muted-foreground">
-            No messages yet. Ask a question below.
-          </p>
+          <div className="mx-auto mt-16 max-w-md space-y-4 text-center">
+            <SparklesIcon className="mx-auto h-10 w-10 text-primary/40" />
+            <div className="space-y-1">
+              <h3 className="text-base font-semibold">
+                Ask your knowledge base anything
+              </h3>
+              <p className="text-sm text-muted-foreground">
+                Questions are answered using indexed sources.
+              </p>
+            </div>
+            <div className="grid gap-2 pt-2">
+              {SUGGESTED_PROMPTS.map((p) => (
+                <button
+                  key={p}
+                  type="button"
+                  onClick={() => onSend?.(p)}
+                  className="rounded-lg border border-border bg-card px-4 py-2.5 text-left text-sm transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                >
+                  {p}
+                </button>
+              ))}
+            </div>
+          </div>
         )}
 
         {allMessages.map((msg) => (
@@ -84,13 +125,13 @@ export function MessageThread({
               <BotIcon className="h-4 w-4 text-muted-foreground" />
             </div>
             <div className="max-w-[75%] rounded-2xl rounded-tl-sm bg-muted px-4 py-2.5">
-              <p className="whitespace-pre-wrap break-words text-sm">
-                {streamingToken}
+              <div className="break-words text-sm">
+                <MarkdownLite content={streamingToken} />
                 <span
                   className="ml-0.5 inline-block h-3.5 w-0.5 bg-foreground align-middle"
                   aria-hidden="true"
                 />
-              </p>
+              </div>
             </div>
           </div>
         )}
@@ -112,6 +153,13 @@ interface MessageBubbleProps {
 function MessageBubble({ message, sessionId, onCitationClick }: MessageBubbleProps) {
   const isUser = message.role === 'user'
 
+  const handleCopy = () => {
+    navigator.clipboard
+      .writeText(message.content)
+      .then(() => toast.success('Copied'))
+      .catch(() => toast.error('Failed to copy'))
+  }
+
   return (
     <div className={cn('flex items-start gap-3', isUser && 'flex-row-reverse')}>
       <div
@@ -131,10 +179,18 @@ function MessageBubble({ message, sessionId, onCitationClick }: MessageBubblePro
       <div
         className={cn(
           'max-w-[75%] rounded-2xl px-4 py-2.5',
-          isUser ? 'rounded-tr-sm bg-primary text-primary-foreground' : 'rounded-tl-sm bg-muted'
+          isUser
+            ? 'rounded-tr-sm bg-primary text-primary-foreground'
+            : 'group rounded-tl-sm bg-muted'
         )}
       >
-        <p className="whitespace-pre-wrap break-words text-sm">{message.content}</p>
+        {isUser ? (
+          <p className="whitespace-pre-wrap break-words text-sm">{message.content}</p>
+        ) : (
+          <div className="break-words text-sm">
+            <MarkdownLite content={message.content} />
+          </div>
+        )}
 
         {!isUser && message.citations && message.citations.length > 0 && (
           <div className="mt-2 flex flex-wrap gap-1.5" role="list" aria-label="Citations">
@@ -162,6 +218,17 @@ function MessageBubble({ message, sessionId, onCitationClick }: MessageBubblePro
             messageId={message.id}
             initialRating={message.feedback?.rating ?? null}
           />
+        )}
+
+        {!isUser && (
+          <button
+            type="button"
+            onClick={handleCopy}
+            className="mt-1 inline-flex items-center gap-1 text-xs text-muted-foreground opacity-0 transition-opacity hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100"
+            aria-label="Copy message"
+          >
+            <CopyIcon className="h-3 w-3" /> Copy
+          </button>
         )}
 
         <time

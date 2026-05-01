@@ -5,6 +5,12 @@ COPY package.json pnpm-lock.yaml* ./
 RUN corepack enable pnpm && pnpm install --frozen-lockfile
 COPY . .
 ENV NEXT_TELEMETRY_DISABLED=1
+# NEXT_PUBLIC_* vars are inlined at build time by Next.js, so they must be
+# present as ENV before `pnpm run build`. The compose file passes the
+# host-port-aware value through `args:`. Default keeps the image usable
+# for direct `docker build` runs.
+ARG NEXT_PUBLIC_API_URL=http://localhost:8000
+ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
 RUN corepack enable pnpm && pnpm run build
 
 # ---- runner ----

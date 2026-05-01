@@ -21,6 +21,7 @@ from src.services.user_service import UserService
 
 if TYPE_CHECKING:
     from src.models.user import User
+    from src.services.account_lockout import AccountLockout
 
 
 class AuthService:
@@ -32,11 +33,13 @@ class AuthService:
         refresh_repo: RefreshTokenRepository,
         user_service: UserService,
         password_service: PasswordService,
+        lockout: "AccountLockout | None" = None,
     ) -> None:
         self._user_repo = user_repo
         self._refresh_repo = refresh_repo
         self._user_service = user_service
         self._password_svc = password_service
+        self._lockout = lockout
 
     # ------------------------------------------------------------------ #
     # Public API                                                          #
@@ -50,18 +53,31 @@ class AuthService:
         Returns ``(access_token, raw_refresh_token, must_change_password)``.
 
         Raises:
+            AccountLockedError: account is currently locked due to repeated
+                failed attempts (HTTP 423).
+            RedisUnavailableError: lockout check failed and strict-mode is
+                enabled (HTTP 503).
             UnauthorizedError: bad credentials.
             ForbiddenError: account disabled.
         """
+        # Lockout check happens BEFORE the expensive bcrypt verification so
+        # the per-email rate limit can't be turned into a CPU-burn vector.
+        if self._lockout is not None:
+            await self._lockout.check(email)
+
         user = await self._user_repo.get_by_email(email)
         if user is None or not self._password_svc.verify_password(
             password, user.hashed_password
         ):
+            if self._lockout is not None:
+                await self._lockout.record_failure(email)
             raise UnauthorizedError("Invalid email or password")
 
         if not user.is_active:
             raise ForbiddenError("Account is disabled")
 
+        if self._lockout is not None:
+            await self._lockout.reset(email)
         return await self._issue_tokens(user)
 
     async def refresh(

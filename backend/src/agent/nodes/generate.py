@@ -1,5 +1,10 @@
 # src/agent/nodes/generate.py
-"""generate_response — LangGraph node."""
+"""generate_response — LangGraph node.
+
+Resolves the AI model record at node entry via :class:`AIModelResolver`,
+so admin updates to ``/admin/ai-models`` and ``/admin/llm-settings`` take
+effect on the next request after the resolver's TTL window (60 s by default).
+"""
 from __future__ import annotations
 
 import logging
@@ -7,7 +12,7 @@ from typing import TYPE_CHECKING
 
 import tenacity
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
-from openai import APIStatusError, APITimeoutError, AsyncOpenAI
+from openai import APIStatusError, APITimeoutError
 
 from src.agent.prompts import NO_CONTEXT_MESSAGE, render_system_prompt
 from src.agent.state import AgentState
@@ -15,17 +20,20 @@ from src.agent.state import AgentState
 if TYPE_CHECKING:
     from langfuse import Langfuse
 
+    from src.services.ai_model_resolver import AIModelResolver
+
 logger = logging.getLogger(__name__)
 
-_MODEL = "gpt-4o-mini"
-_TEMPERATURE = 0.2
-_MAX_TOKENS = 1024
+_STAGE = "synthesizer"
 _MAX_RETRIES = 3
 
 
-def _build_messages(state: AgentState) -> list[dict]:  # type: ignore[type-arg]
+def _build_messages(state: AgentState, custom_prompt: str | None) -> list[dict]:  # type: ignore[type-arg]
     """Convert LangGraph state messages to OpenAI chat format."""
-    system_text = render_system_prompt(state.get("retrieved_chunks", []))
+    if custom_prompt:
+        system_text = custom_prompt
+    else:
+        system_text = render_system_prompt(state.get("retrieved_chunks", []))
     result = [{"role": "system", "content": system_text}]
 
     for msg in state.get("messages", []):
@@ -42,7 +50,7 @@ def _build_messages(state: AgentState) -> list[dict]:  # type: ignore[type-arg]
 async def generate_response(
     state: AgentState,
     *,
-    openai_client: AsyncOpenAI,
+    ai_model_resolver: AIModelResolver,
     langfuse: Langfuse,
 ) -> dict:  # type: ignore[type-arg]
     """Run the LLM and set state["final_answer"].
@@ -51,17 +59,20 @@ async def generate_response(
     On permanent failure sets ``state["error"]`` and returns an
     empty-context fallback message.
     """
+    client = await ai_model_resolver.resolve(_STAGE)
+
     span = langfuse.span(  # type: ignore[attr-defined]
         trace_id=state["trace_id"],
-        name="generate_response",
+        name=_STAGE,
         input={
-            "model": _MODEL,
+            "model": client.model_id,
+            "provider": client.provider,
             "chunk_count": len(state.get("retrieved_chunks", [])),
             "query": state.get("query", "")[:200],
         },
     )
 
-    messages = _build_messages(state)
+    messages = _build_messages(state, client.custom_prompt)
 
     @tenacity.retry(
         stop=tenacity.stop_after_attempt(_MAX_RETRIES),
@@ -70,11 +81,11 @@ async def generate_response(
         reraise=True,
     )
     async def _call() -> tuple[str, dict]:  # type: ignore[type-arg]
-        response = await openai_client.chat.completions.create(
-            model=_MODEL,
+        response = await client.http_client.chat.completions.create(
+            model=client.model_id,
             messages=messages,  # type: ignore[arg-type]
-            temperature=_TEMPERATURE,
-            max_tokens=_MAX_TOKENS,
+            temperature=client.temperature,
+            max_tokens=client.max_tokens,
         )
         text = response.choices[0].message.content or ""
         usage = {
@@ -87,7 +98,8 @@ async def generate_response(
         answer, usage = await _call()
         span.update(output={"answer_length": len(answer), **usage})
         logger.info(
-            "generate_response: tokens in=%d out=%d",
+            "generate_response: model=%s tokens in=%d out=%d",
+            client.model_id,
             usage["input_tokens"],
             usage["output_tokens"],
         )

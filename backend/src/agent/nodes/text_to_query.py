@@ -1,0 +1,305 @@
+"""text_to_query — LangGraph node that converts the user's natural-language
+question into a read-only SQL SELECT for each routed database source.
+
+Resolver slot: ``text_to_query``.
+
+Only fires when ``state["text_to_query_source_ids"]`` is non-empty.
+For each such source the node:
+
+1. Resolves the source's connection config from the DB.
+2. Generates a SQL SELECT via the LLM.
+3. Validates the SQL is read-only (see :func:`is_safe_sql`).
+4. Wraps it as ``SELECT * FROM ({generated_sql}) AS _q LIMIT 100``.
+5. Executes it; appends each row as a chunk so ``persist`` renders citations.
+
+State writes (merged into existing fields):
+* ``retrieved_chunks`` — extended with one chunk per row.
+* ``generated_sql`` — ``{source_id: sql}`` for trace/debug.
+
+Defensive fallbacks:
+* SQL safety check fails → skip that source, log warning.
+* Source connect / execute fails → skip that source, continue.
+* No source list → no-op.
+
+Constitution: SQL injection prevention is non-negotiable.  We refuse
+anything that is not a single ``SELECT`` statement.
+"""
+from __future__ import annotations
+
+import logging
+import re
+import uuid
+from typing import TYPE_CHECKING, Any
+
+import sqlalchemy as sa
+from sqlalchemy.ext.asyncio import create_async_engine
+
+from src.agent.state import AgentState
+from src.core.crypto import decrypt
+from src.models.enums import SourceType
+from src.prompts import load_prompt
+
+if TYPE_CHECKING:
+    from langfuse import Langfuse
+    from sqlalchemy.ext.asyncio import AsyncSession
+
+    from src.repositories.source_repository import SourceRepository
+    from src.services.ai_model_resolver import AIModelResolver
+
+logger = logging.getLogger(__name__)
+
+_STAGE = "text_to_query"
+_LIMIT = 100
+_FORBIDDEN_KEYWORDS = (
+    "INSERT",
+    "UPDATE",
+    "DELETE",
+    "DROP",
+    "ALTER",
+    "CREATE",
+    "TRUNCATE",
+    "GRANT",
+    "REVOKE",
+    "EXEC",
+    "MERGE",
+    "CALL",
+)
+
+
+def is_safe_sql(sql: str) -> tuple[bool, str]:
+    """Return (safe, reason).  reason is empty when safe."""
+    if not isinstance(sql, str):
+        return False, "sql is not a string"
+    stripped = sql.strip()
+    # Strip a single trailing semicolon (some LLMs add one despite the prompt).
+    if stripped.endswith(";"):
+        stripped = stripped[:-1].rstrip()
+    if not stripped:
+        return False, "empty sql"
+    # Must start with SELECT (case-insensitive).
+    if not re.match(r"^\s*SELECT\b", stripped, flags=re.IGNORECASE):
+        return False, "must start with SELECT"
+    # Reject any further semicolons (multi-statement).
+    if ";" in stripped:
+        return False, "contains semicolon (multi-statement)"
+    # Reject SQL line / block comments.
+    if "--" in stripped or "/*" in stripped:
+        return False, "contains comments"
+    # Reject any forbidden keyword anywhere as a whole word.
+    upper = stripped.upper()
+    for kw in _FORBIDDEN_KEYWORDS:
+        if re.search(rf"\b{re.escape(kw)}\b", upper):
+            return False, f"forbidden keyword {kw}"
+    return True, ""
+
+
+def wrap_with_limit(sql: str, *, limit: int = _LIMIT) -> str:
+    """Wrap *sql* with an outer ``SELECT * FROM (...) AS _q LIMIT N``."""
+    inner = sql.strip()
+    if inner.endswith(";"):
+        inner = inner[:-1].rstrip()
+    return f"SELECT * FROM ({inner}) AS _q LIMIT {limit}"
+
+
+def _row_to_text(row: Any) -> str:
+    """Render a SQL row as ``col: value`` lines for the synthesizer."""
+    try:
+        return "\n".join(f"{col}: {val}" for col, val in row.items())
+    except Exception:  # noqa: BLE001
+        return str(row)
+
+
+async def _generate_sql(
+    *,
+    query: str,
+    schema_sketch: str,
+    ai_model_resolver: AIModelResolver,
+) -> str:
+    client = await ai_model_resolver.resolve(_STAGE)
+    prompt = load_prompt(_STAGE, custom=client.custom_prompt)
+    user_payload = (
+        f"Schema sketch:\n{schema_sketch or '(no schema available)'}\n\n"
+        f"Question: {query}"
+    )
+    response = await client.http_client.chat.completions.create(
+        model=client.model_id,
+        messages=[
+            {"role": "system", "content": prompt},
+            {"role": "user", "content": user_payload},
+        ],
+        temperature=client.temperature,
+        max_tokens=client.max_tokens,
+    )
+    return (response.choices[0].message.content or "").strip()
+
+
+def _decrypt_source_config(source: Any) -> dict[str, Any] | None:
+    """Decrypt and parse the source's encrypted JSON config.
+
+    Returns None on any decryption / parse failure.
+    """
+    if not getattr(source, "config_encrypted", None):
+        return None
+    try:
+        import json  # noqa: PLC0415
+
+        plaintext = decrypt(source.config_encrypted)
+        return dict(json.loads(plaintext))
+    except Exception:  # noqa: BLE001
+        logger.warning(
+            "text_to_query: failed to decrypt config for source=%s", source.id,
+            exc_info=True,
+        )
+        return None
+
+
+async def _execute(
+    connection_string: str,
+    sql: str,
+) -> list[Any]:
+    """Run *sql* against *connection_string*; returns list of mapping rows."""
+    engine = create_async_engine(
+        connection_string,
+        pool_size=1,
+        max_overflow=0,
+    )
+    try:
+        async with engine.connect() as conn:
+            result = await conn.execute(sa.text(sql))
+            return list(result.mappings().all())
+    finally:
+        await engine.dispose()
+
+
+async def text_to_query(
+    state: AgentState,
+    *,
+    ai_model_resolver: AIModelResolver,
+    db_session: AsyncSession,
+    source_repository: SourceRepository,
+    langfuse: Langfuse,
+) -> dict[str, Any]:
+    """Run NL→SQL retrieval for each routed database source.
+
+    Result chunks are appended to ``retrieved_chunks`` with metadata
+    so ``persist.format_response`` renders human-readable citations.
+    """
+    target_ids: list[str] = list(state.get("text_to_query_source_ids") or [])
+    query: str = (state.get("query") or "").strip()
+    if not target_ids or not query:
+        return {}
+
+    span = langfuse.span(  # type: ignore[attr-defined]
+        trace_id=state["trace_id"],
+        name=_STAGE,
+        input={"target_count": len(target_ids), "query": query[:200]},
+    )
+
+    new_chunks: list[dict[str, Any]] = []
+    generated_sql: dict[str, str] = {}
+    skipped: list[str] = []
+
+    try:
+        # Resolve sources by id (defensive — bad inputs just get skipped).
+        try:
+            uuids: list[uuid.UUID] = []
+            for sid in target_ids:
+                try:
+                    uuids.append(uuid.UUID(sid))
+                except (ValueError, TypeError):
+                    skipped.append(sid)
+            sources = await source_repository.list_by_ids(uuids) if uuids else []
+        except Exception:  # noqa: BLE001
+            logger.warning("text_to_query: failed to load sources", exc_info=True)
+            return {}
+
+        for source in sources:
+            sid = str(source.id)
+            if source.source_type != SourceType.DATABASE:
+                skipped.append(sid)
+                continue
+
+            config = _decrypt_source_config(source)
+            if config is None or not config.get("connection_string"):
+                logger.info(
+                    "text_to_query: source=%s has no connection_string — skipping",
+                    sid,
+                )
+                skipped.append(sid)
+                continue
+
+            # Schema sketch — pull from cached description for now.
+            schema_sketch = source.description or ""
+
+            try:
+                raw_sql = await _generate_sql(
+                    query=query,
+                    schema_sketch=schema_sketch,
+                    ai_model_resolver=ai_model_resolver,
+                )
+            except Exception:  # noqa: BLE001
+                logger.warning(
+                    "text_to_query: LLM call failed for source=%s", sid,
+                    exc_info=True,
+                )
+                skipped.append(sid)
+                continue
+
+            safe, reason = is_safe_sql(raw_sql)
+            if not safe:
+                logger.warning(
+                    "text_to_query: unsafe SQL for source=%s reason=%s — skipping",
+                    sid,
+                    reason,
+                )
+                skipped.append(sid)
+                continue
+
+            wrapped = wrap_with_limit(raw_sql, limit=_LIMIT)
+            generated_sql[sid] = wrapped
+
+            try:
+                rows = await _execute(config["connection_string"], wrapped)
+            except Exception:  # noqa: BLE001
+                logger.warning(
+                    "text_to_query: execution failed for source=%s — skipping",
+                    sid,
+                    exc_info=True,
+                )
+                skipped.append(sid)
+                continue
+
+            for row in rows:
+                new_chunks.append(
+                    {
+                        "chunk_id": f"sql:{sid}:{len(new_chunks)}",
+                        "source_id": sid,
+                        "text": _row_to_text(row),
+                        "score": 0.0,
+                        "document_title": source.name,
+                        "page_number": None,
+                        "source_name": source.name,
+                    }
+                )
+
+        existing = list(state.get("retrieved_chunks") or [])
+        merged = existing + new_chunks
+        span.update(
+            output={
+                "rows_added": len(new_chunks),
+                "sources_used": len(generated_sql),
+                "sources_skipped": len(skipped),
+            }
+        )
+        logger.info(
+            "text_to_query: produced %d rows from %d sources (skipped=%d)",
+            len(new_chunks),
+            len(generated_sql),
+            len(skipped),
+        )
+        return {
+            "retrieved_chunks": merged,
+            "generated_sql": generated_sql,
+        }
+    finally:
+        span.end()

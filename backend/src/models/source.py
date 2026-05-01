@@ -12,9 +12,10 @@ unprivileged users or API responses.
 from __future__ import annotations
 
 import uuid
+from datetime import datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import Boolean, Enum, ForeignKey, String
+from sqlalchemy import Boolean, Enum, ForeignKey, String, Text
 from sqlalchemy.dialects.postgresql import BYTEA, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -49,6 +50,26 @@ class Source(Base, UUIDMixin, TimestampMixin):
         index=True,
     )
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+
+    # -- Phase 2 fields ------------------------------------------------------
+    source_mode: Mapped[str] = mapped_column(String, nullable=False, default="snapshot")
+    retrieval_mode: Mapped[str] = mapped_column(String, nullable=False, default="vector_only")
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    sync_mode: Mapped[str] = mapped_column(String, nullable=False, default="manual")
+    sync_schedule: Mapped[str | None] = mapped_column(String, nullable=True)
+    last_synced_at: Mapped[datetime | None] = mapped_column(nullable=True)
+    status: Mapped[str] = mapped_column(String, nullable=False, default="pending")
+    citations_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    # Internal MinIO object key — NEVER exposed in API responses
+    file_storage_path: Mapped[str | None] = mapped_column(String, nullable=True)
+    next_sync_due_at: Mapped[datetime | None] = mapped_column(nullable=True)
+    # Embedder pinned at Source creation; immutable once chunks exist.
+    embedder_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("embedders.id", ondelete="RESTRICT"),
+        nullable=True,
+        index=True,
+    )
 
     # -- relationships -------------------------------------------------------
     owner: Mapped[User] = relationship(

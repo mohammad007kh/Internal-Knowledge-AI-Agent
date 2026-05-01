@@ -1,34 +1,90 @@
 'use client'
 
 import {
-  type CreateSourceRequest,
-  createSourceApi,
+  type UpdateSourceRequest,
   deleteSourceApi,
+  getSourceApi,
+  getSourceStatsApi,
+  listSourceDocumentsApi,
   listSourcesApi,
+  listSyncJobsApi,
+  refreshDescriptionApi,
   testConnectionApi,
+  triggerSyncApi,
+  updateSourceApi,
 } from '@/lib/api/sources'
+import { getErrorMessage } from '@/lib/errors'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 
-const SOURCES_KEY = ['sources'] as const
+// ---------------------------------------------------------------------------
+// Query key factory — single source of truth
+// ---------------------------------------------------------------------------
+
+export const sourcesKeys = {
+  all: ['sources'] as const,
+  list: () => [...sourcesKeys.all, 'list'] as const,
+  detail: (id: string) => [...sourcesKeys.all, 'detail', id] as const,
+  stats: (id: string) => [...sourcesKeys.all, 'stats', id] as const,
+  syncJobs: (id: string) => [...sourcesKeys.all, 'sync-jobs', id] as const,
+  documents: (id: string) => [...sourcesKeys.all, 'documents', id] as const,
+}
+
+// ---------------------------------------------------------------------------
+// Queries
+// ---------------------------------------------------------------------------
 
 export function useListSources() {
   return useQuery({
-    queryKey: [...SOURCES_KEY],
+    queryKey: sourcesKeys.list(),
     queryFn: () => listSourcesApi(),
   })
 }
 
-export function useCreateSource() {
+export function useSource(sourceId: string | undefined) {
+  return useQuery({
+    queryKey: sourceId ? sourcesKeys.detail(sourceId) : ['sources', 'detail', 'empty'],
+    queryFn: () => getSourceApi(sourceId as string),
+    enabled: Boolean(sourceId),
+  })
+}
+
+export function useSourceStats(sourceId: string | undefined) {
+  return useQuery({
+    queryKey: sourceId ? sourcesKeys.stats(sourceId) : ['sources', 'stats', 'empty'],
+    queryFn: () => getSourceStatsApi(sourceId as string),
+    enabled: Boolean(sourceId),
+  })
+}
+
+export function useSyncJobs(sourceId: string | undefined) {
+  return useQuery({
+    queryKey: sourceId ? sourcesKeys.syncJobs(sourceId) : ['sources', 'sync-jobs', 'empty'],
+    queryFn: () => listSyncJobsApi(sourceId as string),
+    enabled: Boolean(sourceId),
+  })
+}
+
+export function useSourceDocuments(sourceId: string | undefined) {
+  return useQuery({
+    queryKey: sourceId ? sourcesKeys.documents(sourceId) : ['sources', 'documents', 'empty'],
+    queryFn: () => listSourceDocumentsApi(sourceId as string),
+    enabled: Boolean(sourceId),
+  })
+}
+
+// ---------------------------------------------------------------------------
+// Mutations
+// ---------------------------------------------------------------------------
+
+export function useUpdateSource(sourceId: string) {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: (body: CreateSourceRequest) => createSourceApi(body),
+    mutationFn: (body: UpdateSourceRequest) => updateSourceApi(sourceId, body),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: SOURCES_KEY })
-      toast.success('Source created successfully')
-    },
-    onError: () => {
-      toast.error('Failed to create source')
+      queryClient.invalidateQueries({ queryKey: sourcesKeys.detail(sourceId) })
+      queryClient.invalidateQueries({ queryKey: sourcesKeys.list() })
+      queryClient.invalidateQueries({ queryKey: ['admin', 'analytics'] })
     },
   })
 }
@@ -38,11 +94,12 @@ export function useDeleteSource() {
   return useMutation({
     mutationFn: (sourceId: string) => deleteSourceApi(sourceId),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: SOURCES_KEY })
-      toast.success('Source deleted')
+      queryClient.invalidateQueries({ queryKey: sourcesKeys.all })
+      queryClient.invalidateQueries({ queryKey: ['admin', 'analytics'] })
+      toast.success('Source deleted.')
     },
-    onError: () => {
-      toast.error('Failed to delete source')
+    onError: (error: unknown) => {
+      toast.error(getErrorMessage(error) || 'Failed to delete source')
     },
   })
 }
@@ -57,8 +114,27 @@ export function useTestConnection() {
         toast.error(data.message || 'Connection failed')
       }
     },
-    onError: () => {
-      toast.error('Connection test failed')
+    onError: (error: unknown) => {
+      toast.error(getErrorMessage(error) || 'Connection test failed')
     },
+  })
+}
+
+export function useTriggerSync() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (sourceId: string) => triggerSyncApi(sourceId),
+    onSuccess: (_data, sourceId) => {
+      queryClient.invalidateQueries({ queryKey: sourcesKeys.list() })
+      queryClient.invalidateQueries({ queryKey: sourcesKeys.detail(sourceId) })
+      queryClient.invalidateQueries({ queryKey: sourcesKeys.syncJobs(sourceId) })
+      queryClient.invalidateQueries({ queryKey: sourcesKeys.stats(sourceId) })
+    },
+  })
+}
+
+export function useRefreshDescription(sourceId: string) {
+  return useMutation({
+    mutationFn: () => refreshDescriptionApi(sourceId),
   })
 }

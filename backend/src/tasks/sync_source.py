@@ -105,7 +105,15 @@ async def _sync_source_async(task: Any, source_id: str) -> dict[str, Any]:  # no
     # ── 4–6. Chunk → persist documents → embed → persist chunks ─────────────
     span_process = trace.span(name="process_documents")
     chunking_svc = container.chunking_service()
-    embedding_svc = container.embedding_service()
+    # Resolve the embedder pinned to this source via the factory.  v1
+    # invariant: ``for_source`` returns the singleton active embedder, but
+    # the factory entry point keeps us forward-compatible with v1.1.
+    embedding_factory = container.embedding_service_factory()
+    # ``for_source`` returns both the service and the embedder id used to
+    # stamp ``embedder_id`` onto each persisted chunk — single DB roundtrip.
+    embedding_svc, active_embedder_id = await embedding_factory.for_source(
+        uuid.UUID(source_id)
+    )
 
     all_chunk_texts: list[str] = []
     # Parallel lists kept in sync so we can back-fill embeddings later.
@@ -160,6 +168,7 @@ async def _sync_source_async(task: Any, source_id: str) -> dict[str, Any]:  # no
                         embedding=vectors[idx],
                         chunk_index=chunk_index,
                         metadata_=meta,
+                        embedder_id=active_embedder_id,
                     )
                     for idx, (doc_id, src_id, chunk_index, meta) in enumerate(
                         pending_chunks

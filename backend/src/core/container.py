@@ -7,29 +7,38 @@ from src.agent.pipeline import build_pipeline
 from src.connectors.factory import ConnectorFactory
 from src.core.config import settings
 from src.core.database import AsyncSessionLocal
+from src.repositories.admin_audit_log_repository import AdminAuditLogRepository
+from src.repositories.ai_model_repository import AIModelRepository
 from src.repositories.chat_repository import ChatMessageRepository, ChatSessionRepository
 from src.repositories.chunk_repository import ChunkRepository
 from src.repositories.company_policy_repository import CompanyPolicyRepository
 from src.repositories.connector_repository import ConnectorRepository
 from src.repositories.document_repository import DocumentRepository
+from src.repositories.embedder_repository import EmbedderRepository
 from src.repositories.invitation_repository import InvitationRepository
+from src.repositories.llm_config_repository import LLMConfigRepository
 from src.repositories.refresh_token_repository import RefreshTokenRepository
 from src.repositories.source_permission_repository import SourcePermissionRepository
 from src.repositories.source_repository import SourceRepository
 from src.repositories.sync_job_repository import SyncJobRepository
 from src.repositories.guardrail_event_repository import GuardrailEventRepository
 from src.repositories.user_repository import UserRepository
+from src.services.account_lockout import AccountLockout
+from src.services.ai_model_resolver import AIModelResolver
 from src.services.auth_service import AuthService
 from src.services.chat_session_service import ChatSessionService
 from src.services.chunking_service import ChunkingService
 from src.services.connector_service import ConnectorService
 from src.services.email_service import EmailService
 from src.services.embedding_service import EmbeddingService
+from src.services.embedding_service_factory import EmbeddingServiceFactory
 from src.services.guardrail_service import GuardrailService
 from src.services.langfuse_tracing_service import LangfuseTracingService, NullLangfuse
 from src.services.password_service import PasswordService
+from src.services.source_inspection_service import SourceInspectionService
 from src.services.source_permission_service import SourcePermissionService
 from src.services.source_service import SourceService
+from src.services.storage_service import StorageService
 from src.services.sync_job_service import SyncJobService
 from src.services.user_service import UserService
 
@@ -94,10 +103,24 @@ class Container(containers.DeclarativeContainer):
     connector_repo = providers.Factory(ConnectorRepository, session=db_session_factory)
     company_policy_repo = providers.Factory(CompanyPolicyRepository, session=db_session_factory)
     guardrail_event_repo = providers.Factory(GuardrailEventRepository, session=db_session_factory)
+    llm_config_repo = providers.Factory(LLMConfigRepository, session=db_session_factory)
+    ai_model_repo = providers.Factory(AIModelRepository, session=db_session_factory)
+    embedder_repo = providers.Factory(EmbedderRepository, session=db_session_factory)
+    admin_audit_log_repo = providers.Factory(
+        AdminAuditLogRepository, session=db_session_factory
+    )
 
     # ── Services ────────────────────────────────────────────────────
     password_service = providers.Factory(PasswordService)
     email_service = providers.Factory(EmailService)
+    # AccountLockout is constructed with a None redis_client; the service
+    # re-resolves the live client from src.core.redis on every call so it
+    # picks up the singleton initialised during the lifespan startup hook.
+    account_lockout: providers.Singleton[AccountLockout] = providers.Singleton(
+        AccountLockout,
+        redis_client=None,
+        settings=config,
+    )
     user_service = providers.Factory(
         UserService,
         user_repo=user_repo,
@@ -112,6 +135,7 @@ class Container(containers.DeclarativeContainer):
         refresh_repo=refresh_token_repo,
         user_service=user_service,
         password_service=password_service,
+        lockout=account_lockout,
     )
     source_service = providers.Factory(
         SourceService,
@@ -151,6 +175,27 @@ class Container(containers.DeclarativeContainer):
         AsyncOpenAI,
         api_key=config.provided.OPENAI_API_KEY,
     )
+    # ── v2 resolver / factory (AI_MODELS_V2) ───────────────────────────
+    ai_model_resolver: providers.Singleton[AIModelResolver] = providers.Singleton(
+        AIModelResolver,
+        session_factory=session_factory_provider,
+    )
+    embedding_service_factory: providers.Singleton[EmbeddingServiceFactory] = (
+        providers.Singleton(
+            EmbeddingServiceFactory,
+            session_factory=session_factory_provider,
+        )
+    )
+    storage_service: providers.Singleton[StorageService] = providers.Singleton(
+        StorageService,
+        settings=config,
+    )
+    source_inspection_service: providers.Singleton[SourceInspectionService] = (
+        providers.Singleton(
+            SourceInspectionService,
+            openai_client=openai_client,
+        )
+    )
     langfuse: providers.Singleton[Any] = providers.Singleton(
         lambda: _build_langfuse_client(settings)
     )
@@ -163,17 +208,22 @@ class Container(containers.DeclarativeContainer):
         policy_repo=company_policy_repo,
         guardrail_event_repo=guardrail_event_repo,
         openai_client=openai_client,
+        ai_model_resolver=ai_model_resolver,
     )
     pipeline = providers.Factory(
         build_pipeline,
         db_session=providers.Factory(AsyncSessionLocal),
-        embedding_service=embedding_service,
         chunk_repository=chunk_repo,
         chat_session_repository=chat_session_repo,
         chat_message_repository=chat_message_repo,
-        openai_client=openai_client,
+        ai_model_resolver=ai_model_resolver,
+        embedding_service_factory=embedding_service_factory,
         langfuse=langfuse,
         guardrail_service=guardrail_service,
+        # Pipeline v2 needs SourceRepository to look up name/type/description
+        # for the source_router and text_to_query nodes.  When omitted the
+        # builder falls back to v1 (legacy single-shot) automatically.
+        source_repository=source_repo,
     )
 
 

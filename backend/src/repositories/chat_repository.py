@@ -57,6 +57,21 @@ class ChatSessionRepository:
         )
         return list(result.scalars().all())
 
+    async def rename(
+        self,
+        session: AsyncSession,
+        session_id: uuid.UUID,
+        title: str,
+    ) -> ChatSession | None:
+        """Update the title of a session. Returns updated object or None if not found."""
+        obj = await self.get(session, session_id)
+        if obj is None:
+            return None
+        obj.title = title
+        await session.flush()
+        await session.refresh(obj)
+        return obj
+
     async def soft_delete(
         self,
         session: AsyncSession,
@@ -82,9 +97,22 @@ class ChatMessageRepository:
         chat_session_id: uuid.UUID,
         role: MessageRole,
         content: str,
+        message_type: str = "normal",
+        is_partial: bool = False,
+        sources_cited: list[dict] | None = None,
     ) -> ChatMessage:
         """Insert a single message and return the refreshed ORM object."""
-        obj = ChatMessage(session_id=chat_session_id, role=role, content=content)
+        obj = ChatMessage(
+            session_id=chat_session_id,
+            role=role,
+            content=content,
+        )
+        if hasattr(obj, "message_type"):
+            obj.message_type = message_type
+        if hasattr(obj, "is_partial"):
+            obj.is_partial = is_partial
+        if hasattr(obj, "sources_cited") and sources_cited is not None:
+            obj.sources_cited = sources_cited
         session.add(obj)
         await session.flush()
         await session.refresh(obj)

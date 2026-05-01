@@ -4,7 +4,8 @@ from __future__ import annotations
 import uuid
 from collections.abc import Sequence
 
-from sqlalchemy import delete, func, select, text
+from pgvector.sqlalchemy import Vector  # type: ignore[import-not-found]
+from sqlalchemy import bindparam, delete, func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.models.chunk import Chunk
@@ -57,9 +58,14 @@ class ChunkRepository:
         query_embedding: list[float],
         source_ids: list[str],
         limit: int = 10,
+        embedder_id: uuid.UUID | None = None,
     ) -> list[tuple[Chunk, float]]:
         """
         HNSW cosine similarity search filtered by source_ids (FR-019).
+
+        The operator is ``<=>`` (cosine distance) — matching the
+        ``vector_cosine_ops`` HNSW index built in revision 0007.  Using
+        ``<->`` (L2) here forced sequential scans (see design doc §6.2).
 
         Args:
             session:         Async SQLAlchemy session (injected per-call).
@@ -67,6 +73,9 @@ class ChunkRepository:
             source_ids:      Allowlist of source ID strings.  Empty list causes
                              an immediate empty-list return (no DB query).
             limit:           Maximum number of results to return (default 10).
+            embedder_id:     When provided, restricts results to chunks
+                             produced by this embedder.  Defensive guard
+                             for v1.1 cross-embedder isolation.
 
         Returns:
             List of (Chunk, cosine_distance) tuples ordered by distance asc.
@@ -74,7 +83,19 @@ class ChunkRepository:
         if not source_ids:
             return []
 
-        vector_literal = f"'[{','.join(str(v) for v in query_embedding)}]'::vector"
+        # SECURITY: the query embedding MUST be passed via a typed bindparam,
+        # never interpolated into the SQL string.  pgvector's SQLAlchemy
+        # adapter serialises ``list[float]`` → ``vector`` correctly when the
+        # bind is typed with ``Vector``; we additionally ``CAST(:qvec AS
+        # vector)`` so pgvector picks the right operator class even if the
+        # adapter doesn't kick in (e.g. raw asyncpg fast-path).
+        embedder_clause = ""
+        extra_binds: list[object] = []
+        if embedder_id is not None:
+            embedder_clause = " AND c.embedder_id = :embedder_id"
+            extra_binds.append(
+                bindparam("embedder_id", value=str(embedder_id))
+            )
 
         stmt = text(
             f"""
@@ -82,15 +103,17 @@ class ChunkRepository:
                 c.id        AS chunk_id,
                 c.source_id,
                 c.chunk_text,
-                c.embedding <-> {vector_literal}  AS score
+                c.embedding <=> CAST(:qvec AS vector)  AS score
             FROM chunks c
-            WHERE c.source_id = ANY(:source_ids)
+            WHERE c.source_id = ANY(:source_ids){embedder_clause}
             ORDER BY score ASC
             LIMIT :limit
             """
         ).bindparams(
-            source_ids=source_ids,
-            limit=limit,
+            bindparam("qvec", value=query_embedding, type_=Vector()),
+            bindparam("source_ids", value=source_ids),
+            bindparam("limit", value=limit),
+            *extra_binds,
         )
 
         result = await session.execute(stmt)

@@ -1,6 +1,9 @@
 import { type NextRequest, NextResponse } from 'next/server'
 
 // ── Route groups ──────────────────────────────────────────────────────────────
+// Note: (user)/(admin) route groups in app/ are layout-only and do not appear
+// in URLs. Keep matchers based on actual URL paths — the regex below is correct
+// regardless of how the app/ folder is organised.
 const AUTH_ROUTES = /^\/(login|password-reset|setup|change-password)(\/|$)/
 const DASHBOARD_ROUTES = /^\/(chat|admin|profile)(\/|$)/
 const ADMIN_ROUTES = /^\/admin(\/|$)/

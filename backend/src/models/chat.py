@@ -5,7 +5,7 @@ import uuid
 from datetime import datetime
 from enum import StrEnum
 
-from sqlalchemy import Boolean, DateTime, Enum, ForeignKey, Text
+from sqlalchemy import Boolean, DateTime, Enum, ForeignKey, String, Text
 from sqlalchemy.dialects.postgresql import JSONB as _JSONB
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -92,7 +92,11 @@ class ChatMessage(Base):
         index=True,
     )
     role: Mapped[MessageRole] = mapped_column(
-        Enum(MessageRole, name="messagerole"),
+        Enum(
+            MessageRole,
+            name="messagerole",
+            values_callable=lambda enum_cls: [m.value for m in enum_cls],
+        ),
         nullable=False,
     )
     content: Mapped[str] = mapped_column(Text, nullable=False)
@@ -101,6 +105,14 @@ class ChatMessage(Base):
         nullable=False,
         server_default=func.now(),
         index=True,
+    )
+    # Phase 2: citation and streaming fields
+    sources_cited: Mapped[list | None] = mapped_column(_JSONB, nullable=True)
+    message_type: Mapped[str] = mapped_column(
+        String, nullable=False, server_default="normal"
+    )
+    is_partial: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=expression.false()
     )
 
     session: Mapped[ChatSession] = relationship(

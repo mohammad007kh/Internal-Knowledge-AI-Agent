@@ -186,8 +186,18 @@ function SessionItem({
   )
 }
 
-export function SessionList() {
-  const { sessionId, setSessionId } = useSelectedSession()
+export interface SessionListProps {
+  /**
+   * Optional callback fired after a session is selected (clicked in the list).
+   * Used by `<SessionListSheet>` to close the slide-over once the user picks
+   * a chat. Not invoked when a new session is created via the "+" button —
+   * that path keeps focus on the rename input.
+   */
+  onSelect?: (sessionId: string) => void
+}
+
+export function SessionList({ onSelect }: SessionListProps = {}) {
+  const { sessionId, setSessionId, abortStream } = useSelectedSession()
   const queryClient = useQueryClient()
 
   const [search, setSearch] = useState('')
@@ -226,7 +236,13 @@ export function SessionList() {
     mutationFn: (id: string) => sessionsApi.delete(id),
     onSuccess: (_, deletedId) => {
       queryClient.invalidateQueries({ queryKey: ['chat-sessions'] })
-      if (sessionId === deletedId) setSessionId(null)
+      if (sessionId === deletedId) {
+        // Cancel any in-flight stream bound to the session we just deleted
+        // before clearing the selection so no stale tokens or completion
+        // events arrive after the session is gone.
+        abortStream()
+        setSessionId(null)
+      }
       setDeletingId(null)
       toast.success('Session deleted.')
     },
@@ -314,7 +330,10 @@ export function SessionList() {
                 isActive={session.id === sessionId}
                 isEditing={editingId === session.id}
                 editTitle={editTitle}
-                onSelect={() => setSessionId(session.id)}
+                onSelect={() => {
+                  setSessionId(session.id)
+                  onSelect?.(session.id)
+                }}
                 onStartEdit={() => startEdit(session)}
                 onEditChange={setEditTitle}
                 onCommitEdit={() => commitEdit(session.id)}

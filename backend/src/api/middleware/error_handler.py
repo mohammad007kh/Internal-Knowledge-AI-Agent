@@ -39,6 +39,7 @@ def _problem_response(
     detail: str,
     instance: str,
     extra: dict[str, Any] | None = None,
+    headers: dict[str, str] | None = None,
 ) -> JSONResponse:
     body: dict[str, Any] = {
         "type": f"https://knowledge-agent.internal/errors/{type_}",
@@ -49,10 +50,13 @@ def _problem_response(
     }
     if extra:
         body["extra"] = extra
+    response_headers = {"Content-Type": _PROBLEM_CONTENT_TYPE}
+    if headers:
+        response_headers.update(headers)
     return JSONResponse(
         content=body,
         status_code=status,
-        headers={"Content-Type": _PROBLEM_CONTENT_TYPE},
+        headers=response_headers,
     )
 
 
@@ -67,6 +71,12 @@ def register_exception_handlers(app: FastAPI) -> None:
         else:
             logger.warning("AppError [%s]: %s", exc.error_type, exc.detail)
 
+        # Surface Retry-After when the error carries one (e.g. 423 lockout).
+        extra_headers: dict[str, str] | None = None
+        retry_after = (exc.extra or {}).get("retry_after_seconds")
+        if isinstance(retry_after, int) and retry_after > 0:
+            extra_headers = {"Retry-After": str(retry_after)}
+
         return _problem_response(
             type_=exc.error_type,
             title=exc.title,
@@ -74,6 +84,7 @@ def register_exception_handlers(app: FastAPI) -> None:
             detail=exc.detail,
             instance=str(request.url.path),
             extra=exc.extra or None,
+            headers=extra_headers,
         )
 
     @app.exception_handler(RequestValidationError)
