@@ -129,6 +129,16 @@ class Container(containers.DeclarativeContainer):
         refresh_token_repo=refresh_token_repo,
         email_service=email_service,
     )
+    # WARNING: Do NOT use Container.auth_service() for any mutating operation
+    # on a live request. Each Factory() call below creates a *fresh*
+    # AsyncSession per repository, so writes performed via this resolver
+    # land in unrelated, never-committed transactions and are silently
+    # rolled back when the sessions are GC'd. Use the request-scoped
+    # _get_auth_service in src.api.v1.auth instead, which binds every
+    # repository to the request's Depends(get_db) session.
+    #
+    # Retained because tests still reference Container.auth_service for a
+    # handful of read-only call sites.
     auth_service = providers.Factory(
         AuthService,
         user_repo=user_repo,

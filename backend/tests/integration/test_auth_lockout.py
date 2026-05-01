@@ -179,6 +179,7 @@ async def lockout_client(db_session, fake_redis):  # type: ignore[no-untyped-def
             refresh_repo=RefreshTokenRepository(session=db_session),
             user_service=_make_user_svc(),
             password_service=PasswordService(),
+            session=db_session,
             lockout=lockout,
         )
 

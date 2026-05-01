@@ -151,6 +151,7 @@ if _INTEGRATION:
                 refresh_repo=RefreshTokenRepository(session=db_session),
                 user_service=_make_user_svc(),
                 password_service=PasswordService(),
+                session=db_session,
             )
 
         app.dependency_overrides[get_db] = lambda: db_session

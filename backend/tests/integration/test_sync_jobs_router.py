@@ -144,6 +144,7 @@ async def client(  # type: ignore[override]
             refresh_repo=RefreshTokenRepository(session=db_session),
             user_service=_make_user_svc(),
             password_service=PasswordService(),
+            session=db_session,
         )
 
     def _make_source_svc() -> _SourceSvc:
