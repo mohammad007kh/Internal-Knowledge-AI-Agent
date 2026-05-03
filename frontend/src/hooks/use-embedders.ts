@@ -126,11 +126,25 @@ async function activateEmbedder(id: string): Promise<ActivateEmbedderResponse> {
   }
 }
 
+/**
+ * List query for the embedders admin page.
+ *
+ * `placeholderData: (prev) => prev` keeps the previous page on screen while a
+ * search refines, and `select` normalises the response so `data.items` and
+ * `data.total` are always defined — defending consumers from a backend that
+ * ships a partial payload (see /admin/embedders crash regression).
+ */
 export function useEmbedders(params: EmbeddersListParams = {}) {
-  return useQuery({
+  return useQuery<EmbedderListResponse, Error, EmbedderListResponse>({
     queryKey: [...EMBEDDERS_KEY, params],
     queryFn: () => listEmbedders(params),
     placeholderData: (prev) => prev,
+    select: (raw): EmbedderListResponse => ({
+      items: raw?.items ?? [],
+      total: raw?.total ?? 0,
+      limit: raw?.limit ?? params.limit ?? 0,
+      offset: raw?.offset ?? params.offset ?? 0,
+    }),
   })
 }
 

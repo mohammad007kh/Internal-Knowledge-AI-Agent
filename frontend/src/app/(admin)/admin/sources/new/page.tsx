@@ -3,13 +3,12 @@
 import { zodResolver } from '@hookform/resolvers/zod'
 import {
   AlertCircleIcon,
-  BookOpenIcon,
   CheckCircle2Icon,
   ChevronRightIcon,
-  CloudIcon,
   DatabaseIcon,
   FileTextIcon,
   GlobeIcon,
+  InfoIcon,
   Loader2Icon,
   PlusIcon,
   RefreshCwIcon,
@@ -55,13 +54,20 @@ import {
 import { useUploadFile } from '@/hooks/use-upload-url'
 import { cn } from '@/lib/utils'
 
+// TODO: re-add 'confluence' and 'sharepoint' once backend connectors ship (see docs/architecture-review-2026-04.md)
 const SOURCE_TYPE_OPTIONS = [
   { value: 'file_upload', label: 'Files', icon: FileTextIcon, category: 'File' },
   { value: 'database', label: 'Database', icon: DatabaseIcon, category: 'Database' },
   { value: 'web_url', label: 'Web URL', icon: GlobeIcon, category: 'Web' },
-  { value: 'confluence', label: 'Confluence', icon: BookOpenIcon, category: 'SaaS' },
-  { value: 'sharepoint', label: 'SharePoint', icon: CloudIcon, category: 'SaaS' },
 ] as const
+
+const CRAWL_MODES = ['single', 'recursive'] as const
+type CrawlMode = (typeof CRAWL_MODES)[number]
+
+const CRAWL_MODE_LABELS: Record<CrawlMode, string> = {
+  single: 'Single — Fetch just this URL once',
+  recursive: 'Recursive — Crawl this site within the same domain (max depth 2)',
+}
 
 const FILE_EXTENSION_MAP: Record<string, FileTypeKey> = {
   pdf: 'pdf',
@@ -180,16 +186,22 @@ const databaseConnectionSchema = z
       }
       return
     }
-    if (!value.query || value.query.trim() === '') {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ['query'],
-        message: 'Query is required for SQL databases',
-      })
-    }
+    // Query is optional for SQL: when omitted, the agent infers interesting
+    // tables/columns from the schema. Read-only is enforced regardless.
   })
 
 type DatabaseConnectionValues = z.infer<typeof databaseConnectionSchema>
+
+const webUrlSchema = z.object({
+  url: z
+    .string()
+    .min(1, 'URL is required')
+    .url('Enter a valid URL')
+    .refine((value) => /^https?:\/\//i.test(value), {
+      message: 'URL must start with http:// or https://',
+    }),
+  crawl_mode: z.enum(CRAWL_MODES),
+})
 
 const schema = z
   .object({
@@ -205,31 +217,51 @@ const schema = z
     query: z.string().optional(),
     collection: z.string().optional(),
     ssl_mode: z.enum(['disable', 'require']).optional(),
+    read_only_enforced: z.boolean(),
+    url: z.string().optional(),
+    crawl_mode: z.enum(CRAWL_MODES).optional(),
     retrieval_mode: z.enum(['vector_only', 'text_to_query', 'hybrid']),
     sync_mode: z.enum(['manual', 'scheduled', 'delta']),
     sync_schedule: z.string().optional(),
     citations_enabled: z.boolean(),
   })
   .superRefine((values, ctx) => {
-    if (values.source_type !== 'database') return
-    const dbResult = databaseConnectionSchema.safeParse({
-      db_type: values.db_type,
-      host: values.host,
-      port: values.port,
-      database_name: values.database_name,
-      username: values.username,
-      password: values.password,
-      query: values.query,
-      collection: values.collection,
-      ssl_mode: values.ssl_mode,
-    })
-    if (!dbResult.success) {
-      for (const issue of dbResult.error.issues) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          path: issue.path,
-          message: issue.message,
-        })
+    if (values.source_type === 'database') {
+      const dbResult = databaseConnectionSchema.safeParse({
+        db_type: values.db_type,
+        host: values.host,
+        port: values.port,
+        database_name: values.database_name,
+        username: values.username,
+        password: values.password,
+        query: values.query,
+        collection: values.collection,
+        ssl_mode: values.ssl_mode,
+      })
+      if (!dbResult.success) {
+        for (const issue of dbResult.error.issues) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: issue.path,
+            message: issue.message,
+          })
+        }
+      }
+      return
+    }
+    if (values.source_type === 'web_url') {
+      const webResult = webUrlSchema.safeParse({
+        url: values.url,
+        crawl_mode: values.crawl_mode,
+      })
+      if (!webResult.success) {
+        for (const issue of webResult.error.issues) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: issue.path,
+            message: issue.message,
+          })
+        }
       }
     }
   })
@@ -278,6 +310,9 @@ export default function NewSourcePage() {
       query: '',
       collection: '',
       ssl_mode: 'disable',
+      read_only_enforced: true,
+      url: '',
+      crawl_mode: 'single',
       retrieval_mode: 'hybrid',
       sync_mode: 'manual',
       sync_schedule: '',
@@ -449,6 +484,7 @@ export default function NewSourcePage() {
         database: values.database_name ?? '',
         username: values.username ?? '',
         password: values.password ?? '',
+        read_only_enforced: values.read_only_enforced,
       }
       if (dbTypeValue === 'mongodb') {
         base.collection = values.collection ?? ''
@@ -459,6 +495,11 @@ export default function NewSourcePage() {
         }
       }
       connection = base
+    } else if (values.source_type === 'web_url') {
+      connection = {
+        url: values.url ?? '',
+        crawl_mode: values.crawl_mode ?? 'single',
+      }
     }
 
     let files: UploadedFileRef[] | null = null
@@ -633,6 +674,8 @@ export default function NewSourcePage() {
                     portTouchedRef.current = true
                   }}
                 />
+              ) : sourceType === 'web_url' ? (
+                <WebUrlConnectionFields form={form} />
               ) : (
                 <p className="text-sm text-muted-foreground">
                   No additional configuration is required for this source type yet.
@@ -967,6 +1010,38 @@ function DatabaseConnectionFields({
         />
       </div>
 
+      <FormField
+        control={form.control}
+        name="read_only_enforced"
+        render={({ field }) => (
+          <FormItem>
+            <label className="flex cursor-pointer select-none items-start gap-2.5 rounded-md border bg-muted/20 p-3 text-sm">
+              <FormControl>
+                <input
+                  type="checkbox"
+                  className="mt-0.5 h-4 w-4 rounded border-input accent-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  checked={field.value}
+                  onChange={(e) => field.onChange(e.target.checked)}
+                  onBlur={field.onBlur}
+                  name={field.name}
+                  ref={field.ref}
+                />
+              </FormControl>
+              <span className="space-y-0.5">
+                <span className="block font-medium text-foreground">
+                  Force read-only credentials
+                </span>
+                <span className="block text-xs text-muted-foreground">
+                  Recommended. Verifies the provided credentials cannot perform
+                  INSERT/UPDATE/DELETE/DROP. Treat unverified credentials as if they could write.
+                </span>
+              </span>
+            </label>
+            <FormMessage />
+          </FormItem>
+        )}
+      />
+
       {isSqlDb && (
         <FormField
           control={form.control}
@@ -997,7 +1072,34 @@ function DatabaseConnectionFields({
           name="query"
           render={({ field }) => (
             <FormItem>
-              <FormLabel>Query</FormLabel>
+              <div className="flex items-center gap-1.5">
+                <FormLabel className="m-0">Query</FormLabel>
+                <TooltipProvider delayDuration={150}>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <button
+                        type="button"
+                        aria-label="About the query field"
+                        className="inline-flex h-4 w-4 items-center justify-center rounded-full text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                      >
+                        <InfoIcon className="h-3.5 w-3.5" aria-hidden />
+                      </button>
+                    </TooltipTrigger>
+                    <TooltipContent side="top" className="max-w-xs">
+                      <span className="block">
+                        If you don&apos;t provide a query, the agent will guess what&apos;s
+                        interesting from your schema.
+                      </span>
+                      <span className="mt-1 block">
+                        To restrict it to specific tables/columns, paste a SELECT statement.
+                      </span>
+                      <span className="mt-1 block font-medium">
+                        Read-only is enforced regardless.
+                      </span>
+                    </TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
+              </div>
               <FormControl>
                 <Textarea
                   className="font-mono text-xs"
@@ -1007,8 +1109,8 @@ function DatabaseConnectionFields({
                 />
               </FormControl>
               <FormDescription>
-                SELECT statement that returns the rows to index. The first column should be a stable
-                id.
+                Optional. Leave empty to let the agent infer relevant tables and columns from your
+                schema, or paste a SELECT statement to restrict indexing.
               </FormDescription>
               <FormMessage />
             </FormItem>
@@ -1050,6 +1152,70 @@ function DatabaseConnectionFields({
           <TooltipContent>Coming soon</TooltipContent>
         </Tooltip>
       </TooltipProvider>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Web URL connection — single URL + crawl mode picker.
+// ---------------------------------------------------------------------------
+
+interface WebUrlConnectionFieldsProps {
+  form: UseFormReturn<FormValues>
+}
+
+function WebUrlConnectionFields({ form }: WebUrlConnectionFieldsProps) {
+  return (
+    <div className="space-y-4">
+      <FormField
+        control={form.control}
+        name="url"
+        render={({ field }) => (
+          <FormItem>
+            <FormLabel>URL</FormLabel>
+            <FormControl>
+              <Input
+                type="url"
+                inputMode="url"
+                placeholder="https://docs.example.com/handbook"
+                autoComplete="off"
+                spellCheck={false}
+                {...field}
+              />
+            </FormControl>
+            <FormDescription>
+              Must start with <code>http://</code> or <code>https://</code>.
+            </FormDescription>
+            <FormMessage />
+          </FormItem>
+        )}
+      />
+
+      <FormField
+        control={form.control}
+        name="crawl_mode"
+        render={({ field }) => (
+          <FormItem>
+            <FormLabel>Crawl mode</FormLabel>
+            <Select onValueChange={field.onChange} value={field.value ?? 'single'}>
+              <FormControl>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+              </FormControl>
+              <SelectContent>
+                {CRAWL_MODES.map((mode) => (
+                  <SelectItem key={mode} value={mode}>
+                    {CRAWL_MODE_LABELS[mode]}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <FormDescription>Use Sync mode below to schedule re-fetches.</FormDescription>
+            <FormMessage />
+          </FormItem>
+        )}
+      />
     </div>
   )
 }

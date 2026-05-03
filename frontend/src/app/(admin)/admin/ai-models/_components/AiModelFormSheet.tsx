@@ -115,7 +115,7 @@ export function AiModelFormSheet({ open, onOpenChange, model }: AiModelFormSheet
 
   const provider = useProvider(state.providerKey)
   const suggestedModels = useMemo<readonly string[]>(
-    () => (provider ? provider.llm_models.map((m) => m.model_id) : []),
+    () => (provider?.llm_models ?? []).map((m) => m.model_id),
     [provider]
   )
 

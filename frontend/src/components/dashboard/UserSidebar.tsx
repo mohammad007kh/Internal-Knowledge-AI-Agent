@@ -1,7 +1,7 @@
 'use client'
 
 import { ChatSidebarGroup } from '@/components/chat/ChatSidebarGroup'
-import { SelectedSessionProvider } from '@/components/chat/SelectedSessionContext'
+import type { ReactNode } from 'react'
 import { AdminPanelButton } from './AdminPanelButton'
 import { MobileHeader, Sidebar } from './Sidebar'
 import { SidebarNavGroup } from './SidebarNavGroup'
@@ -12,8 +12,8 @@ import { USER_NAV } from './nav-config'
 
 const BRAND = 'Knowledge AI'
 
-export function UserSidebar() {
-  const renderNav = (onNavigate?: () => void) => (
+function renderUserNav(onNavigate?: () => void): ReactNode {
+  return (
     <>
       {USER_NAV.map((item) => {
         // The "Chat" entry is owned by ChatSidebarGroup which renders inline
@@ -37,22 +37,39 @@ export function UserSidebar() {
       })}
     </>
   )
+}
 
-  const renderFooter = (onNavigate?: () => void) => (
+function renderUserFooter(onNavigate?: () => void): ReactNode {
+  return (
     <>
       <AdminPanelButton onNavigate={onNavigate} />
       <ThemeToggleRow />
       <UserPopover onNavigate={onNavigate} />
     </>
   )
+}
 
-  // SelectedSessionProvider must wrap the sidebar because the inline chat
-  // history group (and its keyboard shortcut) reads/writes the active session
-  // from anywhere in the user shell — not just under `/chat`.
-  return (
-    <SelectedSessionProvider>
-      <Sidebar brand={BRAND} nav={renderNav} footer={renderFooter} />
-      <MobileHeader brand={BRAND} nav={renderNav} footer={renderFooter} />
-    </SelectedSessionProvider>
-  )
+/**
+ * Desktop-only sidebar `<aside>` for the user shell.
+ *
+ * The mobile header is rendered separately by `<UserMobileHeader>` so the
+ * layout can place it ABOVE the flex row (instead of as a sibling of
+ * `<main>`, which previously made it sit side-by-side with content on narrow
+ * viewports below the `md` breakpoint).
+ *
+ * Both components consume the shared `SelectedSessionProvider` mounted by the
+ * `(user)/layout.tsx` so the inline chat history sheet and the chat surface
+ * see the same active session.
+ */
+export function UserSidebar() {
+  return <Sidebar brand={BRAND} nav={renderUserNav} footer={renderUserFooter} />
+}
+
+/**
+ * Mobile-only top header for the user shell. Renders the hamburger trigger
+ * and theme toggle; the slide-out sheet contains the same nav and footer as
+ * the desktop sidebar.
+ */
+export function UserMobileHeader() {
+  return <MobileHeader brand={BRAND} nav={renderUserNav} footer={renderUserFooter} />
 }
