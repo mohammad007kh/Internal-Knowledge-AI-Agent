@@ -157,6 +157,18 @@ class EmbeddingServiceFactory:
 
     @staticmethod
     def _materialise(row: Embedder) -> EmbeddingService:
+        # Defense in depth: refuse to build an embedder client for a provider
+        # that has no native embedder offering. The Pydantic validator on
+        # ``EmbedderCreate`` already rejects this at the API edge, but a stale
+        # row (legacy data, manual DB write) could still make it here.
+        from src.services.provider_catalog import PROVIDERS_WITHOUT_NATIVE_EMBEDDER
+
+        provider = getattr(row, "provider", None)
+        if provider in PROVIDERS_WITHOUT_NATIVE_EMBEDDER:
+            raise RuntimeError(
+                f"Provider '{provider}' does not offer a native embedder."
+            )
+
         api_key = ""
         if row.api_key_encrypted:
             try:

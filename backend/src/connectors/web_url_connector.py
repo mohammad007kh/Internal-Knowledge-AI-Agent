@@ -1,7 +1,9 @@
 """WebUrl connector — fetch, parse, archive, and yield a Document (T-046)."""
 from __future__ import annotations
 
+import ipaddress
 import logging
+import socket
 import urllib.robotparser
 import uuid
 from collections.abc import AsyncIterator
@@ -21,6 +23,48 @@ logger = logging.getLogger(__name__)
 _DEFAULT_USER_AGENT = "KnowledgeAIAgent/1.0 (+internal)"
 _DEFAULT_TIMEOUT = 30.0  # seconds
 _MAX_CONTENT_LENGTH = 10 * 1024 * 1024  # 10 MB safety limit for HTML
+
+# Hostnames we always reject regardless of DNS resolution. ``169.254.169.254``
+# is also covered by the link-local check below; listed here for symmetry.
+_BLOCKED_HOSTS: frozenset[str] = frozenset(
+    {"metadata.google.internal", "metadata", "169.254.169.254"}
+)
+
+
+def _is_safe_url(url: str) -> bool:
+    """Return ``True`` only when *url* points to a publicly routable host.
+
+    Resolves all A/AAAA records for the hostname and rejects any address that
+    is private, loopback, link-local, multicast, reserved, or otherwise
+    non-public. This guards the connector against SSRF attacks that try to
+    exfiltrate cloud-metadata services or pivot into the internal network.
+    """
+    parsed = urlparse(url)
+    host = (parsed.hostname or "").lower()
+    if not host or host in _BLOCKED_HOSTS:
+        return False
+    try:
+        infos = socket.getaddrinfo(host, None)
+    except socket.gaierror:
+        return False
+    if not infos:
+        return False
+    for info in infos:
+        sockaddr = info[4]
+        try:
+            addr = ipaddress.ip_address(sockaddr[0])
+        except ValueError:
+            return False
+        if (
+            addr.is_private
+            or addr.is_loopback
+            or addr.is_link_local
+            or addr.is_multicast
+            or addr.is_reserved
+            or addr.is_unspecified
+        ):
+            return False
+    return True
 
 
 @register(SourceType.WEB_URL)
@@ -95,6 +139,11 @@ class WebUrlConnector(BaseConnector):
     async def extract_documents(self) -> AsyncIterator[Document]:
         assert self._client is not None, "Call connect() before extract_documents()"
 
+        if not _is_safe_url(self._url):
+            raise ValueError(
+                "URL points to a non-public address; refusing to fetch."
+            )
+
         if not await self._is_allowed():
             logger.warning(
                 "WebUrlConnector: robots.txt disallows crawling — skipping",
@@ -161,6 +210,9 @@ class WebUrlConnector(BaseConnector):
         Returns True only if the response HTTP status < 400.
         Never raises.
         """
+        if not _is_safe_url(self._url):
+            logger.warning("WebUrlConnector.test_connection: SSRF guard rejected URL")
+            return False
         try:
             async with httpx.AsyncClient(
                 headers={"User-Agent": self._user_agent},

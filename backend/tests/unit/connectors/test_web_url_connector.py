@@ -1,6 +1,7 @@
 """Unit tests for WebUrlConnector (T-057)."""
 from __future__ import annotations
 
+import socket
 import uuid
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -8,7 +9,22 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from src.connectors.base import Document
-from src.connectors.web_url_connector import WebUrlConnector
+from src.connectors.web_url_connector import WebUrlConnector, _is_safe_url
+
+
+@pytest.fixture(autouse=True)
+def _allow_public_dns(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Stub ``socket.getaddrinfo`` so SSRF guard treats _URL as public.
+
+    Tests that exercise the SSRF guard explicitly override this fixture by
+    calling ``_is_safe_url`` with a different URL (the guard re-resolves on
+    each call).
+    """
+    def _fake(host: str, *args: Any, **kwargs: Any) -> list[Any]:
+        # Return a public-looking IPv4 address for any hostname.
+        return [(socket.AF_INET, socket.SOCK_STREAM, 0, "", ("93.184.216.34", 0))]
+
+    monkeypatch.setattr("src.connectors.web_url_connector.socket.getaddrinfo", _fake)
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -391,3 +407,91 @@ async def test_async_context_manager_calls_connect_disconnect() -> None:
         async with conn:
             mock_connect.assert_called_once()
         mock_disconnect.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# SSRF guard — _is_safe_url
+# ---------------------------------------------------------------------------
+
+
+def _stub_dns(monkeypatch: pytest.MonkeyPatch, ip: str) -> None:
+    def _fake(host: str, *args: Any, **kwargs: Any) -> list[Any]:
+        return [(socket.AF_INET, socket.SOCK_STREAM, 0, "", (ip, 0))]
+
+    monkeypatch.setattr("src.connectors.web_url_connector.socket.getaddrinfo", _fake)
+
+
+def test_is_safe_url_accepts_public_address(monkeypatch: pytest.MonkeyPatch) -> None:
+    _stub_dns(monkeypatch, "93.184.216.34")  # example.com
+    assert _is_safe_url("https://example.com/page") is True
+
+
+def test_is_safe_url_rejects_aws_metadata_alias(monkeypatch: pytest.MonkeyPatch) -> None:
+    _stub_dns(monkeypatch, "93.184.216.34")  # DNS would resolve, but host is blocked literal
+    assert _is_safe_url("http://169.254.169.254/latest/meta-data/") is False
+
+
+def test_is_safe_url_rejects_gcp_metadata_alias(monkeypatch: pytest.MonkeyPatch) -> None:
+    _stub_dns(monkeypatch, "93.184.216.34")
+    assert _is_safe_url("http://metadata.google.internal/computeMetadata/v1/") is False
+
+
+def test_is_safe_url_rejects_link_local(monkeypatch: pytest.MonkeyPatch) -> None:
+    _stub_dns(monkeypatch, "169.254.169.254")
+    assert _is_safe_url("http://attacker.example.com/") is False
+
+
+def test_is_safe_url_rejects_rfc1918_10(monkeypatch: pytest.MonkeyPatch) -> None:
+    _stub_dns(monkeypatch, "10.0.0.1")
+    assert _is_safe_url("http://internal.example.com/") is False
+
+
+def test_is_safe_url_rejects_rfc1918_172(monkeypatch: pytest.MonkeyPatch) -> None:
+    _stub_dns(monkeypatch, "172.16.0.1")
+    assert _is_safe_url("http://internal.example.com/") is False
+
+
+def test_is_safe_url_rejects_rfc1918_192(monkeypatch: pytest.MonkeyPatch) -> None:
+    _stub_dns(monkeypatch, "192.168.1.1")
+    assert _is_safe_url("http://internal.example.com/") is False
+
+
+def test_is_safe_url_rejects_loopback(monkeypatch: pytest.MonkeyPatch) -> None:
+    _stub_dns(monkeypatch, "127.0.0.1")
+    assert _is_safe_url("http://localhost/") is False
+
+
+def test_is_safe_url_rejects_unresolvable(monkeypatch: pytest.MonkeyPatch) -> None:
+    def _fail(*_args: Any, **_kwargs: Any) -> list[Any]:
+        raise socket.gaierror("nope")
+
+    monkeypatch.setattr("src.connectors.web_url_connector.socket.getaddrinfo", _fail)
+    assert _is_safe_url("http://does-not-resolve.invalid/") is False
+
+
+def test_is_safe_url_rejects_empty_host() -> None:
+    assert _is_safe_url("not-a-url") is False
+
+
+async def test_extract_documents_rejects_private_target(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The SSRF guard must fire before the HTTP client is touched."""
+    _stub_dns(monkeypatch, "10.0.0.1")
+    conn, _ = _make_connector()
+    mock_client = AsyncMock()
+    conn._client = mock_client  # noqa: SLF001
+
+    with pytest.raises(ValueError, match="non-public address"):
+        async for _doc in conn.extract_documents():
+            pass
+
+    mock_client.get.assert_not_called()
+
+
+async def test_test_connection_rejects_private_target(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _stub_dns(monkeypatch, "127.0.0.1")
+    conn, _ = _make_connector()
+    assert await conn.test_connection() is False

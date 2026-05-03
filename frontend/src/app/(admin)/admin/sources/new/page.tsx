@@ -35,6 +35,7 @@ import {
 } from '@/components/ui/form'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import {
   Select,
   SelectContent,
@@ -61,17 +62,12 @@ const SOURCE_TYPE_OPTIONS = [
   { value: 'web_url', label: 'Web URL', icon: GlobeIcon, category: 'Web' },
 ] as const
 
-const CRAWL_MODES = ['single', 'recursive'] as const
+// TODO: Re-add 'recursive' once WebUrlConnector implements BFS with SSRF guard + same-domain + page-cap. See architecture-review-2026-04.md.
+const CRAWL_MODES = ['single'] as const
 type CrawlMode = (typeof CRAWL_MODES)[number]
-
-const CRAWL_MODE_LABELS: Record<CrawlMode, string> = {
-  single: 'Single page',
-  recursive: 'Recursive',
-}
 
 const CRAWL_MODE_DESCRIPTIONS: Record<CrawlMode, string> = {
   single: 'Fetch just this URL once.',
-  recursive: 'Crawl this site within the same domain (max depth 2).',
 }
 
 const FILE_EXTENSION_MAP: Record<string, FileTypeKey> = {
@@ -191,8 +187,13 @@ const databaseConnectionSchema = z
       }
       return
     }
-    // Query is optional for SQL: when omitted, the agent infers interesting
-    // tables/columns from the schema. Read-only is enforced regardless.
+    if (!value.query || value.query.trim() === '') {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['query'],
+        message: 'Query is required for SQL sources',
+      })
+    }
   })
 
 type DatabaseConnectionValues = z.infer<typeof databaseConnectionSchema>
@@ -223,7 +224,6 @@ const schema = z
     query: z.string().optional(),
     collection: z.string().optional(),
     ssl_mode: z.enum(['disable', 'require']).optional(),
-    read_only_enforced: z.boolean(),
     url: z.string().optional(),
     crawl_mode: z.enum(CRAWL_MODES).optional(),
     retrieval_mode: z.enum(['vector_only', 'text_to_query', 'hybrid']),
@@ -316,7 +316,6 @@ export default function NewSourcePage() {
       query: '',
       collection: '',
       ssl_mode: 'disable',
-      read_only_enforced: true,
       url: '',
       crawl_mode: 'single',
       retrieval_mode: 'hybrid',
@@ -490,7 +489,6 @@ export default function NewSourcePage() {
         database: values.database_name ?? '',
         username: values.username ?? '',
         password: values.password ?? '',
-        read_only_enforced: values.read_only_enforced,
       }
       if (dbTypeValue === 'mongodb') {
         base.collection = values.collection ?? ''
@@ -1016,37 +1014,7 @@ function DatabaseConnectionFields({
         />
       </div>
 
-      <FormField
-        control={form.control}
-        name="read_only_enforced"
-        render={({ field }) => (
-          <FormItem>
-            <label className="flex cursor-pointer select-none items-start gap-2.5 rounded-md border bg-muted/20 p-3 text-sm">
-              <FormControl>
-                <input
-                  type="checkbox"
-                  className="mt-0.5 h-4 w-4 rounded border-input accent-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                  checked={field.value}
-                  onChange={(e) => field.onChange(e.target.checked)}
-                  onBlur={field.onBlur}
-                  name={field.name}
-                  ref={field.ref}
-                />
-              </FormControl>
-              <span className="space-y-0.5">
-                <span className="block font-medium text-foreground">
-                  Force read-only credentials
-                </span>
-                <span className="block text-xs text-muted-foreground">
-                  Recommended. Prevents this connection from modifying your database. If unchecked,
-                  the agent could write data.
-                </span>
-              </span>
-            </label>
-            <FormMessage />
-          </FormItem>
-        )}
-      />
+      {/* TODO: Add read-only enforcement once SqlDatabaseConnector applies SET TRANSACTION READ ONLY at connect-time. See architecture-review-2026-04.md. */}
 
       {isSqlDb && (
         <FormField
@@ -1080,29 +1048,28 @@ function DatabaseConnectionFields({
             <FormItem>
               <div className="flex items-center gap-1.5">
                 <FormLabel className="m-0">Query</FormLabel>
-                <TooltipProvider delayDuration={150}>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <button
-                        type="button"
-                        aria-label="About the query field"
-                        className="inline-flex h-4 w-4 items-center justify-center rounded-full text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                      >
-                        <InfoIcon className="h-3.5 w-3.5" aria-hidden />
-                      </button>
-                    </TooltipTrigger>
-                    <TooltipContent side="top" className="max-w-xs">
-                      <p>
-                        If you don&apos;t provide a query, the agent will guess what&apos;s
-                        interesting from your schema.
-                      </p>
-                      <p className="mt-1">
-                        To restrict it to specific tables/columns, paste a SELECT statement.
-                      </p>
-                      <p className="mt-1 font-medium">Read-only is enforced regardless.</p>
-                    </TooltipContent>
-                  </Tooltip>
-                </TooltipProvider>
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <button
+                      type="button"
+                      aria-label="About the query field"
+                      className="-m-2 inline-flex h-9 w-9 items-center justify-center rounded-full text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    >
+                      <InfoIcon className="h-4 w-4" aria-hidden />
+                    </button>
+                  </PopoverTrigger>
+                  <PopoverContent side="top" className="max-w-xs text-sm">
+                    <p>
+                      Paste a SELECT that returns the rows to index. Read-only is enforced
+                      regardless: the agent rejects anything that isn&apos;t a single SELECT.
+                    </p>
+                    <p className="mt-2">
+                      Use any joins, filters, or projections you need to narrow the index to the
+                      relevant tables and columns.
+                    </p>
+                    <p className="mt-2 font-medium">Read-only is enforced regardless.</p>
+                  </PopoverContent>
+                </Popover>
               </div>
               <FormControl>
                 <Textarea
@@ -1113,8 +1080,7 @@ function DatabaseConnectionFields({
                 />
               </FormControl>
               <FormDescription>
-                Optional. Leave empty to let the agent infer relevant tables and columns from your
-                schema, or paste a SELECT statement to restrict indexing.
+                Required. Paste a SELECT statement that returns the rows to index.
               </FormDescription>
               <FormMessage />
             </FormItem>
@@ -1169,7 +1135,8 @@ interface WebUrlConnectionFieldsProps {
 }
 
 function WebUrlConnectionFields({ form }: WebUrlConnectionFieldsProps) {
-  const crawlMode = (form.watch('crawl_mode') ?? 'single') as CrawlMode
+  // Crawl mode is fixed to 'single' for now — the Select is omitted entirely.
+  // See WebUrlConnectionFields TODO above (CRAWL_MODES) for re-add criteria.
 
   return (
     <div className="space-y-4">
@@ -1190,34 +1157,9 @@ function WebUrlConnectionFields({ form }: WebUrlConnectionFieldsProps) {
               />
             </FormControl>
             <FormDescription>
-              Must start with <code>http://</code> or <code>https://</code>.
+              Must start with <code>http://</code> or <code>https://</code>.{' '}
+              {CRAWL_MODE_DESCRIPTIONS.single}
             </FormDescription>
-            <FormMessage />
-          </FormItem>
-        )}
-      />
-
-      <FormField
-        control={form.control}
-        name="crawl_mode"
-        render={({ field }) => (
-          <FormItem>
-            <FormLabel>Crawl mode</FormLabel>
-            <Select onValueChange={field.onChange} value={field.value ?? 'single'}>
-              <FormControl>
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-              </FormControl>
-              <SelectContent>
-                {CRAWL_MODES.map((mode) => (
-                  <SelectItem key={mode} value={mode}>
-                    {CRAWL_MODE_LABELS[mode]}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <FormDescription>{CRAWL_MODE_DESCRIPTIONS[crawlMode]}</FormDescription>
             <FormMessage />
           </FormItem>
         )}
