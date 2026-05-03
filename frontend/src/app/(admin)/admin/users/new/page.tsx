@@ -124,9 +124,7 @@ export default function InviteUserPage() {
                     <SelectItem value="admin">Admin</SelectItem>
                   </SelectContent>
                 </Select>
-                <FormDescription>
-                  Admins can manage sources, connectors, and other users.
-                </FormDescription>
+                <FormDescription>Admins can manage sources and other users.</FormDescription>
                 <FormMessage />
               </FormItem>
             )}

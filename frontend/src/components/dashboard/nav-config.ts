@@ -4,7 +4,6 @@ import {
   Layers,
   LayoutDashboardIcon,
   MessageCircleIcon,
-  PlugIcon,
   ShieldIcon,
   SlidersHorizontalIcon,
   SparklesIcon,
@@ -51,7 +50,6 @@ export const USER_NAV: readonly NavItem[] = [
 export const ADMIN_NAV: readonly NavItem[] = [
   { href: '/admin/sources', label: 'Sources', icon: DatabaseIcon },
   { href: '/admin/users', label: 'Users', icon: UsersIcon },
-  { href: '/admin/connectors', label: 'Connectors', icon: PlugIcon },
   { href: '/admin/analytics', label: 'Analytics', icon: LayoutDashboardIcon },
   {
     href: '/admin/ai',
