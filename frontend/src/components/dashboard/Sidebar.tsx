@@ -69,7 +69,7 @@ export function Sidebar({ brand, brandSuffix, nav, footer, ariaLabel = 'Primary'
       <aside
         aria-label={ariaLabel}
         className={cn(
-          'hidden flex-col border-r border-border bg-card transition-[width] duration-200 ease-out md:flex',
+          'hidden flex-col border-r border-border bg-card transition-[width] duration-200 ease-out md:flex md:sticky md:top-0 md:h-screen',
           collapsed ? 'w-14' : 'w-60'
         )}
       >
@@ -112,7 +112,7 @@ export function MobileHeader({
 
   return (
     <TooltipProvider delayDuration={0}>
-      <header className="flex h-14 items-center border-b border-border bg-card px-4 md:hidden">
+      <header className="sticky top-0 z-30 flex h-14 items-center border-b border-border bg-card px-4 md:hidden">
         <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
           <SheetTrigger asChild>
             <button

@@ -65,8 +65,13 @@ const CRAWL_MODES = ['single', 'recursive'] as const
 type CrawlMode = (typeof CRAWL_MODES)[number]
 
 const CRAWL_MODE_LABELS: Record<CrawlMode, string> = {
-  single: 'Single — Fetch just this URL once',
-  recursive: 'Recursive — Crawl this site within the same domain (max depth 2)',
+  single: 'Single page',
+  recursive: 'Recursive',
+}
+
+const CRAWL_MODE_DESCRIPTIONS: Record<CrawlMode, string> = {
+  single: 'Fetch just this URL once.',
+  recursive: 'Crawl this site within the same domain (max depth 2).',
 }
 
 const FILE_EXTENSION_MAP: Record<string, FileTypeKey> = {
@@ -205,7 +210,8 @@ const webUrlSchema = z.object({
 
 const schema = z
   .object({
-    source_type: z.enum(['database', 'file_upload', 'web_url', 'confluence', 'sharepoint']),
+    // TODO: re-add when backend connectors ship — see docs/architecture-review-2026-04.md
+    source_type: z.enum(['database', 'file_upload', 'web_url']),
     name: z.string().min(1, 'Name is required').max(200, 'Max 200 characters'),
     description: z.string().max(500, 'Max 500 characters').optional(),
     db_type: z.enum(DB_TYPES).optional(),
@@ -573,7 +579,7 @@ export default function NewSourcePage() {
                       <div
                         role="radiogroup"
                         aria-label="Source type"
-                        className="grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-5"
+                        className="grid grid-cols-2 gap-2 sm:grid-cols-3"
                       >
                         {SOURCE_TYPE_OPTIONS.map((opt) => {
                           const Icon = opt.icon
@@ -1032,8 +1038,8 @@ function DatabaseConnectionFields({
                   Force read-only credentials
                 </span>
                 <span className="block text-xs text-muted-foreground">
-                  Recommended. Verifies the provided credentials cannot perform
-                  INSERT/UPDATE/DELETE/DROP. Treat unverified credentials as if they could write.
+                  Recommended. Prevents this connection from modifying your database. If unchecked,
+                  the agent could write data.
                 </span>
               </span>
             </label>
@@ -1086,16 +1092,14 @@ function DatabaseConnectionFields({
                       </button>
                     </TooltipTrigger>
                     <TooltipContent side="top" className="max-w-xs">
-                      <span className="block">
+                      <p>
                         If you don&apos;t provide a query, the agent will guess what&apos;s
                         interesting from your schema.
-                      </span>
-                      <span className="mt-1 block">
+                      </p>
+                      <p className="mt-1">
                         To restrict it to specific tables/columns, paste a SELECT statement.
-                      </span>
-                      <span className="mt-1 block font-medium">
-                        Read-only is enforced regardless.
-                      </span>
+                      </p>
+                      <p className="mt-1 font-medium">Read-only is enforced regardless.</p>
                     </TooltipContent>
                   </Tooltip>
                 </TooltipProvider>
@@ -1165,6 +1169,8 @@ interface WebUrlConnectionFieldsProps {
 }
 
 function WebUrlConnectionFields({ form }: WebUrlConnectionFieldsProps) {
+  const crawlMode = (form.watch('crawl_mode') ?? 'single') as CrawlMode
+
   return (
     <div className="space-y-4">
       <FormField
@@ -1211,7 +1217,7 @@ function WebUrlConnectionFields({ form }: WebUrlConnectionFieldsProps) {
                 ))}
               </SelectContent>
             </Select>
-            <FormDescription>Use Sync mode below to schedule re-fetches.</FormDescription>
+            <FormDescription>{CRAWL_MODE_DESCRIPTIONS[crawlMode]}</FormDescription>
             <FormMessage />
           </FormItem>
         )}

@@ -67,6 +67,9 @@ export function ProviderSelect({ value, kind, disabled, onChange, id }: Provider
         <SelectValue placeholder={isLoading ? 'Loading providers…' : 'Select a provider'} />
       </SelectTrigger>
       <SelectContent>
+        {providers.length === 0 && !isLoading ? (
+          <div className="px-2 py-1.5 text-xs text-muted-foreground">No providers available.</div>
+        ) : null}
         {providers.map((provider) => (
           <SelectItem key={provider.key} value={provider.key}>
             <div className="flex flex-col">

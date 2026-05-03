@@ -98,8 +98,14 @@ class DatabaseConnectionConfig(BaseModel):
 
     The wizard sends fields in a typed shape (no JSON blobs).  The backend
     translates them into the underlying connector config:
-      * SQL  → ``{connection_string, query, ssl_mode?}`` for ``DatabaseConnector``
+      * SQL  → ``{connection_string, query?, ssl_mode?}`` for ``DatabaseConnector``
       * Mongo → ``{uri, database, collection}`` for ``MongoDBConnector``
+
+    For SQL dialects the ``query`` field is OPTIONAL: when omitted (or blank)
+    the connector switches to schema-inference mode and the agent picks
+    interesting tables/columns automatically. Read-only enforcement is
+    independent of whether a query is supplied. The MongoDB ``collection``
+    field remains required.
 
     Credentials are URL-quoted at translation time before being placed into
     any connection string (see :func:`SourceService._build_database_config`).
@@ -113,7 +119,8 @@ class DatabaseConnectionConfig(BaseModel):
     database: str = Field(..., min_length=1, max_length=255)
     username: str = Field(default="", max_length=255)
     password: str = Field(default="", max_length=4096)
-    # SQL-only fields
+    # SQL-only fields. ``query`` is OPTIONAL — empty/None means
+    # "let the connector infer from the schema".
     query: str | None = None
     ssl_mode: Literal["disable", "require"] | None = None
     # MongoDB-only field
@@ -121,15 +128,15 @@ class DatabaseConnectionConfig(BaseModel):
 
     @model_validator(mode="after")
     def _enforce_per_dialect_shape(self) -> DatabaseConnectionConfig:
-        """Enforce SQL vs MongoDB field requirements after parse."""
+        """Enforce SQL vs MongoDB field requirements after parse.
+
+        SQL dialects: no extra requirements — ``query`` may be empty/None
+        (schema-inference mode).
+        MongoDB: ``collection`` is required.
+        """
         if self.db_type == "mongodb":
             if not self.collection or not self.collection.strip():
                 raise ValueError("'collection' is required for MongoDB sources.")
-        else:  # SQL dialects
-            if not self.query or not self.query.strip():
-                raise ValueError(
-                    "'query' is required for SQL database sources."
-                )
         return self
 
 
