@@ -18,7 +18,15 @@ export interface Clarification {
 }
 
 export interface UseChatReturn {
-  send: (text: string) => void
+  /**
+   * Send a message into the active session.
+   *
+   * Accepts an optional `overrideSessionId` so callers that just created a
+   * session (e.g. ChatLayout's "auto-create on send" path) can dispatch into
+   * the new session in the same tick without waiting for the closed-over
+   * `sessionId` prop to update on the next render.
+   */
+  send: (text: string, overrideSessionId?: string) => void
   abort: () => void
   isPending: boolean
   streamingToken: string
@@ -43,7 +51,7 @@ export function useChat({ sessionId }: { sessionId: string | null }): UseChatRet
   const pendingOptimisticIdRef = useRef<string | null>(null)
   const lastHandledMessageIdRef = useRef<string | null>(null)
   const lastQueryRef = useRef<string>('')
-  const sendRef = useRef<(text: string) => void>(() => {})
+  const sendRef = useRef<(text: string, overrideSessionId?: string) => void>(() => {})
 
   const clearOptimistic = useCallback(() => {
     const id = pendingOptimisticIdRef.current
@@ -53,8 +61,12 @@ export function useChat({ sessionId }: { sessionId: string | null }): UseChatRet
   }, [])
 
   const send = useCallback(
-    (text: string) => {
-      if (!sessionId || !text.trim()) return
+    (text: string, overrideSessionId?: string) => {
+      // Prefer the explicit override so that callers which just created a
+      // session can dispatch into it before React commits the state update
+      // that propagates the new id through props.
+      const targetSessionId = overrideSessionId ?? sessionId
+      if (!targetSessionId || !text.trim()) return
       const trimmed = text.trim()
       lastQueryRef.current = trimmed
 
@@ -75,7 +87,7 @@ export function useChat({ sessionId }: { sessionId: string | null }): UseChatRet
       setLocalGuardrail(null)
       setIsPending(true)
 
-      stream.sendMessage(sessionId, trimmed, []).catch(() => {
+      stream.sendMessage(targetSessionId, trimmed, []).catch(() => {
         clearOptimistic()
         setIsPending(false)
         import('sonner')

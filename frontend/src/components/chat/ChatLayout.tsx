@@ -4,6 +4,7 @@ import { Card } from '@/components/ui/card'
 import { apiClient } from '@/lib/api-client'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { MessageSquarePlusIcon, SparklesIcon } from 'lucide-react'
+import { useCallback } from 'react'
 import { toast } from 'sonner'
 import { ChatInputBar } from './ChatInputBar'
 import { ClarificationCard } from './ClarificationCard'
@@ -57,6 +58,44 @@ export function ChatLayout() {
     onError: () => toast.error('Failed to create session.'),
   })
 
+  // Single source of truth for "make sure a session exists, then return its
+  // id". Used by both the hero "Start a new chat" button (which triggers it
+  // directly) and the input-bar send path (which uses it to auto-create
+  // when the user types a message before any session is selected). Reuses
+  // the existing mutation — no new API call is introduced.
+  const ensureSession = useCallback(async (): Promise<string> => {
+    if (sessionId) return sessionId
+    const created = await createMutation.mutateAsync()
+    return created.id
+  }, [sessionId, createMutation])
+
+  // Send wrapper: when no session is selected, create one first and then
+  // dispatch the message into the freshly-created session in the same tick
+  // (via `useChat.send`'s `overrideSessionId` argument) so the user does
+  // not need to retry their message after the empty canvas resolves.
+  const handleSend = useCallback(
+    async (text: string) => {
+      if (!text.trim()) return
+      if (sessionId) {
+        send(text)
+        return
+      }
+      try {
+        const newId = await ensureSession()
+        send(text, newId)
+      } catch {
+        // The mutation's onError already surfaces a toast; swallow here so
+        // an unhandled promise rejection does not bubble out of the input.
+      }
+    },
+    [sessionId, send, ensureSession]
+  )
+
+  const handleStartNewChat = useCallback(() => {
+    if (createMutation.isPending) return
+    createMutation.mutate()
+  }, [createMutation])
+
   // First-time canvas: replace the muted "Select or create a session" line
   // with a centered hero + prominent primary CTA so new users have an
   // unambiguous next step. The sidebar "+" still works for power users.
@@ -79,10 +118,11 @@ export function ChatLayout() {
               </p>
             </div>
             <Button
+              type="button"
               size="lg"
               className="mt-2 gap-2"
               disabled={createMutation.isPending}
-              onClick={() => createMutation.mutate()}
+              onClick={handleStartNewChat}
             >
               <MessageSquarePlusIcon className="h-4 w-4" aria-hidden />
               {createMutation.isPending ? 'Creating…' : 'Start a new chat'}
@@ -95,14 +135,14 @@ export function ChatLayout() {
           streamingToken={streamingToken}
           isStreaming={isStreaming}
           extraMessages={optimisticMessages}
-          onSend={send}
+          onSend={handleSend}
         />
       )}
       {clarification && (
         <ClarificationCard
           question={clarification.question}
           onDismiss={dismissClarification}
-          onReply={(answer) => send(answer)}
+          onReply={(answer) => handleSend(answer)}
           disabled={isPending}
         />
       )}
@@ -110,11 +150,12 @@ export function ChatLayout() {
         <GuardrailCard message={guardrailMessage} onDismiss={dismissGuardrail} />
       )}
       <ChatInputBar
-        onSend={send}
+        onSend={handleSend}
         onStop={abort}
         disabled={isPending && !isStreaming}
         isStreaming={isStreaming}
         sessionId={sessionId}
+        isCreatingSession={createMutation.isPending}
       />
     </div>
   )

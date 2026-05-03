@@ -11,6 +11,8 @@ ENV NEXT_TELEMETRY_DISABLED=1
 # for direct `docker build` runs.
 ARG NEXT_PUBLIC_API_URL=http://localhost:8000
 ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
+ARG NEXT_PUBLIC_MINIO_PUBLIC_URL=http://localhost:9000
+ENV NEXT_PUBLIC_MINIO_PUBLIC_URL=$NEXT_PUBLIC_MINIO_PUBLIC_URL
 RUN corepack enable pnpm && pnpm run build
 
 # ---- runner ----

@@ -39,9 +39,39 @@ async function requestUploadUrl(body: UploadUrlRequest): Promise<UploadUrlRespon
   return data
 }
 
-const ALLOWED_UPLOAD_ORIGINS = (process.env.NEXT_PUBLIC_MINIO_ENDPOINT ?? 'http://localhost:9000')
-  .split(',')
-  .map((s) => s.trim())
+/**
+ * Allowlist of origins the browser may PUT presigned-upload bytes to.
+ *
+ * Derived from the same NEXT_PUBLIC_* env vars that drive the rest of the
+ * app, so shifting HOST_MINIO_API_PORT (or HOST_BACKEND_PORT) only requires
+ * a frontend rebuild — no source edits.
+ *
+ *   - NEXT_PUBLIC_API_URL          → backend origin (defensive: presigned
+ *                                    URLs normally point at MinIO, but this
+ *                                    keeps the allowlist symmetric with the
+ *                                    rest of the API surface)
+ *   - NEXT_PUBLIC_MINIO_PUBLIC_URL → MinIO public origin (the actual target)
+ *
+ * Both are baked at build time by Next.js. Defaults match docker-compose
+ * defaults so direct `next dev` against a stock stack still works.
+ */
+function safeOrigin(url: string | undefined): string | null {
+  if (!url) return null
+  try {
+    return new URL(url).origin
+  } catch {
+    return null
+  }
+}
+
+const ALLOWED_UPLOAD_ORIGINS: readonly string[] = Array.from(
+  new Set(
+    [
+      safeOrigin(process.env.NEXT_PUBLIC_API_URL) ?? 'http://localhost:8000',
+      safeOrigin(process.env.NEXT_PUBLIC_MINIO_PUBLIC_URL) ?? 'http://localhost:9000',
+    ].filter((origin): origin is string => origin !== null)
+  )
+)
 
 function validateUploadUrl(url: string): void {
   let parsed: URL
@@ -51,7 +81,7 @@ function validateUploadUrl(url: string): void {
     throw new Error('Invalid upload URL returned by server')
   }
   const origin = parsed.origin
-  if (!ALLOWED_UPLOAD_ORIGINS.some((allowed) => origin === allowed || url.startsWith(allowed))) {
+  if (!ALLOWED_UPLOAD_ORIGINS.includes(origin)) {
     throw new Error(`Upload URL origin "${origin}" is not trusted`)
   }
 }

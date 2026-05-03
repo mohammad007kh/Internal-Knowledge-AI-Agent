@@ -7,6 +7,10 @@ services:
         # value through build args so changing HOST_BACKEND_PORT only
         # requires `docker compose build frontend` (no runtime env needed).
         NEXT_PUBLIC_API_URL: "http://localhost:${HOST_BACKEND_PORT:-8000}"
+        # MinIO presigned upload URLs are issued by the backend at this host
+        # so the frontend's upload-trust allowlist must include it. Shifting
+        # HOST_MINIO_API_PORT also requires `docker compose build frontend`.
+        NEXT_PUBLIC_MINIO_PUBLIC_URL: "http://localhost:${HOST_MINIO_API_PORT:-9000}"
     ports:
       - "${HOST_FRONTEND_PORT:-3000}:3000"
     depends_on:

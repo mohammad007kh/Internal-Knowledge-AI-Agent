@@ -8,7 +8,6 @@ import {
   ShieldIcon,
   SlidersHorizontalIcon,
   SparklesIcon,
-  UserCircleIcon,
   UsersIcon,
 } from 'lucide-react'
 import type { ComponentType, SVGProps } from 'react'
@@ -32,10 +31,15 @@ export interface NavItem {
   groupKey?: string
 }
 
-/** Top-level navigation for the user shell. */
+/**
+ * Top-level navigation for the user shell.
+ *
+ * Note: Profile is intentionally NOT listed here. It is reachable via the
+ * "Profile settings" entry inside the user popover at the bottom of the
+ * sidebar (see `UserPopover.tsx`), which is the canonical location.
+ */
 export const USER_NAV: readonly NavItem[] = [
   { href: '/chat', label: 'Chat', icon: MessageCircleIcon },
-  { href: '/profile', label: 'Profile', icon: UserCircleIcon },
 ] as const
 
 /**
