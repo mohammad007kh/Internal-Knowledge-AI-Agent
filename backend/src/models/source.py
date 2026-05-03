@@ -37,7 +37,17 @@ class Source(Base, UUIDMixin, TimestampMixin):
 
     name: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
     source_type: Mapped[SourceType] = mapped_column(
-        Enum(SourceType, name="sourcetype", create_constraint=True),
+        # values_callable: bind the lowercase enum VALUE ("file_upload"), not
+        # the uppercase NAME ("FILE_UPLOAD"). The Postgres enum is created
+        # with the lowercase values; without this, asyncpg raises
+        # InvalidTextRepresentationError on insert. Same fix as messagerole
+        # in chat.py (Slice A).
+        Enum(
+            SourceType,
+            name="sourcetype",
+            create_constraint=True,
+            values_callable=lambda enum_cls: [m.value for m in enum_cls],
+        ),
         nullable=False,
     )
     # Fernet-encrypted JSON blob: {"url": ..., "credentials": ...}
