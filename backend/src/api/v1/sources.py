@@ -517,18 +517,27 @@ async def delete_source(
     """
     source = await service.get_source(source_id)
     _assert_ownership_or_admin(source.owner_id, current_user)
-    # Capture identifiers BEFORE deletion so the audit row keeps the resource_id.
+    # Capture identifiers BEFORE deletion so the audit row keeps them after
+    # the row is soft-deleted (is_active=False, but resource_id + name are
+    # still valid history we want to log).
+    captured_id = source.id
+    captured_name = source.name
+    # Deactivate first; emit audit + commit together so the soft-delete
+    # write and the audit row land in one transaction. (Previously the
+    # commit ran BEFORE service.delete_source, so the deactivate flush
+    # was never persisted — the request returned 204 but the row stayed
+    # active.)
+    await service.delete_source(source_id)
     await emit_audit(
         AdminAuditLogRepository(db),
         admin_user_id=current_user.id,
         action="source.delete",
         resource_type="source",
-        resource_id=source.id,
+        resource_id=captured_id,
         request=request,
-        metadata={"name": source.name},
+        metadata={"name": captured_name},
     )
     await db.commit()
-    await service.delete_source(source_id)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
