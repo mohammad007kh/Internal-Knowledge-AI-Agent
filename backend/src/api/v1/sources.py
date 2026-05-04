@@ -104,15 +104,38 @@ class UploadUrlResponse(BaseModel):
 # ---------------------------------------------------------------------------
 
 
-def _get_source_service() -> SourceService:
-    """Resolve :class:`SourceService` from the DI container.
+def _get_source_service(
+    db: AsyncSession = Depends(get_db),
+) -> SourceService:
+    """Construct :class:`SourceService` bound to the request-scoped DB session.
 
-    Uses a lazy import so that the module can be loaded without triggering
-    the full container wiring (helpful for unit tests).
+    Replaces the legacy ``Container.source_service()`` resolver, which built
+    the inner ``SourceRepository`` against a *separate* :class:`AsyncSession`.
+    That session was never committed by the route handler (the route only
+    committed its own ``db``-scoped audit-log session), so every mutating
+    call — ``create_source_v2``, ``update_source``, ``delete_source`` —
+    flushed to a doomed session whose changes were rolled back at GC. From
+    the API client's perspective the POST returned 200 with a UUID, but the
+    row was gone seconds later (404 on the detail page).
+
+    All repositories now share the same :class:`AsyncSession` as the audit
+    log so the existing ``await db.commit()`` at the end of each mutation
+    handler persists both the source mutation and the audit row in one
+    transaction.
+
+    Tests continue to override this symbol via
+    ``app.dependency_overrides[_get_source_service] = ...`` to inject mocks —
+    FastAPI ignores the dependency parameters when an override is active.
     """
-    from src.core.container import Container  # noqa: PLC0415
+    from src.connectors.factory import ConnectorFactory  # noqa: PLC0415
+    from src.core.config import settings as _settings  # noqa: PLC0415
+    from src.repositories.source_repository import SourceRepository  # noqa: PLC0415
 
-    return Container.source_service()
+    return SourceService(
+        source_repo=SourceRepository(session=db),
+        settings=_settings,
+        connector_factory=ConnectorFactory(),
+    )
 
 
 # ---------------------------------------------------------------------------
