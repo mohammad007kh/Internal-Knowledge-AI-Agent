@@ -63,6 +63,7 @@ async def run_startup_seeding() -> None:
             await _bootstrap_openai_ai_model(session)
             await _bootstrap_openai_embedder(session)
             await ensure_default_stage_configs(session)
+            await _backfill_missing_api_keys(session)
             await session.commit()
     except Exception:  # noqa: BLE001 — startup must not fail on seed errors
         logger.warning("startup seeding failed (continuing)", exc_info=True)
@@ -282,3 +283,73 @@ async def _pick_default_ai_model(session: AsyncSession) -> AIModel | None:
     return (
         await session.execute(select(AIModel).limit(1))
     ).scalar_one_or_none()
+
+
+# --------------------------------------------------------------------------- #
+# Self-healing API-key backfill                                               #
+# --------------------------------------------------------------------------- #
+
+
+async def _backfill_missing_api_keys(session: AsyncSession) -> None:
+    """Heal rows that were created before ``OPENAI_API_KEY`` was configured.
+
+    The bootstrap helpers above only run when their tables are empty.  If
+    an admin sets ``OPENAI_API_KEY`` *after* the first bootstrap (very
+    common during iterative ``.env`` editing), existing OpenAI rows stay
+    keyless and embed/sync calls fail with ``openai.OpenAIError``.  This
+    pass writes the env key to any ``embedders`` / ``ai_models`` row whose
+    ``provider == 'openai'`` AND whose ``api_key_encrypted IS NULL``.
+
+    Idempotent — running on every boot is a no-op once all OpenAI rows
+    have keys.  A failure on one row never blocks the others.
+    """
+    api_key = (settings.OPENAI_API_KEY or "").strip()
+    if not api_key:
+        return
+
+    try:
+        encrypted = encrypt(api_key)
+    except Exception:  # noqa: BLE001
+        logger.warning(
+            "startup seed: encrypt(OPENAI_API_KEY) failed during backfill",
+            exc_info=True,
+        )
+        return
+
+    targets: tuple[tuple[type, str], ...] = (
+        (Embedder, "embedders"),
+        (AIModel, "ai_models"),
+    )
+    for model_cls, table_name in targets:
+        try:
+            rows = (
+                await session.execute(
+                    select(model_cls).where(
+                        model_cls.api_key_encrypted.is_(None),
+                        model_cls.provider == "openai",
+                    )
+                )
+            ).scalars().all()
+        except Exception:  # noqa: BLE001
+            logger.warning(
+                "startup seed: backfill SELECT failed for %s",
+                table_name,
+                exc_info=True,
+            )
+            continue
+
+        for row in rows:
+            try:
+                row.api_key_encrypted = encrypted
+                logger.info(
+                    "startup seed: backfilled api_key on %s row id=%s name=%r",
+                    table_name,
+                    row.id,
+                    row.name,
+                )
+            except Exception:  # noqa: BLE001
+                logger.warning(
+                    "startup seed: backfill UPDATE failed for %s row",
+                    table_name,
+                    exc_info=True,
+                )
