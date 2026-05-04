@@ -13,8 +13,9 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 WORKDIR /app
 
 # Install system dependencies required by asyncpg and other native libs.
+# libmagic1: required by python-magic (file_upload_connector → MIME detection).
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends gcc libpq-dev curl && \
+    apt-get install -y --no-install-recommends gcc libpq-dev curl libmagic1 && \
     rm -rf /var/lib/apt/lists/*
 
 # Create the unprivileged runtime user before copying the application.

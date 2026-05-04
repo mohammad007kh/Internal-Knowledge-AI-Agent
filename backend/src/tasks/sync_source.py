@@ -25,15 +25,22 @@ import uuid
 from typing import Any
 
 from langfuse import Langfuse
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from src.connectors.factory import ConnectorFactory
+from src.core.config import settings
 from src.core.container import container
-from src.core.database import AsyncSessionLocal
+from src.core.database import task_engine
 from src.models.chunk import Chunk
 from src.models.document import Document
 from src.repositories.chunk_repository import ChunkRepository
 from src.repositories.document_repository import DocumentRepository
+from src.repositories.source_repository import SourceRepository
+from src.repositories.sync_job_repository import SyncJobRepository
 from src.schemas.raw_document import RawDocument
+from src.services.embedding_service_factory import EmbeddingServiceFactory
+from src.services.source_service import SourceService
+from src.services.sync_job_service import SyncJobService
 from src.tasks import celery_app
 
 logger = logging.getLogger(__name__)
@@ -55,7 +62,12 @@ def _sanitise(message: str) -> str:
 
 
 async def _sync_source_async(task: Any, source_id: str) -> dict[str, Any]:  # noqa: C901
-    """Full sync pipeline; runs inside ``asyncio.run()``."""
+    """Full sync pipeline; runs inside ``asyncio.run()``.
+
+    All DB access happens through a per-task ``AsyncEngine`` created inside
+    the current event loop. The container's module-level engine is NOT used
+    here — see ``src.core.database.task_engine`` for the rationale.
+    """
 
     langfuse = Langfuse()
     trace = langfuse.trace(  # type: ignore[attr-defined]
@@ -63,9 +75,81 @@ async def _sync_source_async(task: Any, source_id: str) -> dict[str, Any]:  # no
         input={"source_id": source_id},
     )
 
-    job_svc = container.sync_job_service()
-    source_svc = container.source_service()
+    # ``task_engine`` lives for the entire task — every service below uses
+    # this single engine + sessionmaker so all asyncpg connections bind to
+    # this loop and get disposed cleanly when the context exits.
+    async with task_engine() as eng:
+        session_factory = async_sessionmaker(
+            eng, class_=AsyncSession, expire_on_commit=False
+        )
 
+        # Build per-task services bound to the per-task engine.
+        # SyncJobService takes a session_factory directly, matching the
+        # request-scoped pattern used elsewhere.
+        sync_job_repo = SyncJobRepository()
+        job_svc = SyncJobService(
+            session_factory=session_factory,
+            sync_job_repo=sync_job_repo,
+        )
+
+        # SourceService takes a SourceRepository bound to a single session;
+        # one session per service-call is fine here because the task is
+        # short-lived and we never share the source object across sessions.
+        source_session = session_factory()
+        source_svc = SourceService(
+            source_repo=SourceRepository(source_session),
+            settings=settings,
+            connector_factory=ConnectorFactory(),
+        )
+
+        # EmbeddingServiceFactory needs the same per-task session_factory so
+        # its embedder lookups don't reach back into the module-level engine.
+        embedding_factory = EmbeddingServiceFactory(
+            session_factory=session_factory,
+        )
+
+        # Stateless services come from the container — they hold no DB engine
+        # references (chunking is pure Python; only embedding clients are
+        # event-loop sensitive but we build them via the per-task factory above).
+        chunking_svc = container.chunking_service()
+
+        try:
+            return await _run_sync_pipeline(
+                task=task,
+                source_id=source_id,
+                trace=trace,
+                langfuse=langfuse,
+                job_svc=job_svc,
+                source_svc=source_svc,
+                embedding_factory=embedding_factory,
+                chunking_svc=chunking_svc,
+                session_factory=session_factory,
+            )
+        finally:
+            await source_session.close()
+            # Close any embedder httpx clients opened in this loop.
+            try:
+                await embedding_factory.aclose()
+            except Exception:  # noqa: BLE001 — best-effort cleanup
+                logger.warning(
+                    "embedding_factory.aclose() failed in sync_source task",
+                    exc_info=True,
+                )
+
+
+async def _run_sync_pipeline(  # noqa: C901
+    *,
+    task: Any,
+    source_id: str,
+    trace: Any,
+    langfuse: Langfuse,
+    job_svc: SyncJobService,
+    source_svc: SourceService,
+    embedding_factory: EmbeddingServiceFactory,
+    chunking_svc: Any,
+    session_factory: async_sessionmaker[AsyncSession],
+) -> dict[str, Any]:
+    """Inner pipeline body — extracted to keep the engine-lifecycle wrapper thin."""
     # ── 1. Create SyncJob ────────────────────────────────────────────────────
     job = await job_svc.create_job(uuid.UUID(source_id))
     job_id = job.id
@@ -104,11 +188,6 @@ async def _sync_source_async(task: Any, source_id: str) -> dict[str, Any]:  # no
 
     # ── 4–6. Chunk → persist documents → embed → persist chunks ─────────────
     span_process = trace.span(name="process_documents")
-    chunking_svc = container.chunking_service()
-    # Resolve the embedder pinned to this source via the factory.  v1
-    # invariant: ``for_source`` returns the singleton active embedder, but
-    # the factory entry point keeps us forward-compatible with v1.1.
-    embedding_factory = container.embedding_service_factory()
     # ``for_source`` returns both the service and the embedder id used to
     # stamp ``embedder_id`` onto each persisted chunk — single DB roundtrip.
     embedding_svc, active_embedder_id = await embedding_factory.for_source(
@@ -123,7 +202,7 @@ async def _sync_source_async(task: Any, source_id: str) -> dict[str, Any]:  # no
     documents_synced = 0
 
     try:
-        async with AsyncSessionLocal() as session:
+        async with session_factory() as session:
             doc_repo = DocumentRepository(session)
             chunk_repo = ChunkRepository(session)
 

@@ -13,7 +13,7 @@ from datetime import datetime, timezone
 
 from sqlalchemy import select, update
 
-from src.core.database import AsyncSessionLocal
+from src.core.database import task_session
 from src.models.source import Source
 from src.tasks import celery_app
 
@@ -36,7 +36,8 @@ async def _check_scheduled_syncs_async() -> int:
     """Async worker body — separate to keep Celery entrypoint thin and testable."""
     now = datetime.now(tz=timezone.utc)
 
-    async with AsyncSessionLocal() as db:
+    # Per-task engine — see src.core.database.task_session for the rationale.
+    async with task_session() as db:
         # Matches partial index ``ix_sources_sync_poll``:
         #   sync_mode = 'scheduled' AND next_sync_due_at <= now AND status != 'syncing'
         stmt = select(Source).where(

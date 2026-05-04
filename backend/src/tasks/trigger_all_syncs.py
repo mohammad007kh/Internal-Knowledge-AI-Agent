@@ -4,7 +4,11 @@ from __future__ import annotations
 import asyncio
 import logging
 
-from src.core.container import container
+from src.connectors.factory import ConnectorFactory
+from src.core.config import settings
+from src.core.database import task_session
+from src.repositories.source_repository import SourceRepository
+from src.services.source_service import SourceService
 from src.tasks import celery_app
 from src.tasks.sync_source import sync_source
 
@@ -24,12 +28,22 @@ def trigger_all_syncs() -> dict[str, int]:
 
 
 async def _trigger_async() -> dict[str, int]:
-    """Fetch active sources and fan out ``sync_source`` tasks."""
-    source_service = container.source_service()
+    """Fetch active sources and fan out ``sync_source`` tasks.
 
-    sources, _ = await source_service.list_all_active_sources()
+    Builds a per-task SourceService bound to a per-task engine so the
+    asyncpg connections used here don't leak across event loops — see
+    ``src.core.database.task_session`` for the rationale.
+    """
+    # Per-task engine — connections created here die with this loop.
+    async with task_session() as session:
+        source_service = SourceService(
+            source_repo=SourceRepository(session),
+            settings=settings,
+            connector_factory=ConnectorFactory(),
+        )
+        sources, _ = await source_service.list_all_active_sources()
+
     dispatched = 0
-
     for src in sources:
         sync_source.delay(str(src.id))
         dispatched += 1
