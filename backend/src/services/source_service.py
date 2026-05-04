@@ -327,15 +327,20 @@ class SourceService:
         return updated
 
     async def delete_source(self, source_id: uuid.UUID) -> None:
-        """Soft-delete a Source (sets ``is_active = False``).
+        """Soft-delete a Source (sets ``deleted_at = now()``).
+
+        Approval state (``is_active``) is preserved unchanged so the audit
+        trail can show whether the source was approved at the time of
+        deletion.
 
         Raises:
-            NotFoundError: if *source_id* is not found or already inactive.
+            NotFoundError: if *source_id* is not found or already
+            soft-deleted.
         """
-        deactivated = await self._repo.deactivate(source_id)
-        if not deactivated:
+        deleted = await self._repo.soft_delete(source_id)
+        if not deleted:
             raise NotFoundError(
-                f"Source {source_id} not found or already inactive."
+                f"Source {source_id} not found or already deleted."
             )
 
     # ------------------------------------------------------------------ #
@@ -364,20 +369,37 @@ class SourceService:
         owner_id: uuid.UUID,
         skip: int = 0,
         limit: int = 50,
+        available_only: bool = False,
     ) -> tuple[list[Source], int]:
-        """Return paginated sources for *owner_id* with a total count."""
-        sources = await self._repo.list_by_owner_with_jobs(owner_id, skip=skip, limit=limit)
-        total = await self._repo.count_by_owner(owner_id)
+        """Return paginated non-deleted sources for *owner_id* with a total count.
+
+        ``available_only=True`` restricts to admin-approved
+        (``is_active = TRUE``) — pass this from user-facing surfaces such as
+        the chat session source picker.
+        """
+        sources = await self._repo.list_by_owner_with_jobs(
+            owner_id, skip=skip, limit=limit, available_only=available_only
+        )
+        total = await self._repo.count_by_owner(
+            owner_id, available_only=available_only
+        )
         return sources, total
 
     async def list_all_active_sources(
         self,
         skip: int = 0,
         limit: int = 100,
+        available_only: bool = False,
     ) -> tuple[list[Source], int]:
-        """Return all active sources (admin view) with a total count."""
-        sources = await self._repo.list_active_with_jobs(skip=skip, limit=limit)
-        total = await self._repo.count_active()
+        """Return all non-deleted sources (admin view) with a total count.
+
+        ``available_only=True`` restricts to admin-approved sources — pass
+        this when the consumer is the chat session source picker.
+        """
+        sources = await self._repo.list_active_with_jobs(
+            skip=skip, limit=limit, available_only=available_only
+        )
+        total = await self._repo.count_active(available_only=available_only)
         return sources, total
 
     # ------------------------------------------------------------------ #

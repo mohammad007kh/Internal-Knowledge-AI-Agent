@@ -81,9 +81,12 @@ async def get_metrics(
     except Exception:  # noqa: BLE001
         active_users_7d = 0
 
-    # active_sources
+    # active_sources — non-deleted sources currently in the system. The
+    # historical filter was ``is_active = TRUE`` (which previously meant
+    # "not deleted"); after the is_active repurpose ("approved/available")
+    # the equivalent "exists" filter is ``deleted_at IS NULL``.
     active_sources_result = await db.execute(
-        sa.select(sa.func.count()).select_from(Source).where(Source.is_active.is_(True))
+        sa.select(sa.func.count()).select_from(Source).where(Source.deleted_at.is_(None))
     )
     active_sources: int = active_sources_result.scalar_one()
 

@@ -44,9 +44,14 @@ export interface SyncJob {
 
 export interface SourceListItem {
   id: string
+  // is_active = "approved/available to users". New sources default to false
+  // — admin must explicitly approve via PATCH.
+  is_active: boolean
+  // Soft-delete marker. The list endpoint never returns soft-deleted rows;
+  // this field is kept for completeness when a single source is fetched.
+  deleted_at?: string | null
   name: string
   source_type: SourceType
-  is_active: boolean
   created_at: string
   // Phase-2 enriched fields (optional for backwards compatibility)
   source_mode?: SourceMode
@@ -139,9 +144,37 @@ export interface GrantPermissionRequest {
 // Endpoints
 // ---------------------------------------------------------------------------
 
-export async function listSourcesApi(limit = 50, offset = 0): Promise<PaginatedSources> {
+interface ListSourcesOptions {
+  limit?: number
+  offset?: number
+  // When true, filter to admin-approved sources only (is_active=true).
+  // Use this from user-facing surfaces (e.g. the chat session source picker).
+  // Admin sources list omits this so pending-approval rows remain visible.
+  availableOnly?: boolean
+}
+
+export async function listSourcesApi(
+  limitOrOptions: number | ListSourcesOptions = 50,
+  offset = 0
+): Promise<PaginatedSources> {
+  const opts: Required<ListSourcesOptions> =
+    typeof limitOrOptions === 'number'
+      ? { limit: limitOrOptions, offset, availableOnly: false }
+      : {
+          limit: limitOrOptions.limit ?? 50,
+          offset: limitOrOptions.offset ?? 0,
+          availableOnly: limitOrOptions.availableOnly ?? false,
+        }
+
+  const params: Record<string, string | number> = {
+    limit: opts.limit,
+    offset: opts.offset,
+  }
+  if (opts.availableOnly) {
+    params.available_only = 'true'
+  }
   const { data } = await apiClient.get<PaginatedSources>('/api/v1/sources', {
-    params: { limit, offset },
+    params,
   })
   return data
 }
@@ -161,10 +194,9 @@ export async function listSyncJobsApi(
   limit = 20,
   offset = 0
 ): Promise<PaginatedSyncJobs> {
-  const { data } = await apiClient.get<PaginatedSyncJobs>(
-    `/api/v1/sources/${sourceId}/sync-jobs`,
-    { params: { limit, offset } }
-  )
+  const { data } = await apiClient.get<PaginatedSyncJobs>(`/api/v1/sources/${sourceId}/sync-jobs`, {
+    params: { limit, offset },
+  })
   return data
 }
 
@@ -173,9 +205,7 @@ export async function triggerSyncApi(sourceId: string): Promise<SyncJob> {
   return data
 }
 
-export async function refreshDescriptionApi(
-  sourceId: string
-): Promise<RefreshDescriptionResponse> {
+export async function refreshDescriptionApi(sourceId: string): Promise<RefreshDescriptionResponse> {
   const { data } = await apiClient.post<RefreshDescriptionResponse>(
     `/api/v1/sources/${sourceId}/refresh-description`
   )

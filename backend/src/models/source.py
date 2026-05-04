@@ -19,7 +19,7 @@ from sqlalchemy import Boolean, Enum, ForeignKey, String, Text
 from sqlalchemy.dialects.postgresql import BYTEA, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from src.models.base import Base, TimestampMixin, UUIDMixin
+from src.models.base import Base, SoftDeleteMixin, TimestampMixin, UUIDMixin
 from src.models.enums import SourceType
 
 if TYPE_CHECKING:
@@ -30,8 +30,19 @@ if TYPE_CHECKING:
     from src.models.user import User
 
 
-class Source(Base, UUIDMixin, TimestampMixin):
-    """A configured data source owned by a user."""
+class Source(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
+    """A configured data source owned by a user.
+
+    Visibility / lifecycle semantics:
+
+    * ``deleted_at`` (from :class:`SoftDeleteMixin`) — soft-delete marker.
+      ``deleted_at IS NULL`` means the source exists in the system.
+      :meth:`SourceRepository.soft_delete` sets it to ``func.now()``.
+    * ``is_active`` — admin approval flag ("approved/available to users").
+      Defaults to ``False`` at the ORM level so freshly created rows must
+      be explicitly approved by an admin. The DB-level server default is
+      ``TRUE`` (legacy backfill) so historical rows remain approved.
+    """
 
     __tablename__ = "sources"
 
@@ -59,7 +70,12 @@ class Source(Base, UUIDMixin, TimestampMixin):
         nullable=False,
         index=True,
     )
-    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    # is_active = "approved/available to users". Default False so admins
+    # explicitly review/approve. deleted_at IS NULL means "not soft-deleted".
+    # The DB-level server default is still TRUE (legacy backfill); the
+    # ORM-level default is False so new rows created via the API land
+    # pending approval.
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
     # -- Phase 2 fields ------------------------------------------------------
     source_mode: Mapped[str] = mapped_column(String, nullable=False, default="snapshot")

@@ -107,21 +107,21 @@ class TestGetSource:
 # ---------------------------------------------------------------------------
 
 class TestSoftDelete:
-    async def test_delete_source_calls_repo_deactivate(self, mock_source_repo):
-        """delete_source deactivates the source via the repository."""
+    async def test_delete_source_calls_repo_soft_delete(self, mock_source_repo):
+        """delete_source soft-deletes the source via the repository."""
         source = _make_source()
         mock_source_repo.get_by_id = AsyncMock(return_value=source)
-        mock_source_repo.deactivate = AsyncMock(return_value=source)
+        mock_source_repo.soft_delete = AsyncMock(return_value=source)
 
         service = _make_source_service(mock_source_repo)
 
         await service.delete_source(source_id=source.id)
 
-        mock_source_repo.deactivate.assert_called_once_with(source.id)
+        mock_source_repo.soft_delete.assert_called_once_with(source.id)
 
     async def test_delete_nonexistent_source_raises_not_found(self, mock_source_repo):
         """Deleting unknown source id → NotFoundError."""
-        mock_source_repo.deactivate = AsyncMock(return_value=None)
+        mock_source_repo.soft_delete = AsyncMock(return_value=None)
 
         service = _make_source_service(mock_source_repo)
 

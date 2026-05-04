@@ -1,4 +1,14 @@
-"""Repository for Source data access. Implements T-041."""
+"""Repository for Source data access. Implements T-041.
+
+Visibility semantics
+--------------------
+* ``deleted_at IS NULL`` means the row is not soft-deleted (i.e. "exists" for
+  admin and user-facing queries alike). All "exists" filters use this.
+* ``is_active = TRUE`` means "approved by an admin / available to non-admin
+  users". Admin views show every non-deleted source regardless of approval;
+  the chat session source picker and any other user-facing surface should
+  pass ``available_only=True`` so unapproved sources stay hidden.
+"""
 
 from __future__ import annotations
 
@@ -32,15 +42,25 @@ class SourceRepository(BaseRepository[Source]):
         *,
         skip: int = 0,
         limit: int = 50,
+        available_only: bool = False,
     ) -> list[Source]:
-        """Return all sources owned by the given user (active + inactive)."""
+        """Return non-deleted sources owned by the given user.
+
+        ``available_only=True`` additionally restricts to ``is_active = TRUE``
+        (admin-approved). Default ``False`` so admin views see pending rows.
+        """
         stmt = (
             select(Source)
-            .where(Source.owner_id == owner_id)
+            .where(
+                Source.owner_id == owner_id,
+                Source.deleted_at.is_(None),
+            )
             .order_by(Source.created_at.desc())
             .offset(skip)
             .limit(limit)
         )
+        if available_only:
+            stmt = stmt.where(Source.is_active.is_(True))
         result = await self._session.execute(stmt)
         return list(result.scalars().all())
 
@@ -49,15 +69,22 @@ class SourceRepository(BaseRepository[Source]):
         *,
         skip: int = 0,
         limit: int = 100,
+        available_only: bool = False,
     ) -> list[Source]:
-        """Return all active sources (admin view)."""
+        """Return all non-deleted sources (admin view by default).
+
+        ``available_only=True`` restricts to admin-approved
+        (``is_active = TRUE``) — the chat session source picker uses this.
+        """
         stmt = (
             select(Source)
-            .where(Source.is_active.is_(True))
+            .where(Source.deleted_at.is_(None))
             .order_by(Source.created_at.desc())
             .offset(skip)
             .limit(limit)
         )
+        if available_only:
+            stmt = stmt.where(Source.is_active.is_(True))
         result = await self._session.execute(stmt)
         return list(result.scalars().all())
 
@@ -67,18 +94,24 @@ class SourceRepository(BaseRepository[Source]):
         *,
         skip: int = 0,
         limit: int = 50,
+        available_only: bool = False,
     ) -> list[Source]:
-        """Return sources for *owner_id* with sync_jobs eagerly loaded."""
+        """Return non-deleted sources for *owner_id* with sync_jobs eagerly loaded."""
         from sqlalchemy.orm import selectinload  # noqa: PLC0415
 
         stmt = (
             select(Source)
             .options(selectinload(Source.sync_jobs))
-            .where(Source.owner_id == owner_id)
+            .where(
+                Source.owner_id == owner_id,
+                Source.deleted_at.is_(None),
+            )
             .order_by(Source.created_at.desc())
             .offset(skip)
             .limit(limit)
         )
+        if available_only:
+            stmt = stmt.where(Source.is_active.is_(True))
         result = await self._session.execute(stmt)
         return list(result.scalars().all())
 
@@ -87,38 +120,59 @@ class SourceRepository(BaseRepository[Source]):
         *,
         skip: int = 0,
         limit: int = 100,
+        available_only: bool = False,
     ) -> list[Source]:
-        """Return all active sources with sync_jobs eagerly loaded."""
+        """Return all non-deleted sources with sync_jobs eagerly loaded.
+
+        ``available_only=True`` restricts to admin-approved sources.
+        """
         from sqlalchemy.orm import selectinload  # noqa: PLC0415
 
         stmt = (
             select(Source)
             .options(selectinload(Source.sync_jobs))
-            .where(Source.is_active.is_(True))
+            .where(Source.deleted_at.is_(None))
             .order_by(Source.created_at.desc())
             .offset(skip)
             .limit(limit)
         )
+        if available_only:
+            stmt = stmt.where(Source.is_active.is_(True))
         result = await self._session.execute(stmt)
         return list(result.scalars().all())
 
-    async def count_by_owner(self, owner_id: uuid.UUID) -> int:
-        """Count sources owned by a user (for pagination totals)."""
+    async def count_by_owner(
+        self,
+        owner_id: uuid.UUID,
+        *,
+        available_only: bool = False,
+    ) -> int:
+        """Count non-deleted sources owned by a user (for pagination totals)."""
         stmt = (
             select(func.count())
             .select_from(Source)
-            .where(Source.owner_id == owner_id)
+            .where(
+                Source.owner_id == owner_id,
+                Source.deleted_at.is_(None),
+            )
         )
+        if available_only:
+            stmt = stmt.where(Source.is_active.is_(True))
         result = await self._session.execute(stmt)
         return result.scalar_one()
 
-    async def count_active(self) -> int:
-        """Count all active sources."""
+    async def count_active(self, *, available_only: bool = False) -> int:
+        """Count all non-deleted sources.
+
+        ``available_only=True`` restricts to admin-approved sources.
+        """
         stmt = (
             select(func.count())
             .select_from(Source)
-            .where(Source.is_active.is_(True))
+            .where(Source.deleted_at.is_(None))
         )
+        if available_only:
+            stmt = stmt.where(Source.is_active.is_(True))
         result = await self._session.execute(stmt)
         return result.scalar_one()
 
@@ -127,10 +181,15 @@ class SourceRepository(BaseRepository[Source]):
         name: str,
         owner_id: uuid.UUID,
     ) -> Source | None:
-        """Look up a source by unique (name, owner_id) pair."""
+        """Look up a non-deleted source by unique (name, owner_id) pair.
+
+        Soft-deleted rows are ignored so users can re-use a name once the
+        previous source has been deleted.
+        """
         stmt = select(Source).where(
             Source.name == name,
             Source.owner_id == owner_id,
+            Source.deleted_at.is_(None),
         )
         result = await self._session.execute(stmt)
         return result.scalars().first()
@@ -139,17 +198,18 @@ class SourceRepository(BaseRepository[Source]):
     # Writes
     # ------------------------------------------------------------------ #
 
-    async def deactivate(self, source_id: uuid.UUID) -> bool:
+    async def soft_delete(self, source_id: uuid.UUID) -> bool:
         """
-        Soft-delete: sets is_active=False.
+        Soft-delete: sets ``deleted_at = now()``.
 
         Returns True if a row was updated, False if not found or already
-        inactive.
+        soft-deleted. Approval state (``is_active``) is intentionally NOT
+        modified — historical approval is preserved on the audit trail.
         """
         stmt = (
             update(Source)
-            .where(Source.id == source_id, Source.is_active.is_(True))
-            .values(is_active=False)
+            .where(Source.id == source_id, Source.deleted_at.is_(None))
+            .values(deleted_at=func.now())
             .returning(Source.id)
         )
         result = await self._session.execute(stmt)
@@ -210,16 +270,23 @@ class SourceRepository(BaseRepository[Source]):
         }
 
     async def list_by_ids(self, source_ids: list[uuid.UUID]) -> list[Source]:
-        """Bulk fetch by list of PKs; returns only active sources.
+        """Bulk fetch by list of PKs; returns only non-deleted, approved sources.
 
         Used by permission service to materialise permission lists (T-054).
-        Returns an empty list immediately when *source_ids* is empty.
+        Filters both ``deleted_at IS NULL`` and ``is_active = TRUE`` because the
+        permission service surfaces sources to non-admin users — only approved
+        rows should be visible. Returns an empty list immediately when
+        *source_ids* is empty.
         """
         if not source_ids:
             return []
         stmt = (
             select(Source)
-            .where(Source.id.in_(source_ids), Source.is_active.is_(True))
+            .where(
+                Source.id.in_(source_ids),
+                Source.deleted_at.is_(None),
+                Source.is_active.is_(True),
+            )
         )
         result = await self._session.execute(stmt)
         return list(result.scalars().all())

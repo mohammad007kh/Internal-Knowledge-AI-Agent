@@ -29,7 +29,9 @@ interface SourceSelectorProps {
 }
 
 async function fetchSources(): Promise<SourceResponse> {
-  const res = await apiClient.get('/api/v1/sources?limit=100&status=ready')
+  // available_only=true restricts to admin-approved (is_active=true) sources.
+  // Soft-deleted rows are filtered out server-side regardless.
+  const res = await apiClient.get('/api/v1/sources?limit=100&status=ready&available_only=true')
   return res.data
 }
 

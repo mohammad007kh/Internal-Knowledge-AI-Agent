@@ -221,7 +221,13 @@ class SourceCreateRequest(BaseModel):
 
 
 class SourcePublicResponse(BaseModel):
-    """Public source representation — never exposes connection_config or file_storage_path."""
+    """Public source representation — never exposes connection_config or file_storage_path.
+
+    ``is_active`` semantics: "approved/available to users". New sources default
+    to ``False`` so admins must explicitly approve them after review.
+    ``deleted_at IS None`` means the source is not soft-deleted; admin lists
+    only return non-deleted rows.
+    """
 
     id: str
     name: str
@@ -234,6 +240,8 @@ class SourcePublicResponse(BaseModel):
     last_synced_at: str | None
     status: str
     citations_enabled: bool
+    is_active: bool = False
+    deleted_at: datetime | None = None
     created_at: str
     updated_at: str
 
@@ -265,6 +273,13 @@ class SourceResponse(BaseModel):
 
     ``config_encrypted`` is deliberately absent (FR-020).
 
+    Field semantics:
+      * ``is_active`` — admin approval flag ("approved/available to users").
+        Defaults to ``False`` for newly created rows; admin must explicitly
+        flip it after review.
+      * ``deleted_at`` — soft-delete marker. ``None`` means the source is
+        active in the system (not soft-deleted).
+
     All wizard-collected fields are mirrored here so the frontend detail
     page can render the source without a second round-trip. Optional fields
     default to None / sensible defaults so older rows missing the columns
@@ -278,6 +293,7 @@ class SourceResponse(BaseModel):
     source_type: SourceType
     owner_id: uuid.UUID
     is_active: bool
+    deleted_at: datetime | None = None
     created_at: datetime
     updated_at: datetime
     # Wizard-collected fields (T-004+)
@@ -292,7 +308,12 @@ class SourceResponse(BaseModel):
 
 
 class SourceListItem(BaseModel):
-    """Slim representation used inside paginated lists."""
+    """Slim representation used inside paginated lists.
+
+    ``is_active`` here means "approved/available to users". Soft-deleted rows
+    (``deleted_at IS NOT NULL``) are filtered out by the listing endpoint and
+    therefore never appear in this shape.
+    """
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -300,6 +321,7 @@ class SourceListItem(BaseModel):
     name: str
     source_type: SourceType
     is_active: bool
+    deleted_at: datetime | None = None
     created_at: datetime
     latest_job: SyncJobResponse | None = None
 

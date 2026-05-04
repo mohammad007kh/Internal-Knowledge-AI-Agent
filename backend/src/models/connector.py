@@ -23,7 +23,12 @@ class Connector(Base, UUIDMixin, TimestampMixin):
 
     name: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
     connector_type: Mapped[SourceType] = mapped_column(
-        Enum(SourceType, name="sourcetype", create_constraint=False),
+        Enum(
+            SourceType,
+            name="sourcetype",
+            create_constraint=False,
+            values_callable=lambda enum_cls: [m.value for m in enum_cls],
+        ),
         nullable=False,
     )
     config_encrypted: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)

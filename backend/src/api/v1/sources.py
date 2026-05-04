@@ -3,8 +3,11 @@
 All endpoints live under ``/api/v1/sources`` (prefix set via
 :func:`include_router` in :mod:`src.api.v1.router`).
 
-Admin users see all active sources; regular users see only their own.
-The ``config`` / ``config_encrypted`` field is never returned in any response.
+Admin users see all non-deleted sources (approved + pending); regular users
+see only their own non-deleted sources. Pass ``available_only=true`` from
+user-facing surfaces (chat session picker) to additionally restrict to
+admin-approved (``is_active = TRUE``) rows. The ``config`` /
+``config_encrypted`` field is never returned in any response.
 """
 
 from __future__ import annotations
@@ -281,6 +284,8 @@ async def create_source(
         last_synced_at=source.last_synced_at.isoformat() if source.last_synced_at else None,
         status=source.status,
         citations_enabled=source.citations_enabled,
+        is_active=source.is_active,
+        deleted_at=source.deleted_at,
         created_at=source.created_at.isoformat(),
         updated_at=source.updated_at.isoformat(),
     )
@@ -408,19 +413,35 @@ async def create_upload_url(
 async def list_sources(
     offset: int = 0,
     limit: int = 50,
+    available_only: bool = Query(
+        False,
+        description=(
+            "When true, restrict to admin-approved sources (is_active=true). "
+            "Use this from user-facing surfaces such as the chat session "
+            "source picker. The admin sources list omits this param so "
+            "pending-approval rows remain visible."
+        ),
+    ),
     current_user: User = Depends(get_current_user),
     service: SourceService = Depends(_get_source_service),
 ) -> PaginatedSources:
-    """Return a paginated list of sources.
+    """Return a paginated list of non-deleted sources.
 
-    Admins receive all active sources; regular users receive only their own
-    sources (both active and inactive).
+    Admins receive all non-deleted sources (approved + pending). Regular
+    users receive only their own non-deleted sources. Soft-deleted rows are
+    always filtered out. Pass ``available_only=true`` to restrict to
+    admin-approved sources (chat session picker behaviour).
     """
     if current_user.role == UserRole.admin:
-        items, total = await service.list_all_active_sources(skip=offset, limit=limit)
+        items, total = await service.list_all_active_sources(
+            skip=offset, limit=limit, available_only=available_only
+        )
     else:
         items, total = await service.list_sources_for_owner(
-            owner_id=current_user.id, skip=offset, limit=limit
+            owner_id=current_user.id,
+            skip=offset,
+            limit=limit,
+            available_only=available_only,
         )
     return PaginatedSources(
         items=[_make_list_item(s) for s in items],
@@ -510,23 +531,24 @@ async def delete_source(
     service: SourceService = Depends(_get_source_service),
     db: AsyncSession = Depends(get_db),
 ) -> Response:
-    """Set ``is_active = False``.
+    """Soft-delete the source by setting ``deleted_at = now()``.
 
-    The source record is retained for audit purposes.
-    Raises 404 if the source does not exist.
+    The source record is retained for audit purposes; ``is_active`` is left
+    unchanged so the historical approval state is preserved.
+    Raises 404 if the source does not exist or is already soft-deleted.
     """
     source = await service.get_source(source_id)
     _assert_ownership_or_admin(source.owner_id, current_user)
     # Capture identifiers BEFORE deletion so the audit row keeps them after
-    # the row is soft-deleted (is_active=False, but resource_id + name are
-    # still valid history we want to log).
+    # the row is soft-deleted (deleted_at IS NOT NULL — but resource_id +
+    # name are still valid history we want to log).
     captured_id = source.id
     captured_name = source.name
-    # Deactivate first; emit audit + commit together so the soft-delete
+    # Soft-delete first; emit audit + commit together so the soft-delete
     # write and the audit row land in one transaction. (Previously the
-    # commit ran BEFORE service.delete_source, so the deactivate flush
+    # commit ran BEFORE service.delete_source, so the soft-delete flush
     # was never persisted — the request returned 204 but the row stayed
-    # active.)
+    # visible.)
     await service.delete_source(source_id)
     await emit_audit(
         AdminAuditLogRepository(db),

@@ -5,6 +5,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { formatRelative } from '@/features/sources/format'
 import { SourceModeBadge, StatusBadge, getSourceTypeMeta } from '@/features/sources/source-ui'
 import type { SourceListItem } from '@/lib/api/sources'
+import { cn } from '@/lib/utils'
 import { Eye, Loader2, MoreHorizontal, RefreshCw, Trash2 } from 'lucide-react'
 import Link from 'next/link'
 import { useState } from 'react'
@@ -86,6 +87,19 @@ export function SourceRowCard({ source, isSyncing, onSync, onDelete }: SourceRow
 
       <div className="mt-3 flex flex-wrap items-center gap-2">
         <StatusBadge status={source.status} />
+        <span
+          className={cn(
+            'inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium',
+            source.is_active
+              ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300'
+              : 'border-zinc-400/30 bg-muted/40 text-muted-foreground'
+          )}
+          aria-label={
+            source.is_active ? 'Available to users' : 'Pending admin review — hidden from users'
+          }
+        >
+          {source.is_active ? 'Available' : 'Pending'}
+        </span>
         <SourceModeBadge mode={source.source_mode} />
       </div>
 

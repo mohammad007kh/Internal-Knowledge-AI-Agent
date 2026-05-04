@@ -119,6 +119,22 @@ function StatusDot({ status }: { status: SourceStatus | string | undefined | nul
   )
 }
 
+function ApprovalPill({ approved }: { approved: boolean }) {
+  return (
+    <span
+      className={cn(
+        'inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium',
+        approved
+          ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300'
+          : 'border-zinc-400/30 bg-muted/40 text-muted-foreground'
+      )}
+      aria-label={approved ? 'Available to users' : 'Pending admin review — hidden from users'}
+    >
+      {approved ? 'Available' : 'Pending'}
+    </span>
+  )
+}
+
 function TypePill({ type }: { type: SourceType | string }) {
   const meta = getSourceTypeMeta(type)
   const group = getTypeGroup(type)
@@ -385,6 +401,7 @@ export function SourcesTable() {
                   <TableHead className="min-w-[220px]">Name</TableHead>
                   <TableHead>Type</TableHead>
                   <TableHead>Status</TableHead>
+                  <TableHead>Approval</TableHead>
                   <TableHead>Mode</TableHead>
                   <TableHead className="text-right">Documents</TableHead>
                   <TableHead>Last synced</TableHead>
@@ -426,6 +443,9 @@ export function SourcesTable() {
                       </TableCell>
                       <TableCell>
                         <StatusDot status={source.status} />
+                      </TableCell>
+                      <TableCell>
+                        <ApprovalPill approved={source.is_active} />
                       </TableCell>
                       <TableCell>
                         <SourceModeBadge mode={source.source_mode} />

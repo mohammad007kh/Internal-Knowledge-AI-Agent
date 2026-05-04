@@ -83,7 +83,7 @@ def mock_source_repo() -> AsyncMock:
     repo.list = AsyncMock(return_value=[])
     repo.create = AsyncMock()
     repo.update = AsyncMock()
-    repo.deactivate = AsyncMock(return_value=True)
+    repo.soft_delete = AsyncMock(return_value=True)
     return repo
 
 

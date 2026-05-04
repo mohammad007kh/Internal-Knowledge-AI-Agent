@@ -1,5 +1,6 @@
 'use client'
 
+import { ErrorState } from '@/components/ui/ErrorState'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -13,18 +14,24 @@ import {
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Switch } from '@/components/ui/switch'
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { ErrorState } from '@/components/ui/ErrorState'
 import {
-  SourceModeBadge,
-  StatusBadge,
-  SyncModeBadge,
-  formatTimestamp,
-} from '@/features/sources/source-ui'
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import {
   useDeleteSource,
   useRefreshDescription,
@@ -35,6 +42,12 @@ import {
   useTriggerSync,
   useUpdateSource,
 } from '@/features/sources/hooks/useSources'
+import {
+  SourceModeBadge,
+  StatusBadge,
+  SyncModeBadge,
+  formatTimestamp,
+} from '@/features/sources/source-ui'
 import { getErrorMessage } from '@/lib/errors'
 import { ChevronRightIcon, RefreshCwIcon, Trash2Icon } from 'lucide-react'
 import Link from 'next/link'
@@ -95,7 +108,10 @@ export default function SourceDetailPage() {
   return (
     <div className="space-y-4 p-4 md:space-y-6 md:p-6">
       {/* Breadcrumb */}
-      <nav className="flex items-center gap-1 text-sm text-muted-foreground" aria-label="Breadcrumb">
+      <nav
+        className="flex items-center gap-1 text-sm text-muted-foreground"
+        aria-label="Breadcrumb"
+      >
         <Link href="/admin/sources" className="hover:text-foreground hover:underline">
           Sources
         </Link>
@@ -106,7 +122,19 @@ export default function SourceDetailPage() {
       {/* Header */}
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0 flex-1 space-y-1">
-          <h1 className="break-words text-xl font-bold md:text-2xl">{source.name}</h1>
+          <div className="flex flex-wrap items-center gap-2">
+            <h1 className="break-words text-xl font-bold md:text-2xl">{source.name}</h1>
+            <Badge
+              variant={source.is_active ? 'default' : 'secondary'}
+              aria-label={
+                source.is_active
+                  ? 'Source is approved and available to users'
+                  : 'Source is pending admin review'
+              }
+            >
+              {source.is_active ? 'Available' : 'Pending review'}
+            </Badge>
+          </div>
           {source.description && (
             <p className="text-sm text-muted-foreground">{source.description}</p>
           )}
@@ -152,7 +180,9 @@ export default function SourceDetailPage() {
           <div className="grid gap-4 sm:grid-cols-3">
             <Card>
               <CardHeader className="pb-2">
-                <CardTitle className="text-sm font-medium text-muted-foreground">Documents</CardTitle>
+                <CardTitle className="text-sm font-medium text-muted-foreground">
+                  Documents
+                </CardTitle>
               </CardHeader>
               <CardContent>
                 <p className="text-2xl font-bold tabular-nums">{stats?.document_count ?? '—'}</p>
@@ -168,7 +198,9 @@ export default function SourceDetailPage() {
             </Card>
             <Card>
               <CardHeader className="pb-2">
-                <CardTitle className="text-sm font-medium text-muted-foreground">Last synced</CardTitle>
+                <CardTitle className="text-sm font-medium text-muted-foreground">
+                  Last synced
+                </CardTitle>
               </CardHeader>
               <CardContent>
                 <p className="text-sm">{formatTimestamp(source.last_synced_at)}</p>
@@ -261,7 +293,9 @@ export default function SourceDetailPage() {
               {source.sync_schedule && (
                 <div className="flex items-center justify-between">
                   <span className="text-muted-foreground">Schedule</span>
-                  <code className="rounded bg-muted px-1.5 py-0.5 text-xs">{source.sync_schedule}</code>
+                  <code className="rounded bg-muted px-1.5 py-0.5 text-xs">
+                    {source.sync_schedule}
+                  </code>
                 </div>
               )}
               <div className="flex items-center justify-between">
@@ -340,6 +374,34 @@ export default function SourceDetailPage() {
               <div className="flex items-center justify-between">
                 <span className="text-muted-foreground">Retrieval mode</span>
                 <Badge variant="secondary">{source.retrieval_mode.replace(/_/g, ' ')}</Badge>
+              </div>
+              <div className="flex items-center justify-between">
+                <div className="min-w-0 flex-1 space-y-0.5">
+                  <span className="block text-muted-foreground">Available to users</span>
+                  <span className="block text-xs text-muted-foreground/80">
+                    When off, the source is hidden from the chat session source picker. New sources
+                    start off until approved by an admin.
+                  </span>
+                </div>
+                <Switch
+                  checked={source.is_active}
+                  disabled={updateMutation.isPending}
+                  onCheckedChange={(checked) =>
+                    updateMutation.mutate(
+                      { is_active: checked },
+                      {
+                        onSuccess: () =>
+                          toast.success(
+                            checked
+                              ? 'Source approved — now available to users'
+                              : 'Source hidden from users'
+                          ),
+                        onError: (err) => toast.error(getErrorMessage(err)),
+                      }
+                    )
+                  }
+                  aria-label="Toggle source availability to users"
+                />
               </div>
               <div className="flex items-center justify-between">
                 <span className="text-muted-foreground">Citations enabled</span>
