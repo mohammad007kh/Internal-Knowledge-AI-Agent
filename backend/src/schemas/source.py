@@ -264,6 +264,11 @@ class SourceResponse(BaseModel):
     """Full source representation returned by the API.
 
     ``config_encrypted`` is deliberately absent (FR-020).
+
+    All wizard-collected fields are mirrored here so the frontend detail
+    page can render the source without a second round-trip. Optional fields
+    default to None / sensible defaults so older rows missing the columns
+    (pre-T-004 schema) still validate.
     """
 
     model_config = ConfigDict(from_attributes=True)
@@ -275,6 +280,15 @@ class SourceResponse(BaseModel):
     is_active: bool
     created_at: datetime
     updated_at: datetime
+    # Wizard-collected fields (T-004+)
+    description: str | None = None
+    source_mode: str = "snapshot"
+    retrieval_mode: str = "vector_only"
+    sync_mode: str = "manual"
+    sync_schedule: str | None = None
+    last_synced_at: datetime | None = None
+    status: str = "pending"
+    citations_enabled: bool = True
 
 
 class SourceListItem(BaseModel):
