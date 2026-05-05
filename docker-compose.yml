@@ -32,7 +32,7 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-    env_file: .env
+    env_file: backend/.env
     environment:
       # Override .env so presigned URLs always track HOST_MINIO_API_PORT.
       # Otherwise users who shift the host port would see broken downloads
@@ -65,7 +65,7 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-    env_file: .env
+    env_file: backend/.env
     volumes:
       - ./app_config.yaml:/app/app_config.yaml:ro
     healthcheck:
@@ -90,7 +90,7 @@ services:
         condition: service_healthy
       worker:
         condition: service_started
-    env_file: .env
+    env_file: backend/.env
     volumes:
       - ./app_config.yaml:/app/app_config.yaml:ro
     # FR-033 — MUST be exactly 1 replica; duplicate beat = double-scheduling hazard
