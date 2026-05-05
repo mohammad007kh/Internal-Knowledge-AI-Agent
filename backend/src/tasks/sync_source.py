@@ -222,9 +222,18 @@ async def _run_sync_pipeline(  # noqa: C901
                 documents_synced += 1
 
                 # Chunk document
+                # Enrich metadata so retrieve.py can project document_title /
+                # source_name / page_number into the chunk dict — otherwise
+                # citations in persist.py degrade to source_id (UUID).
                 chunk_data_list = chunking_svc.chunk_text(
                     raw_doc.content,
-                    metadata={"source_id": str(source.id), "url": raw_doc.url},
+                    metadata={
+                        "source_id": str(source.id),
+                        "url": raw_doc.url,
+                        "document_title": raw_doc.title,
+                        "source_name": source.name,
+                        "page_number": raw_doc.metadata.get("page_number"),
+                    },
                 )
                 for c in chunk_data_list:
                     all_chunk_texts.append(c.text)
