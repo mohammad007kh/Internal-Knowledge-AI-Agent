@@ -1,11 +1,11 @@
 'use client'
 
+import { IngestionStrip } from '@/app/(admin)/admin/sources/_components/IngestionStrip'
 import { Button } from '@/components/ui/button'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { formatRelative } from '@/features/sources/format'
-import { SourceModeBadge, StatusBadge, getSourceTypeMeta } from '@/features/sources/source-ui'
+import { SourceModeBadge, getSourceTypeMeta } from '@/features/sources/source-ui'
 import type { SourceListItem } from '@/lib/api/sources'
-import { cn } from '@/lib/utils'
 import { Eye, Loader2, MoreHorizontal, RefreshCw, Trash2 } from 'lucide-react'
 import Link from 'next/link'
 import { useState } from 'react'
@@ -25,10 +25,6 @@ export function SourceRowCard({ source, isSyncing, onSync, onDelete }: SourceRow
   const [menuOpen, setMenuOpen] = useState(false)
   const meta = getSourceTypeMeta(source.source_type)
   const Icon = meta.icon
-  const documents =
-    typeof source.latest_job?.documents_indexed === 'number'
-      ? source.latest_job.documents_indexed.toLocaleString()
-      : '—'
 
   return (
     <div className="rounded-lg border bg-card p-4 shadow-sm">
@@ -86,32 +82,16 @@ export function SourceRowCard({ source, isSyncing, onSync, onDelete }: SourceRow
       </div>
 
       <div className="mt-3 flex flex-wrap items-center gap-2">
-        <StatusBadge status={source.status} />
-        <span
-          className={cn(
-            'inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium',
-            source.is_active
-              ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300'
-              : 'border-zinc-400/30 bg-muted/40 text-muted-foreground'
-          )}
-          aria-label={
-            source.is_active ? 'Available to users' : 'Pending admin review — hidden from users'
-          }
-        >
-          {source.is_active ? 'Available' : 'Pending'}
-        </span>
         <SourceModeBadge mode={source.source_mode} />
       </div>
 
-      <div className="mt-3 grid grid-cols-2 gap-3 text-xs">
-        <div>
-          <p className="text-[10px] uppercase tracking-wide text-muted-foreground">Documents</p>
-          <p className="mt-0.5 font-medium tabular-nums">{documents}</p>
-        </div>
-        <div>
-          <p className="text-[10px] uppercase tracking-wide text-muted-foreground">Last synced</p>
-          <p className="mt-0.5 text-foreground">{formatRelative(source.last_synced_at)}</p>
-        </div>
+      <div className="mt-3">
+        <IngestionStrip source={source} />
+      </div>
+
+      <div className="mt-3 text-xs">
+        <p className="text-[10px] uppercase tracking-wide text-muted-foreground">Last synced</p>
+        <p className="mt-0.5 text-foreground">{formatRelative(source.last_synced_at)}</p>
       </div>
 
       <div className="mt-3 flex items-center justify-end">

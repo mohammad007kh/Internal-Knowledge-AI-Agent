@@ -55,11 +55,17 @@ export interface SourceListItem {
   created_at: string
   // Phase-2 enriched fields (optional for backwards compatibility)
   source_mode?: SourceMode
-  status?: SourceStatus
-  sync_mode?: SyncMode
+  status?: SourceStatus | null
+  sync_mode?: SyncMode | null
   last_synced_at?: string | null
   description?: string | null
   latest_job?: SyncJob | null
+  // Ingestion-clarity fields (T-107). Populated server-side; defaulted to
+  // 0 / false on rows that pre-date the schema.  Drive the four-stage
+  // strip on /admin/sources (Uploaded / Parsed / Chunked / Approved).
+  document_count?: number
+  chunk_count?: number
+  has_upload?: boolean
 }
 
 export interface SourceDetail extends SourceListItem {

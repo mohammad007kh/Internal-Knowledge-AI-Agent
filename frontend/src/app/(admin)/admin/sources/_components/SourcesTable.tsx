@@ -1,5 +1,6 @@
 'use client'
 
+import { IngestionStrip } from '@/app/(admin)/admin/sources/_components/IngestionStrip'
 import { SourceRowCard } from '@/app/(admin)/admin/sources/_components/SourceRowCard'
 import {
   SourcesToolbar,
@@ -34,7 +35,7 @@ import {
   useTriggerSync,
 } from '@/features/sources/hooks/useSources'
 import { SourceModeBadge, getSourceTypeMeta } from '@/features/sources/source-ui'
-import type { SourceListItem, SourceStatus, SourceType } from '@/lib/api/sources'
+import type { SourceListItem, SourceType } from '@/lib/api/sources'
 import { getErrorMessage } from '@/lib/errors'
 import { cn } from '@/lib/utils'
 import {
@@ -75,64 +76,12 @@ const TYPE_GROUP_LABEL: Record<Exclude<TypeGroup, 'all'>, string> = {
   integration: 'Integration',
 }
 
-const STATUS_DOT_CLASS: Record<string, string> = {
-  pending: 'bg-zinc-400',
-  syncing: 'bg-blue-500 animate-pulse',
-  running: 'bg-blue-500 animate-pulse',
-  ready: 'bg-emerald-500',
-  completed: 'bg-emerald-500',
-  success: 'bg-emerald-500',
-  error: 'bg-red-500',
-  failed: 'bg-red-500',
-  disabled: 'bg-zinc-300 dark:bg-zinc-600',
-}
-
-const STATUS_TEXT_CLASS: Record<string, string> = {
-  pending: 'text-zinc-600 dark:text-zinc-300',
-  syncing: 'text-blue-700 dark:text-blue-300',
-  running: 'text-blue-700 dark:text-blue-300',
-  ready: 'text-emerald-700 dark:text-emerald-300',
-  completed: 'text-emerald-700 dark:text-emerald-300',
-  success: 'text-emerald-700 dark:text-emerald-300',
-  error: 'text-red-700 dark:text-red-300',
-  failed: 'text-red-700 dark:text-red-300',
-  disabled: 'text-zinc-500 dark:text-zinc-400',
-}
-
 function getTypeGroup(type: SourceType | string): Exclude<TypeGroup, 'all'> | 'other' {
   if ((DATABASE_TYPES as readonly string[]).includes(type)) return 'database'
   if ((FILE_TYPES as readonly string[]).includes(type)) return 'file'
   if ((WEB_TYPES as readonly string[]).includes(type)) return 'web'
   if ((INTEGRATION_TYPES as readonly string[]).includes(type)) return 'integration'
   return 'other'
-}
-
-function StatusDot({ status }: { status: SourceStatus | string | undefined | null }) {
-  const value = (status ?? 'pending') as string
-  const dot = STATUS_DOT_CLASS[value] ?? STATUS_DOT_CLASS.disabled
-  const text = STATUS_TEXT_CLASS[value] ?? STATUS_TEXT_CLASS.disabled
-  return (
-    <span className="inline-flex items-center gap-2 text-xs font-medium">
-      <span className={cn('h-2 w-2 rounded-full', dot)} aria-hidden />
-      <span className={cn('capitalize', text)}>{value}</span>
-    </span>
-  )
-}
-
-function ApprovalPill({ approved }: { approved: boolean }) {
-  return (
-    <span
-      className={cn(
-        'inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium',
-        approved
-          ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300'
-          : 'border-zinc-400/30 bg-muted/40 text-muted-foreground'
-      )}
-      aria-label={approved ? 'Available to users' : 'Pending admin review — hidden from users'}
-    >
-      {approved ? 'Available' : 'Pending'}
-    </span>
-  )
 }
 
 function TypePill({ type }: { type: SourceType | string }) {
@@ -400,10 +349,8 @@ export function SourcesTable() {
                 <TableRow>
                   <TableHead className="min-w-[220px]">Name</TableHead>
                   <TableHead>Type</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead>Approval</TableHead>
                   <TableHead>Mode</TableHead>
-                  <TableHead className="text-right">Documents</TableHead>
+                  <TableHead className="min-w-[320px]">Ingestion</TableHead>
                   <TableHead>Last synced</TableHead>
                   <TableHead className="text-right">Actions</TableHead>
                 </TableRow>
@@ -411,7 +358,6 @@ export function SourcesTable() {
               <TableBody>
                 {filtered.map((source) => {
                   const meta = getSourceTypeMeta(source.source_type)
-                  const documents = source.latest_job?.documents_indexed
                   const isRowSyncing =
                     syncMutation.isPending && syncMutation.variables === source.id
 
@@ -442,16 +388,10 @@ export function SourcesTable() {
                         <TypePill type={source.source_type} />
                       </TableCell>
                       <TableCell>
-                        <StatusDot status={source.status} />
-                      </TableCell>
-                      <TableCell>
-                        <ApprovalPill approved={source.is_active} />
-                      </TableCell>
-                      <TableCell>
                         <SourceModeBadge mode={source.source_mode} />
                       </TableCell>
-                      <TableCell className="text-right tabular-nums">
-                        {typeof documents === 'number' ? documents.toLocaleString() : '—'}
+                      <TableCell>
+                        <IngestionStrip source={source} />
                       </TableCell>
                       <TableCell className="text-sm text-muted-foreground">
                         {formatRelative(source.last_synced_at)}
