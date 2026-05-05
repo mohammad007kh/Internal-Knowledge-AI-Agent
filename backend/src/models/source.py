@@ -15,7 +15,7 @@ import uuid
 from datetime import datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import Boolean, Enum, ForeignKey, String, Text
+from sqlalchemy import Boolean, DateTime, Enum, ForeignKey, String, Text
 from sqlalchemy.dialects.postgresql import BYTEA, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -83,12 +83,19 @@ class Source(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     sync_mode: Mapped[str] = mapped_column(String, nullable=False, default="manual")
     sync_schedule: Mapped[str | None] = mapped_column(String, nullable=True)
-    last_synced_at: Mapped[datetime | None] = mapped_column(nullable=True)
+    # DB column is TIMESTAMP WITH TIME ZONE (migration 0018). Bind the ORM
+    # type accordingly so asyncpg sees aware datetimes when comparing
+    # against ``datetime.now(tz=timezone.utc)`` in scheduled-sync polling.
+    last_synced_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     status: Mapped[str] = mapped_column(String, nullable=False, default="pending")
     citations_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     # Internal MinIO object key — NEVER exposed in API responses
     file_storage_path: Mapped[str | None] = mapped_column(String, nullable=True)
-    next_sync_due_at: Mapped[datetime | None] = mapped_column(nullable=True)
+    next_sync_due_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     # Embedder pinned at Source creation; immutable once chunks exist.
     embedder_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
