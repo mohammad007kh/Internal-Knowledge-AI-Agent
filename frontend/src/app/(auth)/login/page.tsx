@@ -27,9 +27,19 @@ export default function LoginPage() {
   const { user } = useAuth()
   const login = useLogin()
 
-  // Redirect already-authenticated users
+  // Single source of truth for post-auth redirect.  Fires both on auto-restore
+  // (AuthProvider's initial refresh succeeds) and right after a successful
+  // login (setAccessToken commits the state update).  Calling router.push from
+  // onSubmit AS WELL caused a double-navigation race in Next.js App Router —
+  // the URL would update but the page swap occasionally got dropped, leaving
+  // the user looking at /login until they manually reloaded.
   useEffect(() => {
-    if (user) router.replace('/chat')
+    if (!user) return
+    if (user.must_change_password) {
+      router.replace('/change-password')
+    } else {
+      router.replace('/chat')
+    }
   }, [user, router])
 
   const [showPassword, setShowPassword] = useState(false)
@@ -45,12 +55,9 @@ export default function LoginPage() {
 
   const onSubmit = async (values: LoginFormValues) => {
     try {
-      const result = await login.mutateAsync(values)
-      if (result.must_change_password) {
-        router.push('/change-password')
-      } else {
-        router.push('/chat')
-      }
+      await login.mutateAsync(values)
+      // Don't navigate here — the useEffect above picks up the new `user`
+      // state and handles must_change_password vs. /chat in one place.
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : 'Login failed. Please try again.'
       toast.error(message)
