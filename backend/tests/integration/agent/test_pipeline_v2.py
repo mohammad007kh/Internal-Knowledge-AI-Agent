@@ -152,6 +152,54 @@ async def test_v2_pipeline_invokes_each_new_node() -> None:
 
 
 @pytest.mark.asyncio
+async def test_v2_pipeline_runs_guardrail_input_before_check_clarification() -> None:
+    """Slice E defect-3 fix: guardrails must gate the LLM clarifier in V2.
+
+    Hostile / PII-laden queries should be blocked by ``guardrail_input``
+    before ``check_clarification`` ever issues an LLM call to decide
+    whether to ask the user to clarify.  We assert the topological edge
+    ordering, not run-time semantics.
+    """
+    resolver = _make_resolver_router({})
+    embedding = AsyncMock()
+    embedding.embed_query.return_value = [0.1] * 1536
+    factory = AsyncMock()
+    factory.for_active.return_value = (embedding, uuid.uuid4())
+    chunk_repo = AsyncMock()
+    chat_session_repo = AsyncMock()
+    chat_msg_repo = AsyncMock()
+    langfuse = MagicMock()
+    langfuse.span.return_value = MagicMock()
+    langfuse.start_span.return_value = MagicMock()
+    source_repo = AsyncMock()
+    guardrail = MagicMock()  # presence is what matters; nodes are mocked
+
+    pipeline = build_pipeline(
+        db_session=AsyncMock(),
+        chunk_repository=chunk_repo,
+        chat_session_repository=chat_session_repo,
+        chat_message_repository=chat_msg_repo,
+        ai_model_resolver=resolver,
+        embedding_service_factory=factory,
+        langfuse=langfuse,
+        guardrail_service=guardrail,
+        source_repository=source_repo,
+    )
+
+    graph = pipeline.get_graph()
+    edges = [(e.source, e.target) for e in graph.edges]
+
+    # 1) load_history flows directly into guardrail_input (not clarify).
+    assert ("load_history", "guardrail_input") in edges
+    assert ("load_history", "check_clarification") not in edges
+    # 2) guardrail_input is upstream of check_clarification (via conditional).
+    assert ("guardrail_input", "check_clarification") in edges
+    # 3) check_clarification is no longer a direct successor of load_history.
+    successors_of_load = {t for s, t in edges if s == "load_history"}
+    assert successors_of_load == {"guardrail_input"}
+
+
+@pytest.mark.asyncio
 async def test_v2_pipeline_falls_back_to_v1_without_source_repository() -> None:
     """When source_repository is omitted the v1 graph is built (rollback path)."""
     resolver = _make_resolver_router(

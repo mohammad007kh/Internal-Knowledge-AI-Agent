@@ -345,27 +345,32 @@ def _build_v2_pipeline(
         workflow.add_node("reflector", _reflect)
 
     # Edges -----------------------------------------------------------------
+    # Slice E defect-3 fix (V2 ONLY): guardrail_input must run BEFORE
+    # check_clarification so a hostile / PII-laden query is blocked before
+    # we burn an LLM call deciding whether to clarify it.  V1 keeps its
+    # historical order (clarify first) — see _build_v1_pipeline.
     workflow.add_edge(START, "load_history")
-    workflow.add_edge("load_history", "check_clarification")
-    workflow.add_conditional_edges(
-        "check_clarification",
-        _route_after_clarify,
-        {
-            "handle_clarification": "handle_clarification",
-            "continue": "guardrail_input" if guardrail_service is not None else "query_analyzer",
-        },
-    )
-    workflow.add_edge("handle_clarification", END)
-
     if guardrail_service is not None:
+        workflow.add_edge("load_history", "guardrail_input")
         workflow.add_conditional_edges(
             "guardrail_input",
             _route_after_guardrail_input,
             {
                 END: END,
-                "continue": "query_analyzer",
+                "continue": "check_clarification",
             },
         )
+    else:
+        workflow.add_edge("load_history", "check_clarification")
+    workflow.add_conditional_edges(
+        "check_clarification",
+        _route_after_clarify,
+        {
+            "handle_clarification": "handle_clarification",
+            "continue": "query_analyzer",
+        },
+    )
+    workflow.add_edge("handle_clarification", END)
 
     workflow.add_edge("query_analyzer", "source_router")
     workflow.add_conditional_edges(

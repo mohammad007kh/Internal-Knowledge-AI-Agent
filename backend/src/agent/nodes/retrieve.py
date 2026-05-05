@@ -35,11 +35,15 @@ async def retrieve_context(
     Enforces FR-019: only chunks whose source_id appears in
     ``state["source_ids"]`` are ever returned.
 
-    The active embedder record drives both the query embedding and the
-    defensive ``embedder_id`` filter on the SQL similarity search — see
-    §6.3 of the design doc.
+    When the v2 ``source_router`` has narrowed the accessible sources for
+    this query it writes ``state["selected_source_ids"]`` — a subset of
+    ``state["source_ids"]``.  We prefer that subset so the LLM-driven
+    routing actually filters retrieval; v1 (and any v2 path where the
+    router degraded to empty) still fall back to the full allowlist.
     """
-    source_ids: list[str] = state.get("source_ids", [])
+    accessible_ids: list[str] = state.get("source_ids", []) or []
+    selected_ids: list[str] = state.get("selected_source_ids") or []
+    source_ids: list[str] = selected_ids if selected_ids else accessible_ids
     query: str = state.get("query", "").strip()
 
     # FR-019: empty allowlist → no results, no embedding call

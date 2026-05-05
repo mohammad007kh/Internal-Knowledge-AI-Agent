@@ -67,7 +67,16 @@ _FORBIDDEN_KEYWORDS = (
 
 
 def is_safe_sql(sql: str) -> tuple[bool, str]:
-    """Return (safe, reason).  reason is empty when safe."""
+    """Return (safe, reason).  reason is empty when safe.
+
+    TODO(slice-e-review): the ``\\bUPDATE\\b`` (and similar) whole-word
+    keyword check below produces false positives on legitimate column /
+    identifier names that happen to contain those tokens — e.g. an
+    ``update_at`` timestamp column triggers ``forbidden keyword UPDATE``
+    even though the SQL is read-only.  Out of scope for this fix; logged
+    here so the reviewer's example does not get lost.  A proper fix needs
+    a real SQL parser (sqlglot) rather than a regex.
+    """
     if not isinstance(sql, str):
         return False, "sql is not a string"
     stripped = sql.strip()

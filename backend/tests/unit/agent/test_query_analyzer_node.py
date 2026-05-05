@@ -103,3 +103,37 @@ async def test_empty_query_returns_empty_variants() -> None:
     result = await analyze_query(_state(query="   "), ai_model_resolver=resolver, langfuse=_langfuse())
     assert result["query_variants"] == []
     resolver.resolve.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_reflector_feedback_fed_back_into_llm_prompt() -> None:
+    """Slice E defect-2 fix: reflector retry must surface feedback to the LLM.
+
+    Without this, the second pass through query_analyzer re-runs the same
+    prompt with the same query, so the retry loop is theatre.
+    """
+    http_client = _openai_returning({"variants": ["refund timeline rules"]})
+    resolver = _resolver_for(http_client)
+    state = _state()
+    state["reflector_feedback"] = "Answer omitted the 14-day window."
+    await analyze_query(state, ai_model_resolver=resolver, langfuse=_langfuse())
+
+    # Inspect the actual messages sent to the LLM.
+    kwargs = http_client.chat.completions.create.await_args.kwargs
+    user_msg = next(m for m in kwargs["messages"] if m["role"] == "user")
+    assert "Previous attempt was rejected" in user_msg["content"]
+    assert "14-day window" in user_msg["content"]
+    # Original query is still present.
+    assert "What is the refund policy?" in user_msg["content"]
+
+
+@pytest.mark.asyncio
+async def test_no_reflector_feedback_keeps_prompt_clean() -> None:
+    """Without feedback, the user message is just the query (no retry preamble)."""
+    http_client = _openai_returning({"variants": ["v1"]})
+    resolver = _resolver_for(http_client)
+    await analyze_query(_state(), ai_model_resolver=resolver, langfuse=_langfuse())
+
+    kwargs = http_client.chat.completions.create.await_args.kwargs
+    user_msg = next(m for m in kwargs["messages"] if m["role"] == "user")
+    assert user_msg["content"] == "What is the refund policy?"

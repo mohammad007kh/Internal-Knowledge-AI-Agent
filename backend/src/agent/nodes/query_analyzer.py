@@ -58,14 +58,27 @@ async def _call_llm(
     query: str,
     *,
     ai_model_resolver: AIModelResolver,
+    reflector_feedback: str | None = None,
 ) -> list[str]:
     client = await ai_model_resolver.resolve(_STAGE)
     prompt = load_prompt(_STAGE, custom=client.custom_prompt)
+    # Slice E defect-2 fix: when the reflector flagged a retry, surface its
+    # feedback to this LLM so the next batch of variants tries to address
+    # the issues instead of re-running the same prompt verbatim.
+    if reflector_feedback:
+        user_content = (
+            f"{query}\n\n"
+            "Previous attempt was rejected because: "
+            f"{reflector_feedback}. "
+            "Generate query variants that would address this."
+        )
+    else:
+        user_content = query
     response = await client.http_client.chat.completions.create(
         model=client.model_id,
         messages=[
             {"role": "system", "content": prompt},
-            {"role": "user", "content": query},
+            {"role": "user", "content": user_content},
         ],
         temperature=client.temperature,
         max_tokens=client.max_tokens,
@@ -101,14 +114,20 @@ async def analyze_query(
     if not query:
         return {"query_variants": []}
 
+    reflector_feedback: str | None = state.get("reflector_feedback")
+
     span = langfuse.span(  # type: ignore[attr-defined]
         trace_id=state["trace_id"],
         name=_STAGE,
-        input={"query": query},
+        input={"query": query, "has_reflector_feedback": bool(reflector_feedback)},
     )
     try:
         try:
-            variants = await _call_llm(query, ai_model_resolver=ai_model_resolver)
+            variants = await _call_llm(
+                query,
+                ai_model_resolver=ai_model_resolver,
+                reflector_feedback=reflector_feedback,
+            )
         except Exception:  # noqa: BLE001 - degrade
             logger.warning(
                 "query_analyzer: LLM call failed, falling back to single variant",

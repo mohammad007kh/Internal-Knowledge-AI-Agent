@@ -138,3 +138,73 @@ class TestRetrieveContext:
         )
 
         assert result["retrieved_chunks"] == []
+
+    async def test_prefers_selected_source_ids_over_full_allowlist(self, base_state):
+        """source_router output must filter retrieval; bug fix for Slice E defect 1.
+
+        When ``selected_source_ids`` is non-empty it is a subset chosen by the
+        v2 router LLM.  ``similarity_search`` must be called with that subset
+        — not the full ``source_ids`` allowlist — otherwise the router is
+        theatre and the LLM filtering does nothing.
+        """
+        uuid_a = "11111111-1111-1111-1111-111111111111"
+        uuid_b = "22222222-2222-2222-2222-222222222222"
+        uuid_c = "33333333-3333-3333-3333-333333333333"
+        base_state["source_ids"] = [uuid_a, uuid_b, uuid_c]
+        base_state["selected_source_ids"] = [uuid_a]
+
+        mock_embedding_service = AsyncMock()
+        mock_embedding_service.embed_query.return_value = [0.1] * 1536
+
+        from src.models.chunk import Chunk  # noqa: PLC0415
+
+        fake_chunk = MagicMock(spec=Chunk)
+        fake_chunk.id = "chunk-1"
+        fake_chunk.source_id = uuid_a
+        fake_chunk.chunk_text = "Only-A content."
+        fake_chunk.metadata_ = {}
+
+        mock_chunk_repo = AsyncMock()
+        mock_chunk_repo.similarity_search.return_value = [(fake_chunk, 0.05)]
+
+        mock_langfuse = MagicMock()
+        mock_langfuse.start_span.return_value = MagicMock()
+
+        result = await retrieve_context(
+            base_state,
+            embedding_service_factory=_factory_with(mock_embedding_service),
+            chunk_repository=mock_chunk_repo,
+            db_session=AsyncMock(),
+            langfuse=mock_langfuse,
+        )
+
+        # similarity_search was called with the selected subset, NOT the
+        # broader allowlist.
+        kwargs = mock_chunk_repo.similarity_search.await_args.kwargs
+        assert kwargs["source_ids"] == [uuid_a]
+        # And only the chunk from uuid_a comes back.
+        assert len(result["retrieved_chunks"]) == 1
+        assert result["retrieved_chunks"][0]["source_id"] == uuid_a
+
+    async def test_falls_back_to_source_ids_when_selected_empty(self, base_state):
+        """v1 path / degraded router writes empty selected_source_ids."""
+        base_state["source_ids"] = ["src-1", "src-2"]
+        base_state["selected_source_ids"] = []
+
+        mock_embedding_service = AsyncMock()
+        mock_embedding_service.embed_query.return_value = [0.1] * 1536
+        mock_chunk_repo = AsyncMock()
+        mock_chunk_repo.similarity_search.return_value = []
+        mock_langfuse = MagicMock()
+        mock_langfuse.start_span.return_value = MagicMock()
+
+        await retrieve_context(
+            base_state,
+            embedding_service_factory=_factory_with(mock_embedding_service),
+            chunk_repository=mock_chunk_repo,
+            db_session=AsyncMock(),
+            langfuse=mock_langfuse,
+        )
+
+        kwargs = mock_chunk_repo.similarity_search.await_args.kwargs
+        assert kwargs["source_ids"] == ["src-1", "src-2"]
