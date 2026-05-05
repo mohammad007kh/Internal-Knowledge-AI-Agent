@@ -160,8 +160,22 @@ def _assert_ownership_or_admin(owner_id: uuid.UUID, user: User) -> None:
         )
 
 
-def _make_list_item(source: object) -> SourceListItem:
-    """Build a slim SourceListItem, attaching the latest sync job when available."""
+def _make_list_item(
+    source: object,
+    *,
+    document_count: int = 0,
+    chunk_count: int = 0,
+) -> SourceListItem:
+    """Build a slim :class:`SourceListItem` for the admin sources table.
+
+    Attaches the latest sync job (if any) and the per-source aggregate
+    counts that drive the four-stage ingestion-clarity strip
+    (Uploaded / Parsed / Chunked / Approved).
+
+    ``has_upload`` is derived server-side from
+    ``Source.file_storage_path IS NOT NULL`` — the path itself is never
+    leaked into the API response.
+    """
     latest_raw = max(
         getattr(source, "sync_jobs", []),
         key=lambda j: j.created_at,
@@ -170,6 +184,9 @@ def _make_list_item(source: object) -> SourceListItem:
     item = SourceListItem.model_validate(source)
     if latest_raw is not None:
         item.latest_job = SyncJobResponse.model_validate(latest_raw)
+    item.document_count = document_count
+    item.chunk_count = chunk_count
+    item.has_upload = getattr(source, "file_storage_path", None) is not None
     return item
 
 
@@ -433,18 +450,21 @@ async def list_sources(
     admin-approved sources (chat session picker behaviour).
     """
     if current_user.role == UserRole.admin:
-        items, total = await service.list_all_active_sources(
+        rows, total = await service.list_all_sources_with_counts(
             skip=offset, limit=limit, available_only=available_only
         )
     else:
-        items, total = await service.list_sources_for_owner(
+        rows, total = await service.list_sources_for_owner_with_counts(
             owner_id=current_user.id,
             skip=offset,
             limit=limit,
             available_only=available_only,
         )
     return PaginatedSources(
-        items=[_make_list_item(s) for s in items],
+        items=[
+            _make_list_item(src, document_count=doc_n, chunk_count=chunk_n)
+            for src, doc_n, chunk_n in rows
+        ],
         total=total,
         limit=limit,
         offset=offset,

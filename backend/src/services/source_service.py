@@ -403,6 +403,51 @@ class SourceService:
         return sources, total
 
     # ------------------------------------------------------------------ #
+    # Aggregate listings (T-107 ingestion-clarity)
+    # ------------------------------------------------------------------ #
+
+    async def list_sources_for_owner_with_counts(
+        self,
+        owner_id: uuid.UUID,
+        *,
+        skip: int = 0,
+        limit: int = 50,
+        available_only: bool = False,
+    ) -> tuple[list[tuple[Source, int, int]], int]:
+        """Owner-scoped listing with per-source document/chunk counts.
+
+        Single round-trip — counts are computed via correlated subqueries
+        in the repository so the result stays bounded by ``limit`` rather
+        than the full sources table.
+        """
+        return await self._repo.list_with_counts(
+            owner_id=owner_id,
+            skip=skip,
+            limit=limit,
+            available_only=available_only,
+        )
+
+    async def list_all_sources_with_counts(
+        self,
+        *,
+        skip: int = 0,
+        limit: int = 100,
+        available_only: bool = False,
+    ) -> tuple[list[tuple[Source, int, int]], int]:
+        """Admin listing with per-source document/chunk counts.
+
+        Mirrors :meth:`list_all_active_sources` but adds aggregate counts
+        for the four-stage ingestion-clarity strip on the admin sources
+        table — without an N+1.
+        """
+        return await self._repo.list_with_counts(
+            owner_id=None,
+            skip=skip,
+            limit=limit,
+            available_only=available_only,
+        )
+
+    # ------------------------------------------------------------------ #
     # Connectivity test
     # ------------------------------------------------------------------ #
 

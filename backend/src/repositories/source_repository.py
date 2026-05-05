@@ -141,6 +141,96 @@ class SourceRepository(BaseRepository[Source]):
         result = await self._session.execute(stmt)
         return list(result.scalars().all())
 
+    # ------------------------------------------------------------------ #
+    # Aggregate listings (T-107 ingestion-clarity)
+    # ------------------------------------------------------------------ #
+
+    def _doc_count_subq(self):  # type: ignore[no-untyped-def]
+        """Correlated scalar subquery: count of active Documents per source.
+
+        Mirrors the per-id ``get_stats`` semantics (Documents filtered by
+        ``is_active = TRUE``) so the list and detail views never disagree.
+        """
+        return (
+            select(func.count(Document.id))
+            .where(
+                Document.source_id == Source.id,
+                Document.is_active.is_(True),
+            )
+            .correlate(Source)
+            .scalar_subquery()
+        )
+
+    def _chunk_count_subq(self):  # type: ignore[no-untyped-def]
+        """Correlated scalar subquery: count of Chunks per source.
+
+        Chunks are not filtered (Chunk has no ``is_active`` column and
+        ``embedding`` is NOT NULL — every persisted Chunk is fully embedded).
+        Matches ``get_stats`` semantics.
+        """
+        return (
+            select(func.count(Chunk.id))
+            .where(Chunk.source_id == Source.id)
+            .correlate(Source)
+            .scalar_subquery()
+        )
+
+    async def list_with_counts(
+        self,
+        *,
+        owner_id: uuid.UUID | None = None,
+        skip: int = 0,
+        limit: int = 100,
+        available_only: bool = False,
+    ) -> tuple[list[tuple[Source, int, int]], int]:
+        """Return ``[(source, document_count, chunk_count), ...]`` + total.
+
+        Loads every list-item field — including the per-source aggregate
+        counts — in a single round-trip.  ``sync_jobs`` is eagerly loaded
+        via ``selectinload`` so the ``latest_job`` projection still works
+        without an N+1.
+
+        ``owner_id``
+            When provided, restrict to sources owned by that user (regular
+            user view).  ``None`` = admin view (all non-deleted sources).
+        ``available_only``
+            ``True`` adds ``is_active = TRUE`` (chat picker / approved-only).
+        """
+        from sqlalchemy.orm import selectinload  # noqa: PLC0415
+
+        doc_count = self._doc_count_subq().label("document_count")
+        chunk_count = self._chunk_count_subq().label("chunk_count")
+
+        base_filters = [Source.deleted_at.is_(None)]
+        if owner_id is not None:
+            base_filters.append(Source.owner_id == owner_id)
+        if available_only:
+            base_filters.append(Source.is_active.is_(True))
+
+        stmt = (
+            select(Source, doc_count, chunk_count)
+            .options(selectinload(Source.sync_jobs))
+            .where(*base_filters)
+            .order_by(Source.created_at.desc())
+            .offset(skip)
+            .limit(limit)
+        )
+        result = await self._session.execute(stmt)
+        rows: list[tuple[Source, int, int]] = [
+            (row[0], int(row[1] or 0), int(row[2] or 0))
+            for row in result.all()
+        ]
+
+        count_stmt = (
+            select(func.count())
+            .select_from(Source)
+            .where(*base_filters)
+        )
+        total_result = await self._session.execute(count_stmt)
+        total = int(total_result.scalar_one())
+
+        return rows, total
+
     async def count_by_owner(
         self,
         owner_id: uuid.UUID,

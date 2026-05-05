@@ -313,6 +313,17 @@ class SourceListItem(BaseModel):
     ``is_active`` here means "approved/available to users". Soft-deleted rows
     (``deleted_at IS NOT NULL``) are filtered out by the listing endpoint and
     therefore never appear in this shape.
+
+    Ingestion-clarity fields (``status``, ``last_synced_at``, ``description``,
+    ``source_mode``, ``sync_mode``, ``document_count``, ``chunk_count``,
+    ``has_upload``) power the four-stage admin sources strip
+    (Uploaded / Parsed / Chunked / Approved). They mirror what
+    :class:`SourceResponse` already exposes so the table can render without
+    a per-row round-trip.
+
+    ``has_upload`` is derived server-side from
+    ``Source.file_storage_path IS NOT NULL`` — the path itself is never
+    exposed (see :class:`Source` model docstring).
     """
 
     model_config = ConfigDict(from_attributes=True)
@@ -324,6 +335,15 @@ class SourceListItem(BaseModel):
     deleted_at: datetime | None = None
     created_at: datetime
     latest_job: SyncJobResponse | None = None
+    # Ingestion-clarity fields (T-107)
+    status: str | None = None
+    last_synced_at: datetime | None = None
+    description: str | None = None
+    source_mode: str | None = None
+    sync_mode: str | None = None
+    document_count: int = 0
+    chunk_count: int = 0
+    has_upload: bool = False
 
 
 class PaginatedSources(BaseModel):
