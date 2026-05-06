@@ -11,20 +11,20 @@ import {
 } from '@/components/ui/alert-dialog'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { apiClient } from '@/lib/api-client'
 import { cn } from '@/lib/utils'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
-  CheckIcon,
   MessageSquareIcon,
+  MoreHorizontalIcon,
   PencilIcon,
   PlusIcon,
   SearchIcon,
   Trash2Icon,
-  XIcon,
 } from 'lucide-react'
-import { useCallback, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import { useSelectedSession } from './SelectedSessionContext'
 
@@ -76,6 +76,81 @@ interface SessionItemProps {
   onDelete: () => void
 }
 
+/**
+ * Per-row inline editor. Selects the existing title on focus so users can
+ * type to replace immediately (Claude.ai/ChatGPT pattern). Commits on Enter
+ * or blur-with-changes; reverts on Escape or blur-without-changes.
+ */
+function SessionEditInput({
+  initialTitle,
+  value,
+  onChange,
+  onCommit,
+  onCancel,
+}: {
+  initialTitle: string
+  value: string
+  onChange: (v: string) => void
+  onCommit: () => void
+  onCancel: () => void
+}) {
+  const inputRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    // Focus + select-all on mount so users can immediately type to replace
+    // the existing title (matches Claude.ai/ChatGPT pattern). The Popover
+    // trigger that opened this editor restores focus to itself when it
+    // closes — we defer with rAF (and setTimeout fallback for jsdom, which
+    // doesn't reliably run rAF) so the focus call lands after Radix
+    // finishes its return-focus cycle.
+    const el = inputRef.current
+    if (!el) return
+    const grab = () => {
+      el.focus()
+      el.select()
+    }
+    grab()
+    const raf = window.requestAnimationFrame(grab)
+    const t = window.setTimeout(grab, 0)
+    return () => {
+      window.cancelAnimationFrame(raf)
+      window.clearTimeout(t)
+    }
+  }, [])
+
+  const handleBlur = () => {
+    // Blur without changes is a passive cancel; blur with changes commits
+    // the rename. Empty input on blur reverts to the previous title.
+    if (value.trim() === initialTitle.trim() || !value.trim()) {
+      onCancel()
+      return
+    }
+    onCommit()
+  }
+
+  return (
+    <Input
+      ref={inputRef}
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      onBlur={handleBlur}
+      className="h-6 flex-1 px-1.5 text-xs"
+      maxLength={100}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault()
+          onCommit()
+        }
+        if (e.key === 'Escape') {
+          e.preventDefault()
+          onCancel()
+        }
+      }}
+      aria-label="Rename session"
+    />
+  )
+}
+
 function SessionItem({
   session,
   isActive,
@@ -88,6 +163,8 @@ function SessionItem({
   onCancelEdit,
   onDelete,
 }: SessionItemProps) {
+  const [menuOpen, setMenuOpen] = useState(false)
+
   return (
     <li>
       <div
@@ -117,36 +194,13 @@ function SessionItem({
             onClick={(e) => e.stopPropagation()}
             onKeyDown={(e) => e.stopPropagation()}
           >
-            <Input
+            <SessionEditInput
+              initialTitle={session.title}
               value={editTitle}
-              onChange={(e) => onEditChange(e.target.value)}
-              className="h-6 flex-1 px-1.5 text-xs"
-              autoFocus
-              maxLength={100}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') onCommitEdit()
-                if (e.key === 'Escape') onCancelEdit()
-              }}
-              aria-label="Rename session"
+              onChange={onEditChange}
+              onCommit={onCommitEdit}
+              onCancel={onCancelEdit}
             />
-            <Button
-              size="icon"
-              variant="ghost"
-              className="h-5 w-5 shrink-0"
-              onClick={onCommitEdit}
-              aria-label="Confirm rename"
-            >
-              <CheckIcon className="h-3 w-3" />
-            </Button>
-            <Button
-              size="icon"
-              variant="ghost"
-              className="h-5 w-5 shrink-0"
-              onClick={onCancelEdit}
-              aria-label="Cancel rename"
-            >
-              <XIcon className="h-3 w-3" />
-            </Button>
           </div>
         ) : (
           <>
@@ -160,28 +214,64 @@ function SessionItem({
               </span>
             )}
             <div
-              className="ml-1 hidden shrink-0 items-center gap-0.5 group-hover:flex"
+              // Hidden by default; shown on row hover (desktop) or always on
+              // touch devices where hover is unreliable. The menu also stays
+              // visible whenever it's open so users don't lose the trigger
+              // mid-interaction.
+              className={cn(
+                'ml-1 shrink-0 items-center md:group-hover:flex md:focus-within:flex',
+                menuOpen ? 'flex' : 'flex md:hidden'
+              )}
               onClick={(e) => e.stopPropagation()}
               onKeyDown={(e) => e.stopPropagation()}
             >
-              <Button
-                size="icon"
-                variant="ghost"
-                className="h-5 w-5"
-                onClick={onStartEdit}
-                aria-label={`Rename: ${session.title}`}
-              >
-                <PencilIcon className="h-3 w-3" />
-              </Button>
-              <Button
-                size="icon"
-                variant="ghost"
-                className="h-5 w-5 text-destructive hover:bg-destructive/10"
-                onClick={onDelete}
-                aria-label={`Delete: ${session.title}`}
-              >
-                <Trash2Icon className="h-3 w-3" />
-              </Button>
+              <Popover open={menuOpen} onOpenChange={setMenuOpen}>
+                <PopoverTrigger asChild>
+                  <Button
+                    size="icon"
+                    variant="ghost"
+                    className="h-5 w-5"
+                    aria-label={`Open menu: ${session.title}`}
+                    aria-haspopup="menu"
+                  >
+                    <MoreHorizontalIcon className="h-3.5 w-3.5" />
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent
+                  align="end"
+                  side="bottom"
+                  sideOffset={4}
+                  className="w-36 p-1"
+                  role="menu"
+                >
+                  <button
+                    type="button"
+                    role="menuitem"
+                    aria-label={`Rename: ${session.title}`}
+                    onClick={() => {
+                      setMenuOpen(false)
+                      onStartEdit()
+                    }}
+                    className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-xs text-foreground hover:bg-accent hover:text-accent-foreground focus:bg-accent focus:outline-none"
+                  >
+                    <PencilIcon className="h-3 w-3" aria-hidden />
+                    Rename
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    aria-label={`Delete: ${session.title}`}
+                    onClick={() => {
+                      setMenuOpen(false)
+                      onDelete()
+                    }}
+                    className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-xs text-destructive hover:bg-destructive/10 focus:bg-destructive/10 focus:outline-none"
+                  >
+                    <Trash2Icon className="h-3 w-3" aria-hidden />
+                    Delete
+                  </button>
+                </PopoverContent>
+              </Popover>
             </div>
           </>
         )}
@@ -261,13 +351,17 @@ export function SessionList({ onSelect }: SessionListProps = {}) {
   const commitEdit = useCallback(
     (id: string) => {
       const trimmed = editTitle.trim()
-      if (!trimmed) {
+      const sessions = queryClient.getQueryData<SessionsResponse>(['chat-sessions'])?.items ?? []
+      const original = sessions.find((s) => s.id === id)?.title ?? ''
+      // Empty input → revert (no mutation). Unchanged title → no-op
+      // (don't burn an API call for a no-op rename).
+      if (!trimmed || trimmed === original.trim()) {
         setEditingId(null)
         return
       }
       renameMutation.mutate({ id, title: trimmed })
     },
-    [editTitle, renameMutation]
+    [editTitle, renameMutation, queryClient]
   )
 
   const cancelEdit = useCallback(() => setEditingId(null), [])
