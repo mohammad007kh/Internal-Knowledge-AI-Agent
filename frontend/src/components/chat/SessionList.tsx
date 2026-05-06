@@ -351,8 +351,9 @@ export function SessionList({ onSelect }: SessionListProps = {}) {
   const commitEdit = useCallback(
     (id: string) => {
       const trimmed = editTitle.trim()
-      const sessions = queryClient.getQueryData<SessionsResponse>(['chat-sessions'])?.items ?? []
-      const original = sessions.find((s) => s.id === id)?.title ?? ''
+      const sessions =
+        queryClient.getQueryData<SessionsResponse>(['chat-sessions'])?.sessions ?? []
+      const original = sessions.find((s: ChatSession) => s.id === id)?.title ?? ''
       // Empty input → revert (no mutation). Unchanged title → no-op
       // (don't burn an API call for a no-op rename).
       if (!trimmed || trimmed === original.trim()) {
