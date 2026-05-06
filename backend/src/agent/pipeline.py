@@ -312,6 +312,12 @@ def _build_v2_pipeline(
         langfuse=langfuse,
     )
     reflector_enabled = bool(settings.PIPELINE_REFLECTOR_ENABLED)
+    # Clarifier is OFF by default. The "references entities not yet
+    # introduced" rule fires on virtually every fresh query in a RAG system,
+    # short-circuiting retrieve_context before it ever runs. Letting retrieve
+    # be the gate (returns 0 chunks → synthesizer says "I don't have info")
+    # is a better UX. Re-enable per-environment via PIPELINE_CLARIFY_ENABLED.
+    clarify_enabled = bool(settings.PIPELINE_CLARIFY_ENABLED)
     _reflect = functools.partial(
         reflect,
         ai_model_resolver=ai_model_resolver,
@@ -320,8 +326,9 @@ def _build_v2_pipeline(
     )
 
     workflow.add_node("load_history", _load_history)
-    workflow.add_node("check_clarification", _check_clarification)
-    workflow.add_node("handle_clarification", handle_clarification)
+    if clarify_enabled:
+        workflow.add_node("check_clarification", _check_clarification)
+        workflow.add_node("handle_clarification", handle_clarification)
     workflow.add_node("query_analyzer", _analyze_query)
     workflow.add_node("source_router", _route_sources)
     workflow.add_node("retrieve_context", _retrieve_context)
@@ -354,6 +361,10 @@ def _build_v2_pipeline(
     # check_clarification so a hostile / PII-laden query is blocked before
     # we burn an LLM call deciding whether to clarify it.  V1 keeps its
     # historical order (clarify first) — see _build_v1_pipeline.
+    # When clarify is disabled the post-guardrail edge skips straight to
+    # query_analyzer, keeping the rest of the graph identical.
+    post_guard_target = "check_clarification" if clarify_enabled else "query_analyzer"
+
     workflow.add_edge(START, "load_history")
     if guardrail_service is not None:
         workflow.add_edge("load_history", "guardrail_input")
@@ -362,25 +373,26 @@ def _build_v2_pipeline(
             _route_after_guardrail_input,
             {
                 END: END,
-                "continue": "check_clarification",
+                "continue": post_guard_target,
             },
         )
     else:
-        workflow.add_edge("load_history", "check_clarification")
-    workflow.add_conditional_edges(
-        "check_clarification",
-        _route_after_clarify,
-        {
-            "handle_clarification": "handle_clarification",
-            "continue": "query_analyzer",
-        },
-    )
-    # Route the clarification text through guardrail_output so it gets the
-    # same content-policy check as a normal answer (matches v1 behaviour).
-    if guardrail_service is not None:
-        workflow.add_edge("handle_clarification", "guardrail_output")
-    else:
-        workflow.add_edge("handle_clarification", END)
+        workflow.add_edge("load_history", post_guard_target)
+    if clarify_enabled:
+        workflow.add_conditional_edges(
+            "check_clarification",
+            _route_after_clarify,
+            {
+                "handle_clarification": "handle_clarification",
+                "continue": "query_analyzer",
+            },
+        )
+        # Route the clarification text through guardrail_output so it gets
+        # the same content-policy check as a normal answer (matches v1).
+        if guardrail_service is not None:
+            workflow.add_edge("handle_clarification", "guardrail_output")
+        else:
+            workflow.add_edge("handle_clarification", END)
 
     workflow.add_edge("query_analyzer", "source_router")
     workflow.add_conditional_edges(

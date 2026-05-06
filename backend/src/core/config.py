@@ -96,6 +96,15 @@ class Settings(BaseSettings):
     # Reflector self-critic — costly per Constitution; OFF by default.
     PIPELINE_REFLECTOR_ENABLED: bool = False
     PIPELINE_REFLECTOR_MAX_RETRIES: int = 1
+    # Clarification gate. The LLM clarifier was over-eager on first-turn
+    # questions ("references entities not yet introduced" fires on virtually
+    # every fresh query in a RAG system), short-circuiting retrieve_context
+    # and forcing the user through "Could you please specify..." round-trips
+    # before the bot ever tried to find an answer. OFF by default so retrieve
+    # is the gate: if no chunks come back, the synthesizer naturally says so.
+    # The node code is kept; admins can re-enable per-environment without
+    # redeploying.
+    PIPELINE_CLARIFY_ENABLED: bool = False
     # App config (loaded from YAML)
     upload_max_size_bytes: int = 52428800
     upload_supported_formats: list[str] = ["pdf", "docx", "xlsx", "csv", "txt", "md"]
