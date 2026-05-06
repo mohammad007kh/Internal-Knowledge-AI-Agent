@@ -154,10 +154,24 @@ export function useChat({ sessionId }: { sessionId: string | null }): UseChatRet
   // Abort any in-flight stream when the active session changes — switching
   // sessions (including deletion of the current one) must not leak a stream
   // that would then populate the wrong session's view on completion.
+  //
+  // EXCEPTION: skip the abort when this render's sessionId is `null`.
+  // That cleanup will fire on the null → newId transition (auto-create-on-send
+  // landing a freshly-created id), and the stream that was just started is
+  // bound to the new id — aborting here cancels its AbortController and
+  // clears the optimistic bubble, which is exactly the regression we are
+  // fixing. The cleanup closes over `sessionId` from this render, so the
+  // decision is based on the id we are leaving, not the one we are entering.
   // biome-ignore lint/correctness/useExhaustiveDependencies: only session switches should trigger this
   useEffect(() => {
     return () => {
-      abort()
+      // Only abort when leaving a real (non-null) session. A null → newId
+      // transition runs this cleanup with the captured `sessionId === null`
+      // and must NOT abort, because the freshly-started stream belongs to
+      // the new session, not the (non-existent) previous one.
+      if (sessionId !== null) {
+        abort()
+      }
     }
   }, [sessionId])
 

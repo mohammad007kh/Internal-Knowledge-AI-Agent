@@ -22,6 +22,13 @@ interface ChatInputBarProps {
    * so the user cannot fire two creates in a row.
    */
   isCreatingSession?: boolean
+  /**
+   * When true, the input is usable even with no session selected. The parent
+   * is responsible for transparently creating a session before forwarding
+   * the message to the stream (auto-create-on-send flow in `ChatLayout`).
+   * Defaults to false to preserve existing call sites.
+   */
+  allowEmptySession?: boolean
 }
 
 const MAX_CHARS = 4000
@@ -33,17 +40,23 @@ export function ChatInputBar({
   isStreaming = false,
   sessionId,
   isCreatingSession = false,
+  allowEmptySession = false,
 }: ChatInputBarProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const { selectedIds, selectedSources, handleChange, handleRemove, isUpdating } =
     useSessionSources({ sessionId })
 
+  const inputDisabled =
+    disabled || isStreaming || isCreatingSession || (!sessionId && !allowEmptySession)
+  const sendDisabled = disabled || isCreatingSession || (!sessionId && !allowEmptySession)
+
   const handleSend = useCallback(() => {
     const value = textareaRef.current?.value.trim()
     if (!value || disabled || isCreatingSession) return
+    if (!sessionId && !allowEmptySession) return
     onSend(value)
     if (textareaRef.current) textareaRef.current.value = ''
-  }, [disabled, onSend, isCreatingSession])
+  }, [disabled, onSend, sessionId, allowEmptySession, isCreatingSession])
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -102,14 +115,14 @@ export function ChatInputBar({
               ? 'Generating… press Esc to stop'
               : isCreatingSession
                 ? 'Creating chat…'
-                : sessionId
+                : sessionId || allowEmptySession
                   ? 'Ask a question… (Enter to send)'
-                  : 'Ask a question to start a new chat…'
+                  : 'Select a session first…'
           }
           className={cn('max-h-40 min-h-[2.75rem] flex-1 resize-none rounded-xl')}
           rows={1}
           maxLength={MAX_CHARS}
-          disabled={disabled || isStreaming || isCreatingSession}
+          disabled={inputDisabled}
           onKeyDown={handleKeyDown}
           aria-label="Chat message input"
         />
@@ -128,7 +141,7 @@ export function ChatInputBar({
           <Button
             type="submit"
             size="icon"
-            disabled={disabled || isCreatingSession}
+            disabled={sendDisabled}
             aria-label="Send message"
             className="shrink-0"
           >

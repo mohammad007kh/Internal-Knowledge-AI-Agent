@@ -71,8 +71,10 @@ export function ChatLayout() {
 
   // Send wrapper: when no session is selected, create one first and then
   // dispatch the message into the freshly-created session in the same tick
-  // (via `useChat.send`'s `overrideSessionId` argument) so the user does
-  // not need to retry their message after the empty canvas resolves.
+  // (via `useChat.send`'s `overrideSessionId` argument).  See the matching
+  // exception in useChat's session-switch abort effect — without it, the
+  // cleanup that fires on null → newId would cancel the just-started SSE
+  // stream and reset the surface to the empty state.
   const handleSend = useCallback(
     async (text: string) => {
       if (!text.trim()) return
@@ -99,6 +101,9 @@ export function ChatLayout() {
   // First-time canvas: replace the muted "Select or create a session" line
   // with a centered hero + prominent primary CTA so new users have an
   // unambiguous next step. The sidebar "+" still works for power users.
+  // We leave the hero up while the user is composing (no optimistic message,
+  // no stream) so the auto-create-on-send flow takes over the moment they
+  // submit — at that point the optimistic bubble flips us into the thread.
   const showEmptyHero = !sessionId && optimisticMessages.length === 0 && !isStreaming
 
   return (
@@ -152,10 +157,11 @@ export function ChatLayout() {
       <ChatInputBar
         onSend={handleSend}
         onStop={abort}
-        disabled={isPending && !isStreaming}
+        disabled={(isPending && !isStreaming) || createMutation.isPending}
         isStreaming={isStreaming}
         sessionId={sessionId}
         isCreatingSession={createMutation.isPending}
+        allowEmptySession
       />
     </div>
   )
