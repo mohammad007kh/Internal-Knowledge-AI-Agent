@@ -56,7 +56,15 @@ class ChatMessageResponse(BaseModel):
     role: MessageRoleSchema
     content: str
     created_at: datetime
-    metadata: dict[str, Any] = Field(default_factory=dict)
+    # NOTE: do NOT add a `metadata` field here.  The ChatMessage ORM has no
+    # `metadata` column, and pydantic's from_attributes lookup would fall back
+    # to SQLAlchemy's class-level `Base.metadata` (a MetaData() instance,
+    # NOT a dict), causing model_validate() to crash with
+    # `Input should be a valid dictionary [type=dict_type, input_value=MetaData()]`.
+    # That bug 500'd GET /chat/sessions/{id} for any session with messages and
+    # in turn broke the chat UI (see the MetaData-collision incident).  Use
+    # `sources_cited`, `message_type`, or `is_partial` directly if you need
+    # per-message side data.
 
     model_config = {"from_attributes": True}
 
