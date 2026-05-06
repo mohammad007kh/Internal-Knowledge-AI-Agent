@@ -221,7 +221,12 @@ def _build_v1_pipeline(
             "continue": "guardrail_input" if guardrail_service is not None else "retrieve_context",
         },
     )
-    workflow.add_edge("handle_clarification", END)
+    # Route the clarification text through guardrail_output so it gets
+    # the same content-policy check as a normal answer.
+    if guardrail_service is not None:
+        workflow.add_edge("handle_clarification", "guardrail_output")
+    else:
+        workflow.add_edge("handle_clarification", END)
 
     if guardrail_service is not None:
         workflow.add_conditional_edges(
@@ -370,7 +375,12 @@ def _build_v2_pipeline(
             "continue": "query_analyzer",
         },
     )
-    workflow.add_edge("handle_clarification", END)
+    # Route the clarification text through guardrail_output so it gets the
+    # same content-policy check as a normal answer (matches v1 behaviour).
+    if guardrail_service is not None:
+        workflow.add_edge("handle_clarification", "guardrail_output")
+    else:
+        workflow.add_edge("handle_clarification", END)
 
     workflow.add_edge("query_analyzer", "source_router")
     workflow.add_conditional_edges(
