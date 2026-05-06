@@ -72,6 +72,23 @@ class ChatSessionRepository:
         await session.refresh(obj)
         return obj
 
+    async def update_source_ids(
+        self,
+        session: AsyncSession,
+        session_id: uuid.UUID,
+        source_ids: list[str],
+    ) -> ChatSession | None:
+        """Replace the source-id allowlist for a session. Empty list = retrieve
+        across all sources the user has access to (the default-fallback
+        semantics handled by ChatSessionService.get_source_ids_for_session)."""
+        obj = await self.get(session, session_id)
+        if obj is None:
+            return None
+        obj.source_ids = list(source_ids)
+        await session.flush()
+        await session.refresh(obj)
+        return obj
+
     async def soft_delete(
         self,
         session: AsyncSession,

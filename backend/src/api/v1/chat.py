@@ -23,6 +23,7 @@ from src.schemas.chat import (
     ChatSessionCreate,
     ChatSessionListResponse,
     ChatSessionResponse,
+    ChatSessionUpdate,
     ChatStreamEvent,
 )
 from src.services.langfuse_tracing_service import LangfuseTracingService
@@ -148,20 +149,37 @@ async def get_session(
 
 
 @router.patch("/sessions/{session_id}", response_model=ChatSessionResponse)
-async def rename_session(
+async def update_session(
     session_id: uuid.UUID,
-    body: dict,
+    body: ChatSessionUpdate,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     chat_session_repo: ChatSessionRepository = Depends(_get_chat_session_repo),
 ) -> ChatSessionResponse:
-    """Rename a chat session. Body: {"title": "..."}."""
-    title = body.get("title", "")
-    if not title or not isinstance(title, str) or len(title) > 255:
-        raise problem(status=400, title="Bad Request", detail="title must be 1–255 characters.")
+    """Partial-update a chat session.  Body fields:
+
+    - ``title``: new title (1-255 chars, stripped).  Used by rename UI.
+    - ``source_ids``: replacement allowlist.  Used by the chat source-picker
+      on every selection change.  Empty list means "no per-session filter —
+      retrieve across every source the user can access".
+
+    At least one field must be provided; if both are present, both are
+    applied in the same transaction.  Pre-fix this endpoint was
+    rename-only and silently 400'd source-picker writes, which left
+    chat_sessions.source_ids stuck at [] forever and made retrieval fall
+    back to the bot's "no information" boilerplate.
+    """
     session_obj = await chat_session_repo.get(db, session_id)
     _assert_session_owner(session_obj, current_user)
-    updated = await chat_session_repo.rename(db, session_id, title.strip())
+
+    updated = session_obj
+    if body.title is not None:
+        updated = await chat_session_repo.rename(db, session_id, body.title) or updated
+    if body.source_ids is not None:
+        updated = (
+            await chat_session_repo.update_source_ids(db, session_id, body.source_ids)
+            or updated
+        )
     await db.commit()
     return ChatSessionResponse.model_validate(updated)
 

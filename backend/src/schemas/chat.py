@@ -6,7 +6,7 @@ from enum import StrEnum
 from typing import Any
 from uuid import UUID
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 # ---------------------------------------------------------------------------
 # Enumerations
@@ -27,6 +27,34 @@ class MessageRoleSchema(StrEnum):
 class ChatSessionCreate(BaseModel):
     title: str = Field(default="New Chat", max_length=255)
     source_ids: list[str] | None = None
+
+
+class ChatSessionUpdate(BaseModel):
+    """Partial update for a chat session. At least one field is required.
+
+    Title-only payloads come from the rename UI; source_ids-only payloads
+    come from the source-picker on every selection change.  Both can be
+    sent in a single PATCH if the caller wants to update both fields.
+    """
+
+    title: str | None = Field(default=None, max_length=255)
+    source_ids: list[str] | None = None
+
+    @field_validator("title")
+    @classmethod
+    def strip_title(cls, v: str | None) -> str | None:
+        if v is None:
+            return None
+        stripped = v.strip()
+        if not stripped:
+            raise ValueError("title must not be blank")
+        return stripped
+
+    @model_validator(mode="after")
+    def at_least_one_field(self) -> ChatSessionUpdate:
+        if self.title is None and self.source_ids is None:
+            raise ValueError("at least one of {title, source_ids} must be provided")
+        return self
 
 
 class ChatSessionResponse(BaseModel):
