@@ -228,11 +228,16 @@ export function useChatStream(): UseChatStreamReturn {
             const frame = parseSseFrame(raw)
             if (!frame) continue
 
+            // Event names below match the backend's StreamEventType enum
+            // (backend/src/schemas/chat.py) — `delta` for tokens,
+            // `clarification` for clarification asks, `done` for stream
+            // completion, `error` for failures.  Anything else falls through
+            // to the no-op default for forward compatibility.
             switch (frame.event) {
-              case 'token': {
-                const payload = safeJsonParse<{ delta?: string }>(frame.data)
-                if (payload?.delta) {
-                  setCurrentResponse((prev) => prev + payload.delta)
+              case 'delta': {
+                const payload = safeJsonParse<{ token?: string }>(frame.data)
+                if (payload?.token) {
+                  setCurrentResponse((prev) => prev + payload.token)
                 }
                 break
               }
@@ -243,7 +248,7 @@ export function useChatStream(): UseChatStreamReturn {
                 }
                 break
               }
-              case 'clarification_needed': {
+              case 'clarification': {
                 const payload = safeJsonParse<{ question?: string }>(frame.data)
                 setMessageType('clarification')
                 setClarificationQuestion(payload?.question ?? '')

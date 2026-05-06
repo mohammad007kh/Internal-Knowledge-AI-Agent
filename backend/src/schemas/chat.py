@@ -121,8 +121,21 @@ class ChatStreamEvent(BaseModel):
         code: str = "internal_error"
 
     def to_sse(self) -> str:
-        """Format as a Server-Sent Event string."""
-        return f"data: {self.model_dump_json()}\n\n"
+        """Format as a Server-Sent Event string.
+
+        Emits proper SSE-spec frames — ``event: <name>\\ndata: <inner_json>\\n\\n`` —
+        because the frontend's parseSseFrame() reads the event name from the
+        ``event:`` header line, not from the JSON body.  Previously this method
+        wrote the whole envelope (``data: {"event":..., "data":...}``) on a single
+        ``data:`` line, leaving frame.event = the SSE default 'message' on the
+        client and the entire switch falling through to the no-op default branch
+        — i.e. tokens never rendered, ``done`` never invalidated the message
+        cache. This was the second root cause of "I sent a message and got
+        nothing back".
+        """
+        import json
+
+        return f"event: {self.event.value}\ndata: {json.dumps(self.data)}\n\n"
 
     @classmethod
     def delta(cls, token: str) -> ChatStreamEvent:

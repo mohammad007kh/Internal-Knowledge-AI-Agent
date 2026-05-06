@@ -126,6 +126,10 @@ export function useChat({ sessionId }: { sessionId: string | null }): UseChatRet
           // `.finally`, `isPending` would stay true and the textarea would
           // stay locked. Skip if a terminal-event handler already cleared.
           if (!settledRef.current) {
+            // Defensive: if the stream-end watcher hasn't run yet (rare
+            // microtask vs effect ordering edge case), make sure neither the
+            // optimistic bubble nor isPending leaks across the close.
+            clearOptimistic()
             setIsPending(false)
           }
         })
@@ -141,6 +145,10 @@ export function useChat({ sessionId }: { sessionId: string | null }): UseChatRet
     stream.abortStream()
     clearOptimistic()
     setIsPending(false)
+    // Mark settled so the stream-end watcher (which fires on isStreaming
+    // false→true→false) doesn't read this intentional abort as a "connection
+    // dropped" event and toast the user a spurious "Connection lost" message.
+    settledRef.current = true
   }, [stream, clearOptimistic])
 
   // Abort any in-flight stream when the active session changes — switching
