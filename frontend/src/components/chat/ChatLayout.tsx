@@ -28,8 +28,23 @@ interface CreatedSession {
  * which mirrors the ChatGPT/Claude.ai mental model and gives the message
  * canvas full width.
  */
-export function ChatLayout() {
-  const { sessionId, setSessionId } = useSelectedSession()
+interface ChatLayoutProps {
+  /**
+   * Initial sessionId, threaded straight from a server-component page's
+   * `params` so SSR renders the correct surface on the very first paint
+   * (no flicker between empty-hero and message-thread on hard refresh).
+   *
+   * When omitted (e.g. `/chat` with no segment), falls back to the URL-
+   * derived value from `useSelectedSession()`.  The context remains the
+   * authority for `setSessionId` / `abortStream` on every code path —
+   * this prop only seeds the initial render.
+   */
+  sessionId?: string
+}
+
+export function ChatLayout({ sessionId: propSessionId }: ChatLayoutProps = {}) {
+  const { sessionId: ctxSessionId, setSessionId } = useSelectedSession()
+  const sessionId = propSessionId ?? ctxSessionId
   const queryClient = useQueryClient()
   const {
     send,

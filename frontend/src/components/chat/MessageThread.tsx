@@ -42,15 +42,24 @@ export function MessageThread({
   const [pinned, setPinned] = useState(true)
   const [openCitation, setOpenCitation] = useState<Citation | null>(null)
 
-  const { data } = useQuery({
+  const { data, error, isLoading } = useQuery({
     queryKey: ['chat-session-messages', sessionId],
     queryFn: () => fetchMessages(sessionId as string),
     enabled: !!sessionId,
     staleTime: 5_000,
+    // Don't auto-retry a 404 — if the session doesn't exist or the user
+    // doesn't have access, retrying just delays the not-found UX.
+    retry: (failureCount, err) => {
+      const status = (err as { response?: { status?: number } } | undefined)?.response?.status
+      if (status === 404 || status === 403) return false
+      return failureCount < 2
+    },
   })
 
   const persisted: Message[] = data?.messages ?? []
   const allMessages: Message[] = [...persisted, ...extraMessages]
+  const notFoundError = (error as { response?: { status?: number } } | null)?.response?.status
+  const isMissingSession = notFoundError === 404 || notFoundError === 403
 
   const handleScroll = () => {
     const el = scrollRef.current
@@ -74,6 +83,49 @@ export function MessageThread({
     )
   }
 
+  // Backend rejected this session id (deleted, never existed, or not owned by
+  // the current user).  Surface a clear empty state instead of leaving the
+  // user in a phantom thread that silently fails on every send.
+  if (isMissingSession) {
+    return (
+      <div className="flex flex-1 items-center justify-center px-4">
+        <div className="max-w-sm space-y-3 text-center">
+          <SparklesIcon className="mx-auto h-10 w-10 text-muted-foreground/40" aria-hidden />
+          <h3 className="text-base font-semibold">Chat not found</h3>
+          <p className="text-sm text-muted-foreground">
+            This conversation doesn&apos;t exist or you don&apos;t have access. Pick another chat
+            from the sidebar, or start a new one.
+          </p>
+          <a
+            href="/chat"
+            className="inline-flex h-9 items-center rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
+          >
+            Back to chats
+          </a>
+        </div>
+      </div>
+    )
+  }
+
+  // First mount of a real session — show a thin shimmer instead of the
+  // suggestion grid (which is meant for "you have no messages yet").
+  // Don't intercept when a stream is actively running (the streaming bubble
+  // is its own visual signal that work is in progress).
+  if (
+    isLoading &&
+    !isStreaming &&
+    persisted.length === 0 &&
+    extraMessages.length === 0
+  ) {
+    return (
+      <div className="flex flex-1 flex-col gap-4 px-4 py-4" aria-busy="true">
+        <div className="h-12 animate-pulse rounded-lg bg-muted/40" />
+        <div className="ml-auto h-16 w-2/3 animate-pulse rounded-lg bg-muted/40" />
+        <div className="h-20 w-3/4 animate-pulse rounded-lg bg-muted/40" />
+      </div>
+    )
+  }
+
   return (
     <>
       <div
@@ -88,9 +140,7 @@ export function MessageThread({
           <div className="mx-auto mt-16 max-w-md space-y-4 text-center">
             <SparklesIcon className="mx-auto h-10 w-10 text-primary/40" />
             <div className="space-y-1">
-              <h3 className="text-base font-semibold">
-                Ask your knowledge base anything
-              </h3>
+              <h3 className="text-base font-semibold">Ask your knowledge base anything</h3>
               <p className="text-sm text-muted-foreground">
                 Questions are answered using indexed sources.
               </p>
