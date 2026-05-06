@@ -1,7 +1,14 @@
 'use client'
 
 import { ThemeToggle } from '@/components/theme-toggle'
-import { Sheet, SheetClose, SheetContent, SheetTitle, SheetTrigger } from '@/components/ui/sheet'
+import {
+  Sheet,
+  SheetClose,
+  SheetContent,
+  SheetDescription,
+  SheetTitle,
+  SheetTrigger,
+} from '@/components/ui/sheet'
 import { TooltipProvider } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
 import { MenuIcon, XIcon } from 'lucide-react'
@@ -125,6 +132,9 @@ export function MobileHeader({
           </SheetTrigger>
           <SheetContent side="left" className="w-72 max-w-[80vw] bg-card p-0">
             <SheetTitle className="sr-only">{brand} navigation</SheetTitle>
+            <SheetDescription className="sr-only">
+              Primary navigation links for {brand}.
+            </SheetDescription>
             <SheetClose
               aria-label="Close navigation"
               className="absolute right-3 top-3 z-10 inline-flex h-9 w-9 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"

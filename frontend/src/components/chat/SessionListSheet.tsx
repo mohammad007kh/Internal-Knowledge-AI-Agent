@@ -1,7 +1,7 @@
 'use client'
 
 import { Button } from '@/components/ui/button'
-import { Sheet, SheetContent, SheetTitle } from '@/components/ui/sheet'
+import { Sheet, SheetContent, SheetDescription, SheetTitle } from '@/components/ui/sheet'
 import { apiClient } from '@/lib/api-client'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { PlusIcon } from 'lucide-react'
@@ -73,6 +73,13 @@ export function SessionListSheet({ open, onOpenChange }: SessionListSheetProps) 
               right-side "X" close button is rendered by SheetContent. */}
           <div className="flex items-center justify-between border-b border-border px-4 py-3 pr-12">
             <SheetTitle className="text-base">Chats</SheetTitle>
+            {/* Required by Radix Dialog a11y contract — without it the
+                primitive logs `Missing Description or aria-describedby` to
+                the console. The list itself conveys the panel's purpose
+                visually so we hide the description from sighted users. */}
+            <SheetDescription className="sr-only">
+              Browse, search, rename, and delete your chat sessions.
+            </SheetDescription>
             <Button
               size="sm"
               variant="default"

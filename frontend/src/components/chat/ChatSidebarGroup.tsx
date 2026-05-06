@@ -28,7 +28,9 @@ interface ChatSession {
 }
 
 interface SessionsResponse {
-  items: ChatSession[]
+  // Backend chat-sessions envelope is `{sessions, total}` — the lone outlier
+  // in our paginated APIs. See backend/src/schemas/chat.py.
+  sessions: ChatSession[]
   total: number
 }
 
@@ -116,7 +118,7 @@ export function ChatSidebarGroup({ onNavigate }: ChatSidebarGroupProps) {
   })
 
   const sessions = useMemo(() => {
-    const items = data?.items ?? []
+    const items = data?.sessions ?? []
     return [...items]
       .sort((a, b) => (a.updated_at < b.updated_at ? 1 : -1))
       .slice(0, MAX_INLINE_SESSIONS)

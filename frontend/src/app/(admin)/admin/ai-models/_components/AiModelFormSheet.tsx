@@ -6,7 +6,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { Sheet, SheetContent, SheetTitle } from '@/components/ui/sheet'
+import { Sheet, SheetContent, SheetDescription, SheetTitle } from '@/components/ui/sheet'
 import { Textarea } from '@/components/ui/textarea'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import { useCreateAiModel, useTestAiModelConnection, useUpdateAiModel } from '@/hooks/use-ai-models'
@@ -338,9 +338,9 @@ export function AiModelFormSheet({ open, onOpenChange, model }: AiModelFormSheet
       >
         <header className="border-b border-border px-4 py-4 sm:px-6">
           <SheetTitle>{isEdit ? `Edit ${model?.name}` : 'New AI model'}</SheetTitle>
-          <p className="mt-1 pr-8 text-sm text-muted-foreground">
+          <SheetDescription className="mt-1 pr-8">
             Endpoint credentials and generation defaults. API keys are encrypted at rest.
-          </p>
+          </SheetDescription>
         </header>
 
         <form

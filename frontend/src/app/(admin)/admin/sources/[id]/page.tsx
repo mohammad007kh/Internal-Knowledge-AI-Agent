@@ -17,6 +17,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
@@ -446,6 +447,10 @@ export default function SourceDetailPage() {
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Proposed description</DialogTitle>
+            <DialogDescription>
+              AI-generated draft. Review the text below and save it to replace the source's current
+              description.
+            </DialogDescription>
           </DialogHeader>
           <p className="text-sm">{proposedDesc}</p>
           <DialogFooter>

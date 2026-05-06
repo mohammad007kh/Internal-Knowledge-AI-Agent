@@ -6,7 +6,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { Sheet, SheetContent, SheetTitle } from '@/components/ui/sheet'
+import { Sheet, SheetContent, SheetDescription, SheetTitle } from '@/components/ui/sheet'
 import {
   useCreateEmbedder,
   useTestEmbedderConnection,
@@ -290,9 +290,9 @@ export function EmbedderFormSheet({ open, onOpenChange, embedder }: EmbedderForm
       >
         <header className="border-b border-border px-4 py-4 sm:px-6">
           <SheetTitle>{isEdit ? `Edit ${embedder?.name}` : 'New embedder'}</SheetTitle>
-          <p className="mt-1 pr-8 text-sm text-muted-foreground">
+          <SheetDescription className="mt-1 pr-8">
             Embedder endpoint records. Activating one triggers a re-embed batch job.
-          </p>
+          </SheetDescription>
         </header>
 
         <form

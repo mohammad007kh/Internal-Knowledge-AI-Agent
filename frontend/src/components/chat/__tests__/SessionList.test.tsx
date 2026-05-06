@@ -9,7 +9,9 @@ vi.mock('@/lib/api-client', () => ({
   apiClient: {
     get: vi.fn().mockResolvedValue({
       data: {
-        items: [
+        // Mirrors the real wire shape (`sessions`, not `items`) — see
+        // backend/src/schemas/chat.py::ChatSessionListResponse.
+        sessions: [
           {
             id: 's1',
             title: 'Project alpha',

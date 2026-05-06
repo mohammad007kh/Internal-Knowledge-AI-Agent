@@ -37,7 +37,11 @@ interface ChatSession {
 }
 
 interface SessionsResponse {
-  items: ChatSession[]
+  // Backend returns `{sessions, total}` for chat sessions (the only paginated
+  // envelope in the project that doesn't use `items` — see
+  // backend/src/schemas/chat.py::ChatSessionListResponse). Match the wire
+  // shape exactly; reading `items` here was silently empty.
+  sessions: ChatSession[]
   total: number
 }
 
@@ -268,7 +272,7 @@ export function SessionList({ onSelect }: SessionListProps = {}) {
 
   const cancelEdit = useCallback(() => setEditingId(null), [])
 
-  const sessions: ChatSession[] = data?.items ?? []
+  const sessions: ChatSession[] = data?.sessions ?? []
   const filtered = search.trim()
     ? sessions.filter((s) => s.title.toLowerCase().includes(search.toLowerCase()))
     : sessions
