@@ -25,11 +25,7 @@ export interface StreamCitation {
  * - `guardrail_blocked`— request blocked by safety policy (SSE `guardrail_blocked`)
  * - `error`            — stream errored or fetch failed
  */
-export type ChatStreamMessageType =
-  | 'normal'
-  | 'clarification'
-  | 'guardrail_blocked'
-  | 'error'
+export type ChatStreamMessageType = 'normal' | 'clarification' | 'guardrail_blocked' | 'error'
 
 export interface UseChatStreamReturn {
   sendMessage: (sessionId: string, query: string, sourceIds?: string[]) => Promise<void>
@@ -49,8 +45,7 @@ export interface UseChatStreamReturn {
   reset: () => void
 }
 
-const API_BASE =
-  process.env.NEXT_PUBLIC_API_URL?.replace(/\/$/, '') ?? 'http://localhost:8000'
+const API_BASE = process.env.NEXT_PUBLIC_API_URL?.replace(/\/$/, '') ?? 'http://localhost:8000'
 
 interface SseFrame {
   event: string
@@ -106,9 +101,7 @@ export function useChatStream(): UseChatStreamReturn {
   const [currentResponse, setCurrentResponse] = useState('')
   const [citations, setCitations] = useState<StreamCitation[]>([])
   const [messageType, setMessageType] = useState<ChatStreamMessageType>('normal')
-  const [clarificationQuestion, setClarificationQuestion] = useState<string | null>(
-    null
-  )
+  const [clarificationQuestion, setClarificationQuestion] = useState<string | null>(null)
   const [guardrailMessage, setGuardrailMessage] = useState<string | null>(null)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const [lastMessageId, setLastMessageId] = useState<string | null>(null)
@@ -173,7 +166,39 @@ export function useChatStream(): UseChatStreamReturn {
         })
 
         if (!response.ok) {
-          throw new Error(`Stream request failed with status ${response.status}`)
+          // Surface backend error details when present (e.g. FastAPI `detail`,
+          // RFC7807 `title`/`detail`). Falling back to a generic message keeps
+          // the UI honest when the body is empty or unparseable.
+          const fallback = `Stream request failed with status ${response.status}`
+          let errorText = fallback
+          try {
+            const contentType = response.headers.get('content-type') ?? ''
+            if (
+              contentType.includes('application/json') ||
+              contentType.includes('application/problem+json')
+            ) {
+              const body = (await response.json()) as {
+                detail?: unknown
+                title?: unknown
+                message?: unknown
+              }
+              const detail =
+                typeof body.detail === 'string'
+                  ? body.detail
+                  : typeof body.title === 'string'
+                    ? body.title
+                    : typeof body.message === 'string'
+                      ? body.message
+                      : null
+              if (detail) errorText = detail
+            } else {
+              const text = await response.text()
+              if (text.trim()) errorText = text.trim().slice(0, 500)
+            }
+          } catch {
+            errorText = fallback
+          }
+          throw new Error(errorText)
         }
         if (!response.body) {
           throw new Error('Stream response has no body')
@@ -182,6 +207,10 @@ export function useChatStream(): UseChatStreamReturn {
         const reader = response.body.getReader()
         const decoder = new TextDecoder()
         let buffer = ''
+        // Track whether the server emitted a frame that the consumer interprets
+        // as terminal. If the connection closes cleanly without one, we must
+        // synthesize an error so the UI doesn't get stuck mid-stream.
+        let sawTerminalEvent = false
 
         // Drain the stream frame by frame. SSE frames are delimited by "\n\n".
         // Chunks arriving from the network may split mid-frame, so we buffer
@@ -208,9 +237,7 @@ export function useChatStream(): UseChatStreamReturn {
                 break
               }
               case 'citations': {
-                const payload = safeJsonParse<{ citations?: StreamCitation[] }>(
-                  frame.data
-                )
+                const payload = safeJsonParse<{ citations?: StreamCitation[] }>(frame.data)
                 if (payload?.citations) {
                   setCitations(payload.citations)
                 }
@@ -220,12 +247,14 @@ export function useChatStream(): UseChatStreamReturn {
                 const payload = safeJsonParse<{ question?: string }>(frame.data)
                 setMessageType('clarification')
                 setClarificationQuestion(payload?.question ?? '')
+                sawTerminalEvent = true
                 break
               }
               case 'guardrail_blocked': {
                 const payload = safeJsonParse<{ message?: string }>(frame.data)
                 setMessageType('guardrail_blocked')
                 setGuardrailMessage(payload?.message ?? 'Request blocked by policy.')
+                sawTerminalEvent = true
                 break
               }
               case 'done': {
@@ -233,12 +262,14 @@ export function useChatStream(): UseChatStreamReturn {
                 if (payload?.message_id) {
                   setLastMessageId(payload.message_id)
                 }
+                sawTerminalEvent = true
                 break
               }
               case 'error': {
                 const payload = safeJsonParse<{ message?: string }>(frame.data)
                 setMessageType('error')
                 setErrorMessage(payload?.message ?? 'Stream error')
+                sawTerminalEvent = true
                 break
               }
               default:
@@ -246,6 +277,15 @@ export function useChatStream(): UseChatStreamReturn {
                 break
             }
           }
+        }
+
+        // Reader drained without ever seeing a terminal frame: the server
+        // closed the connection mid-flight (e.g. backend exception swallowed
+        // by a bare except). Force the consumer into the same error state a
+        // real `error` frame would have produced so the UI recovers.
+        if (!sawTerminalEvent) {
+          setMessageType('error')
+          setErrorMessage('Stream closed unexpectedly')
         }
       } catch (err) {
         // AbortError is the normal path for user-triggered cancellation.

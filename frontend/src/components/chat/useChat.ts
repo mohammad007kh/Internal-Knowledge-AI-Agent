@@ -51,7 +51,20 @@ export function useChat({ sessionId }: { sessionId: string | null }): UseChatRet
   const pendingOptimisticIdRef = useRef<string | null>(null)
   const lastHandledMessageIdRef = useRef<string | null>(null)
   const lastQueryRef = useRef<string>('')
+  // Capture the session id used at send-time. If the original send auto-created
+  // a session and React hadn't committed `setSessionId` yet, retrying with the
+  // closure's `sessionId` would target `null` and silently no-op. Persisting
+  // the id here lets the retry closure pass it as `overrideSessionId`.
+  const lastSessionIdRef = useRef<string | null>(null)
   const sendRef = useRef<(text: string, overrideSessionId?: string) => void>(() => {})
+  // Tracks whether a terminal signal (lastMessageId/clarification/guardrail/error)
+  // has already cleaned up `isPending` and the optimistic bubble for the current
+  // send. The stream-end watcher uses this to detect zombies, and `.finally()`
+  // on `sendMessage` uses it to avoid double-clearing state.
+  const settledRef = useRef<boolean>(true)
+  // Track previous `isStreaming` so the stream-end watcher can detect a
+  // false→true→false cycle without ever observing a terminal frame.
+  const prevIsStreamingRef = useRef<boolean>(false)
 
   const clearOptimistic = useCallback(() => {
     const id = pendingOptimisticIdRef.current
@@ -69,6 +82,7 @@ export function useChat({ sessionId }: { sessionId: string | null }): UseChatRet
       if (!targetSessionId || !text.trim()) return
       const trimmed = text.trim()
       lastQueryRef.current = trimmed
+      lastSessionIdRef.current = targetSessionId
 
       // Clear any stale optimistic bubble from a previous in-flight send
       // so a rapid second send does not leave a ghost bubble behind.
@@ -86,21 +100,35 @@ export function useChat({ sessionId }: { sessionId: string | null }): UseChatRet
       setClarification(null)
       setLocalGuardrail(null)
       setIsPending(true)
+      settledRef.current = false
 
-      stream.sendMessage(targetSessionId, trimmed, []).catch(() => {
-        clearOptimistic()
-        setIsPending(false)
-        import('sonner')
-          .then(({ toast }) => {
-            toast.error('Failed to send message. Please try again.', {
-              action: {
-                label: 'Retry',
-                onClick: () => sendRef.current(lastQueryRef.current),
-              },
+      stream
+        .sendMessage(targetSessionId, trimmed, [])
+        .catch(() => {
+          clearOptimistic()
+          setIsPending(false)
+          settledRef.current = true
+          import('sonner')
+            .then(({ toast }) => {
+              toast.error('Failed to send message. Please try again.', {
+                action: {
+                  label: 'Retry',
+                  onClick: () =>
+                    sendRef.current(lastQueryRef.current, lastSessionIdRef.current ?? undefined),
+                },
+              })
             })
-          })
-          .catch(() => {})
-      })
+            .catch(() => {})
+        })
+        .finally(() => {
+          // Graceful-close-without-`done` resolves the promise without ever
+          // delivering a terminal event, so `.catch` never fires. Without
+          // `.finally`, `isPending` would stay true and the textarea would
+          // stay locked. Skip if a terminal-event handler already cleared.
+          if (!settledRef.current) {
+            setIsPending(false)
+          }
+        })
     },
     [sessionId, stream, clearOptimistic]
   )
@@ -150,6 +178,7 @@ export function useChat({ sessionId }: { sessionId: string | null }): UseChatRet
     })
     clearOptimistic()
     setIsPending(false)
+    settledRef.current = true
   }, [stream.messageType, stream.clarificationQuestion, stream.lastMessageId, clearOptimistic])
 
   useEffect(() => {
@@ -158,19 +187,22 @@ export function useChat({ sessionId }: { sessionId: string | null }): UseChatRet
     setLocalGuardrail(stream.guardrailMessage)
     clearOptimistic()
     setIsPending(false)
+    settledRef.current = true
   }, [stream.messageType, stream.guardrailMessage, clearOptimistic])
 
   useEffect(() => {
     if (stream.messageType !== 'error') return
     clearOptimistic()
     setIsPending(false)
+    settledRef.current = true
     const msg = stream.errorMessage ?? 'Stream error'
     import('sonner')
       .then(({ toast }) => {
         toast.error(msg, {
           action: {
             label: 'Retry',
-            onClick: () => sendRef.current(lastQueryRef.current),
+            onClick: () =>
+              sendRef.current(lastQueryRef.current, lastSessionIdRef.current ?? undefined),
           },
         })
       })
@@ -185,6 +217,7 @@ export function useChat({ sessionId }: { sessionId: string | null }): UseChatRet
 
     clearOptimistic()
     setIsPending(false)
+    settledRef.current = true
 
     if (sessionId) {
       queryClient.invalidateQueries({
@@ -193,6 +226,33 @@ export function useChat({ sessionId }: { sessionId: string | null }): UseChatRet
     }
     queryClient.invalidateQueries({ queryKey: ['chat-sessions'] })
   }, [stream.lastMessageId, sessionId, queryClient, clearOptimistic])
+
+  // Stream-end watcher: when `isStreaming` flips true→false without any
+  // terminal frame having marked the send as settled, the send is a zombie
+  // (server connection died mid-flight, no `done`/`error`/`clarification`/
+  // `guardrail` ever arrived). Surface a toast + error state so the existing
+  // retry path takes over and the textarea unlocks.
+  useEffect(() => {
+    const wasStreaming = prevIsStreamingRef.current
+    prevIsStreamingRef.current = stream.isStreaming
+    if (!(wasStreaming && !stream.isStreaming)) return
+    if (settledRef.current) return
+    // No terminal signal observed — treat as a connection drop.
+    settledRef.current = true
+    clearOptimistic()
+    setIsPending(false)
+    import('sonner')
+      .then(({ toast }) => {
+        toast.error('Connection lost — please retry.', {
+          action: {
+            label: 'Retry',
+            onClick: () =>
+              sendRef.current(lastQueryRef.current, lastSessionIdRef.current ?? undefined),
+          },
+        })
+      })
+      .catch(() => {})
+  }, [stream.isStreaming, clearOptimistic])
 
   return {
     send,
