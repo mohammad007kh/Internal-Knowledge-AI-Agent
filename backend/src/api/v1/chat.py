@@ -272,6 +272,17 @@ async def send_message(
 
         except GeneratorExit:
             # Client disconnected — persist partial message so the session has a record.
+            # If the stream produced no real tokens, skip the insert; the
+            # `is_partial=True` flag means "real tokens then aborted", not
+            # "empty placeholder", and `chat_messages.content` is NOT NULL.
+            if not final_answer:
+                logger.warning(
+                    "Chat stream aborted with empty final_answer for session=%s — "
+                    "skipping partial persist",
+                    session_id,
+                )
+                langfuse_tracing.end_trace(trace_id, output="[aborted]")
+                return
             async with db_session_factory() as db:
                 try:
                     await chat_message_repo.create(
@@ -282,8 +293,10 @@ async def send_message(
                         is_partial=True,
                     )
                     await db.commit()
-                except Exception:  # noqa: BLE001
-                    logger.exception("Failed to persist partial message for session %s", session_id)
+                except Exception:
+                    logger.exception(
+                        "Failed to persist partial message for session=%s", session_id
+                    )
             langfuse_tracing.end_trace(trace_id, output="[aborted]")
             return
 
@@ -300,6 +313,31 @@ async def send_message(
             langfuse_tracing.end_trace(trace_id, output="", error=str(exc)[:200])
             return
 
+        # Guard: pipeline ended with empty final_answer (e.g. generate_response
+        # produced zero chunks, or guardrail_output early-returned). The DB
+        # column `chat_messages.content` is NOT NULL — inserting None/'' would
+        # raise IntegrityError, the bare except below would swallow it, and
+        # the SSE stream would close without a terminal frame, locking the
+        # frontend textarea. Emit an error event instead so the UI exits its
+        # pending state. Mirrors the precedent in agent/nodes/persist.py:67.
+        if not final_answer:
+            logger.warning(
+                "Chat pipeline ended with empty final_answer for session=%s — "
+                "skipping persist and emitting error frame",
+                session_id,
+            )
+            yield ChatStreamEvent.error(
+                message="The assistant produced no response. Please try again.",
+                code="empty_response",
+            ).to_sse()
+            try:
+                langfuse_tracing.end_trace(trace_id, output="[empty]")
+            except Exception:
+                logger.exception(
+                    "Failed to end langfuse trace for session=%s", session_id
+                )
+            return
+
         # Save assistant message and emit done event
         async with db_session_factory() as db:
             try:
@@ -312,8 +350,26 @@ async def send_message(
                 )
                 message_id = str(assistant_msg.id)
                 await db.commit()
-            except Exception:  # noqa: BLE001
-                logger.exception("Failed to persist assistant message for session %s", session_id)
+            except Exception:
+                # Don't silently swallow — log full stack and emit an error
+                # frame so the frontend exits its pending state instead of
+                # waiting forever for a terminal SSE event.
+                logger.exception(
+                    "Failed to persist assistant message for session=%s", session_id
+                )
+                yield ChatStreamEvent.error(
+                    message="Failed to save the assistant response.",
+                    code="persist_error",
+                ).to_sse()
+                try:
+                    langfuse_tracing.end_trace(
+                        trace_id, output=final_answer, error="persist_failed"
+                    )
+                except Exception:
+                    logger.exception(
+                        "Failed to end langfuse trace for session=%s", session_id
+                    )
+                return
 
         yield ChatStreamEvent.done(
             session_id=str(session_id),

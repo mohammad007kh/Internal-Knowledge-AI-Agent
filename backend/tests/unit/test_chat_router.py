@@ -593,6 +593,55 @@ class TestSendMessage:
             query="Trace me",
         )
 
+    def test_send_message_empty_final_answer_skips_persist_and_emits_error(
+        self,
+        client: TestClient,
+        mock_session_repo: AsyncMock,
+        mock_message_repo: AsyncMock,
+        mock_pipeline: AsyncMock,
+        mock_tracing: MagicMock,
+    ) -> None:
+        """Pipeline ending with empty final_answer must NOT INSERT a NULL row.
+
+        Reproduces the bug where ``content`` (NOT NULL) crashes with
+        ``NotNullViolationError`` and the SSE stream closes without a
+        terminal frame, locking the frontend textarea.
+        """
+        session_obj = _make_session()
+        mock_session_repo.get.return_value = session_obj
+
+        user_msg = _make_message(role=MessageRole.USER, content="Hello")
+        # Single side-effect — the assistant persist must NOT be called.
+        mock_message_repo.create.side_effect = [user_msg]
+
+        async def _empty_events(  # noqa: ARG001
+            state: object, *, config: object, version: object
+        ) -> AsyncGenerator[Never, None]:
+            return
+            yield
+
+        mock_pipeline.astream_events = _empty_events
+
+        resp = client.post(
+            f"/chat/sessions/{SESSION_ID}/messages",
+            json={"query": "Hello"},
+        )
+
+        assert resp.status_code == 200
+        # Exactly one create call — the user message.  No assistant persist.
+        assert mock_message_repo.create.await_count == 1
+        first_call = mock_message_repo.create.call_args_list[0]
+        assert first_call.kwargs.get("role") == MessageRole.USER
+
+        # SSE body must contain a terminal error frame, not a done frame.
+        body = resp.text
+        assert "error" in body
+        assert "empty_response" in body
+        assert "\"event\":\"done\"" not in body
+
+        # Trace must still be ended so Langfuse doesn't leak open spans.
+        mock_tracing.end_trace.assert_called_once()
+
     def test_send_message_sse_headers(
         self,
         client: TestClient,
