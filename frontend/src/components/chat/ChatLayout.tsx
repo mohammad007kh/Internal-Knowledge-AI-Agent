@@ -53,7 +53,10 @@ export function ChatLayout() {
     },
     onSuccess: (session) => {
       queryClient.invalidateQueries({ queryKey: ['chat-sessions'] })
-      setSessionId(session.id)
+      // `replace` (not `push`) so Back does not return to the empty-state
+      // hero we were just looking at — the user expects Back to leave chat,
+      // not to re-show the CTA they just clicked.
+      setSessionId(session.id, { replace: true })
     },
     onError: () => toast.error('Failed to create session.'),
   })

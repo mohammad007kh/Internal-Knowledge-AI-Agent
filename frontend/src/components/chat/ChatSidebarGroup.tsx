@@ -13,7 +13,7 @@ import {
   MessageSquareIcon,
   PlusIcon,
 } from 'lucide-react'
-import { usePathname, useRouter } from 'next/navigation'
+import { usePathname } from 'next/navigation'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { toast } from 'sonner'
 import { useSelectedSession } from './SelectedSessionContext'
@@ -76,7 +76,6 @@ function writeStored(value: boolean): void {
  */
 export function ChatSidebarGroup({ onNavigate }: ChatSidebarGroupProps) {
   const pathname = usePathname()
-  const router = useRouter()
   const { collapsed: ctxCollapsed, isMobile } = useSidebar()
   const collapsed = isMobile ? false : ctxCollapsed
 
@@ -136,10 +135,10 @@ export function ChatSidebarGroup({ onNavigate }: ChatSidebarGroupProps) {
     },
     onSuccess: (session) => {
       queryClient.invalidateQueries({ queryKey: ['chat-sessions'] })
-      setSessionId(session.id)
-      if (!onChatRoute) {
-        router.push('/chat')
-      }
+      // `setSessionId` now performs the route navigation itself
+      // (`/chat/<id>`), so the explicit `router.push('/chat')` fallback we
+      // used to need from non-chat routes is redundant.
+      setSessionId(session.id, { replace: true })
       onNavigate?.()
     },
     onError: () => toast.error('Failed to create session.'),
@@ -147,13 +146,13 @@ export function ChatSidebarGroup({ onNavigate }: ChatSidebarGroupProps) {
 
   const handleSelect = useCallback(
     (id: string) => {
+      // `setSessionId` is now URL-driven and will navigate to `/chat/<id>`
+      // from any route in the user shell — no manual `router.push('/chat')`
+      // needed.
       setSessionId(id)
-      if (!onChatRoute) {
-        router.push('/chat')
-      }
       onNavigate?.()
     },
-    [setSessionId, onChatRoute, router, onNavigate]
+    [setSessionId, onNavigate]
   )
 
   const openAllChats = useCallback(() => {
