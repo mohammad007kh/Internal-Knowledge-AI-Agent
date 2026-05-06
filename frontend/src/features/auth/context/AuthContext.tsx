@@ -53,36 +53,65 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  const scheduleRefresh = useCallback((token: string) => {
+  // Single helper for writing the JS-readable __access cookie that Edge
+  // middleware gates protected routes on. Every code path that sets
+  // accessToken state MUST also call this — otherwise middleware can't see
+  // the session and bounces /chat → /login while React state thinks the
+  // user is authenticated. Gates Secure on the actual page scheme (not on
+  // NODE_ENV) so a production build served over plain HTTP localhost can
+  // still write the cookie.
+  const writeAccessCookie = useCallback((token: string) => {
     const payload = decodeJwt(token)
     if (!payload) return
-    const msUntilExpiry = payload.exp * 1000 - Date.now()
-    const refreshIn = Math.max(msUntilExpiry - 60_000, 0)
-
-    if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current)
-
-    refreshTimerRef.current = setTimeout(async () => {
-      try {
-        const data = await refreshTokenApi()
-        setAccessTokenState(data.access_token)
-        scheduleRefresh(data.access_token)
-      } catch {
-        // Scheduled refresh failed — drop both the in-memory token *and* the
-        // JS-readable __access cookie. Leaving a stale cookie behind makes the
-        // Edge middleware think we are still authenticated, which cancels any
-        // /login redirect and reloads /chat, triggering another 401 cycle.
-        setAccessTokenState(null)
-        Cookies.remove('__access', { path: '/' })
-      }
-    }, refreshIn)
+    Cookies.set('__access', token, {
+      expires: new Date(payload.exp * 1000),
+      path: '/',
+      sameSite: 'strict',
+      secure: typeof window !== 'undefined' && window.location.protocol === 'https:',
+    })
   }, [])
 
-  // Initial session restore from httpOnly refresh cookie
+  const scheduleRefresh = useCallback(
+    (token: string) => {
+      const payload = decodeJwt(token)
+      if (!payload) return
+      const msUntilExpiry = payload.exp * 1000 - Date.now()
+      const refreshIn = Math.max(msUntilExpiry - 60_000, 0)
+
+      if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current)
+
+      refreshTimerRef.current = setTimeout(async () => {
+        try {
+          const data = await refreshTokenApi()
+          setAccessTokenState(data.access_token)
+          writeAccessCookie(data.access_token)
+          scheduleRefresh(data.access_token)
+        } catch {
+          // Scheduled refresh failed — drop both the in-memory token *and* the
+          // JS-readable __access cookie. Leaving a stale cookie behind makes the
+          // Edge middleware think we are still authenticated, which cancels any
+          // /login redirect and reloads /chat, triggering another 401 cycle.
+          setAccessTokenState(null)
+          Cookies.remove('__access', { path: '/' })
+        }
+      }, refreshIn)
+    },
+    [writeAccessCookie]
+  )
+
+  // Initial session restore from httpOnly refresh cookie. The cookie write
+  // matters: Edge middleware gates /chat etc. on the __access cookie, so an
+  // auto-restored session that didn't write the cookie would leave the user
+  // unable to navigate anywhere protected even though `user` was truthy in
+  // React state — that bug presented to users as "I click Sign in and
+  // nothing happens" because the LoginPage useEffect would fire
+  // router.replace('/chat') and middleware would bounce it right back.
   useEffect(() => {
     ;(async () => {
       try {
         const data = await refreshTokenApi()
         setAccessTokenState(data.access_token)
+        writeAccessCookie(data.access_token)
         scheduleRefresh(data.access_token)
       } catch {
         // No valid session — remain unauthenticated
@@ -94,7 +123,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => {
       if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current)
     }
-  }, [scheduleRefresh])
+  }, [scheduleRefresh, writeAccessCookie])
 
   // Sync token to module-level store so api-client.ts can read it without React
   useEffect(() => {
@@ -104,19 +133,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const setAccessToken = useCallback(
     (token: string) => {
       setAccessTokenState(token)
+      writeAccessCookie(token)
       scheduleRefresh(token)
-      // Write readable cookie for Next.js Edge middleware
-      const payload = decodeJwt(token)
-      if (payload) {
-        Cookies.set('__access', token, {
-          expires: new Date(payload.exp * 1000),
-          sameSite: 'strict',
-          secure: process.env.NODE_ENV === 'production',
-          // NOT httpOnly — must be readable from middleware
-        })
-      }
     },
-    [scheduleRefresh]
+    [scheduleRefresh, writeAccessCookie]
   )
 
   const clearAccessToken = useCallback(() => {
