@@ -5,8 +5,7 @@ import uuid
 from collections.abc import Sequence
 
 from pgvector.sqlalchemy import Vector  # type: ignore[import-not-found]
-from sqlalchemy import ARRAY, bindparam, delete, func, select, text
-from sqlalchemy.dialects.postgresql import UUID as PGUUID
+from sqlalchemy import bindparam, delete, func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.models.chunk import Chunk
@@ -90,23 +89,22 @@ class ChunkRepository:
         # bind is typed with ``Vector``; we additionally ``CAST(:qvec AS
         # vector)`` so pgvector picks the right operator class even if the
         # adapter doesn't kick in (e.g. raw asyncpg fast-path).
+        # Cast all UUID-column comparisons at the SQL level — chunks.source_id
+        # and chunks.embedder_id are Postgres UUID columns, and asyncpg's
+        # prepared-statement plan rejects ``uuid = character varying`` no
+        # matter how we type the bind.  Explicit ``CAST(:bind AS uuid[])`` /
+        # ``CAST(:bind AS uuid)`` in the SQL forces the right operator class
+        # and lets us keep binds as plain strings (much simpler to log /
+        # debug than asyncpg-typed UUID arrays).
         embedder_clause = ""
         extra_binds: list[object] = []
         if embedder_id is not None:
-            embedder_clause = " AND c.embedder_id = :embedder_id"
+            embedder_clause = " AND c.embedder_id = CAST(:embedder_id AS uuid)"
             extra_binds.append(
                 bindparam("embedder_id", value=str(embedder_id))
             )
 
-        # Coerce string ids to uuid.UUID — chunks.source_id is a Postgres
-        # UUID column, and asyncpg refuses to compare it against text values
-        # ("operator does not exist: uuid = character varying").  Bind the
-        # ARRAY column-type explicitly so the prepared statement carries
-        # uuid[] type info instead of text[].
-        source_uuids = [
-            sid if isinstance(sid, uuid.UUID) else uuid.UUID(sid)
-            for sid in source_ids
-        ]
+        source_id_strs = [str(sid) for sid in source_ids]
 
         stmt = text(
             f"""
@@ -116,13 +114,13 @@ class ChunkRepository:
                 c.chunk_text,
                 c.embedding <=> CAST(:qvec AS vector)  AS score
             FROM chunks c
-            WHERE c.source_id = ANY(:source_ids){embedder_clause}
+            WHERE c.source_id = ANY(CAST(:source_ids AS uuid[])){embedder_clause}
             ORDER BY score ASC
             LIMIT :limit
             """
         ).bindparams(
             bindparam("qvec", value=query_embedding, type_=Vector()),
-            bindparam("source_ids", value=source_uuids, type_=ARRAY(PGUUID(as_uuid=True))),
+            bindparam("source_ids", value=source_id_strs),
             bindparam("limit", value=limit),
             *extra_binds,
         )
