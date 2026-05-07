@@ -147,7 +147,32 @@ async def analyze_query(
         return {"query_variants": []}
 
     reflector_feedback: str | None = state.get("reflector_feedback")
-    history = _format_history(state.get("messages"))
+    # load_history may include the current turn (it queries the DB AFTER
+    # chat.py persisted the user row). Drop trailing turns that match the
+    # latest query verbatim — they're already passed as LATEST USER MESSAGE
+    # to the rewriter and would corrupt the history block (the rewriter
+    # would see "User: <query>" both at the bottom of history AND as the
+    # latest message, causing it to refuse to resolve pronouns/follow-ups).
+    msgs = state.get("messages") or []
+    trimmed = list(msgs)
+    while trimmed:
+        last = trimmed[-1]
+        last_content = getattr(last, "content", None)
+        last_type = getattr(last, "type", None) or getattr(last, "role", None)
+        if (
+            isinstance(last_content, str)
+            and last_content.strip() == query
+            and last_type in ("human", "user")
+        ):
+            trimmed.pop()
+        else:
+            break
+    if len(trimmed) != len(msgs):
+        logger.debug(
+            "query_analyzer: trimmed %d trailing turn(s) matching latest query",
+            len(msgs) - len(trimmed),
+        )
+    history = _format_history(trimmed)
 
     span = langfuse.span(  # type: ignore[attr-defined]
         trace_id=state["trace_id"],

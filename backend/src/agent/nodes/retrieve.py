@@ -19,7 +19,13 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 _RESULT_LIMIT = 10
-SIMILARITY_THRESHOLD = 0.4
+# Cosine-distance ceiling for retrieved chunks. The 0.40 default rejected
+# ~95% of relevant chunks on text-embedding-3-small (probed: relevant CV
+# chunks score 0.55-0.65, off-topic noise scores 0.85-1.0 — there's no
+# overlap window, so 0.75 keeps relevant content without admitting noise).
+# TODO: make this per-embedder via a column on `embedders` so swapping to
+# 3-large or BGE doesn't require a code change.
+SIMILARITY_THRESHOLD = 0.75
 
 
 async def retrieve_context(

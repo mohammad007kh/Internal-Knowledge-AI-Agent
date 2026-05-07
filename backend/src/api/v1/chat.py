@@ -244,8 +244,6 @@ async def send_message(
     )
 
     async def event_generator() -> AsyncGenerator[str, None]:
-        from langchain_core.messages import HumanMessage  # noqa: PLC0415
-
         try:
             from langgraph.errors import GraphInterrupt  # noqa: PLC0415
         except ImportError:
@@ -253,7 +251,10 @@ async def send_message(
 
         config: dict[str, Any] = {"configurable": {"thread_id": str(session_id)}}
         initial_state: dict[str, Any] = {
-            "messages": [HumanMessage(content=body.query)],
+            # load_history populates messages from DB (the just-persisted user row
+            # is included) so seeding here would double-insert and confuse the
+            # history-aware analyzer.  Empty seed is correct.
+            "messages": [],
             "retrieved_chunks": [],
             "requires_clarification": False,
             "clarification_question": None,
