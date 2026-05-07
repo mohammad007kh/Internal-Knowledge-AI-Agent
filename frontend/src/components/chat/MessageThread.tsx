@@ -309,38 +309,49 @@ function MessageBubble({ message, sessionId, onCitationClick }: MessageBubblePro
           </div>
         )}
 
-        {!isUser && (
-          <FeedbackButtons
-            sessionId={sessionId}
-            messageId={message.id}
-            initialRating={message.feedback?.rating ?? null}
-          />
-        )}
-
-        {!isUser && (
-          <button
-            type="button"
-            onClick={handleCopy}
-            className="mt-1 inline-flex items-center gap-1 text-xs text-muted-foreground opacity-0 transition-opacity hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100"
-            aria-label="Copy message"
-          >
-            <CopyIcon className="h-3 w-3" /> Copy
-          </button>
-        )}
-
-        <time
+        {/* Bottom meta row: timestamp + (assistant only) feedback + copy.
+            All on one line per UX spec — Option A from the inline-actions
+            review.  Always visible on mobile (no hover dependency); icon-only
+            ghost buttons keep visual weight low. */}
+        <div
           className={cn(
-            'mt-1 block text-[10px]',
+            'mt-1 flex items-center gap-1',
             isUser ? 'text-primary-foreground/70' : 'text-muted-foreground'
           )}
-          dateTime={message.created_at}
-          aria-label={new Date(message.created_at).toLocaleString()}
         >
-          {new Date(message.created_at).toLocaleTimeString([], {
-            hour: '2-digit',
-            minute: '2-digit',
-          })}
-        </time>
+          <time
+            className="text-[10px]"
+            dateTime={message.created_at}
+            aria-label={new Date(message.created_at).toLocaleString()}
+          >
+            {new Date(message.created_at).toLocaleTimeString([], {
+              hour: '2-digit',
+              minute: '2-digit',
+            })}
+          </time>
+
+          {!isUser && (
+            <>
+              <span aria-hidden className="select-none px-0.5 text-[10px] opacity-50">
+                ·
+              </span>
+              <FeedbackButtons
+                sessionId={sessionId}
+                messageId={message.id}
+                initialRating={message.feedback?.rating ?? null}
+              />
+              <button
+                type="button"
+                onClick={handleCopy}
+                className="inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                aria-label="Copy message"
+                title="Copy message"
+              >
+                <CopyIcon className="h-3.5 w-3.5" aria-hidden />
+              </button>
+            </>
+          )}
+        </div>
       </div>
     </div>
   )

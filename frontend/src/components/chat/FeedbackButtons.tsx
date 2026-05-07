@@ -73,7 +73,7 @@ export function FeedbackButtons({ sessionId, messageId, initialRating }: Feedbac
   }, [comment, mutation])
 
   return (
-    <div className="mt-1 flex items-center gap-0.5" aria-label="Message feedback">
+    <div className="flex items-center gap-0.5" aria-label="Message feedback">
       <Button
         size="icon"
         variant="ghost"
