@@ -18,6 +18,12 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { toast } from 'sonner'
 import { useSelectedSession } from './SelectedSessionContext'
 import { SessionListSheet } from './SessionListSheet'
+import {
+  SessionDeleteDialog,
+  SessionEditInput,
+  SessionRowKebab,
+  useSessionRowActions,
+} from './SessionRowActions'
 
 interface ChatSession {
   id: string
@@ -36,6 +42,78 @@ interface SessionsResponse {
 
 interface ChatSidebarGroupProps {
   onNavigate?: () => void
+}
+
+interface SidebarSessionRowProps {
+  session: ChatSession
+  isActive: boolean
+  onSelect: () => void
+}
+
+/**
+ * Single recent-chat row in the sidebar disclosure. Owns its own
+ * `useSessionRowActions` so the kebab + inline rename input are
+ * fully self-contained — the parent group just hands us the session
+ * and the select callback.
+ *
+ * The dialog is rendered alongside each row (rather than once at the
+ * group level) because each row owns its own dialog-open state via the
+ * shared hook. Only one can be open at a time in practice — clicking
+ * Delete on row B while row A's dialog is open reuses A's state slot
+ * via the kebab close, but each row is a stable component instance and
+ * the dialog is portalled, so this is safe.
+ */
+function SidebarSessionRow({ session, isActive, onSelect }: SidebarSessionRowProps) {
+  const actions = useSessionRowActions(session)
+
+  return (
+    <li>
+      <div
+        className={cn(
+          'group flex w-full items-center gap-2 rounded-md px-3 py-1.5 text-left text-xs transition-colors',
+          isActive
+            ? 'bg-accent text-accent-foreground'
+            : 'text-muted-foreground hover:bg-accent/50 hover:text-foreground'
+        )}
+      >
+        <MessageSquareIcon className="h-3 w-3 shrink-0 opacity-70" aria-hidden />
+        {actions.isEditing ? (
+          <div
+            className="flex flex-1 items-center gap-1"
+            onClick={(e) => e.stopPropagation()}
+            onKeyDown={(e) => e.stopPropagation()}
+          >
+            <SessionEditInput
+              initialTitle={session.title}
+              value={actions.editTitle}
+              onChange={actions.setEditTitle}
+              onCommit={actions.commitEdit}
+              onCancel={actions.cancelEdit}
+            />
+          </div>
+        ) : (
+          <>
+            <button
+              type="button"
+              onClick={onSelect}
+              aria-current={isActive ? 'page' : undefined}
+              aria-label={`Chat session: ${session.title}`}
+              className="min-w-0 flex-1 truncate text-left"
+            >
+              {session.title}
+            </button>
+            <SessionRowKebab session={session} actions={actions} />
+          </>
+        )}
+      </div>
+      <SessionDeleteDialog
+        open={actions.deleteOpen}
+        onOpenChange={actions.setDeleteOpen}
+        onConfirm={actions.confirmDelete}
+        title={session.title}
+      />
+    </li>
+  )
 }
 
 const STORAGE_KEY = 'ui:nav-group-chat'
@@ -244,27 +322,14 @@ export function ChatSidebarGroup({ onNavigate }: ChatSidebarGroupProps) {
             </p>
           ) : (
             <ul className="space-y-0.5">
-              {sessions.map((session) => {
-                const isActive = session.id === sessionId && onChatRoute
-                return (
-                  <li key={session.id}>
-                    <button
-                      type="button"
-                      onClick={() => handleSelect(session.id)}
-                      aria-current={isActive ? 'page' : undefined}
-                      className={cn(
-                        'flex w-full items-center gap-2 rounded-md px-3 py-1.5 text-left text-xs transition-colors',
-                        isActive
-                          ? 'bg-accent text-accent-foreground'
-                          : 'text-muted-foreground hover:bg-accent/50 hover:text-foreground'
-                      )}
-                    >
-                      <MessageSquareIcon className="h-3 w-3 shrink-0 opacity-70" aria-hidden />
-                      <span className="flex-1 truncate">{session.title}</span>
-                    </button>
-                  </li>
-                )
-              })}
+              {sessions.map((session) => (
+                <SidebarSessionRow
+                  key={session.id}
+                  session={session}
+                  isActive={session.id === sessionId && onChatRoute}
+                  onSelect={() => handleSelect(session.id)}
+                />
+              ))}
             </ul>
           )}
 

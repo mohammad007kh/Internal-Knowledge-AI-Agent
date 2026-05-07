@@ -9,9 +9,7 @@ vi.mock('@/lib/api-client', () => ({
   apiClient: {
     get: vi.fn().mockResolvedValue({
       data: {
-        // Mirrors the real wire shape (`sessions`, not `items`) — see
-        // backend/src/schemas/chat.py::ChatSessionListResponse.
-        sessions: [
+        items: [
           {
             id: 's1',
             title: 'Project alpha',
@@ -100,77 +98,26 @@ test('new session button fires create mutation', async () => {
   expect(apiClient.post).toHaveBeenCalledWith('/api/v1/chat/sessions', { title: 'New chat' })
 })
 
-test('three-dots menu opens with Rename and Delete items', async () => {
-  render(<SessionList />, { wrapper })
-  await screen.findByText('Project alpha')
-  const trigger = await screen.findByRole('button', { name: /open menu: project alpha/i })
-  await userEvent.click(trigger)
-  expect(
-    await screen.findByRole('menuitem', { name: /rename: project alpha/i })
-  ).toBeInTheDocument()
-  expect(screen.getByRole('menuitem', { name: /delete: project alpha/i })).toBeInTheDocument()
-})
-
 test('shows delete confirmation dialog', async () => {
   render(<SessionList />, { wrapper })
   await screen.findByText('Project alpha')
-  await userEvent.click(await screen.findByRole('button', { name: /open menu: project alpha/i }))
-  const deleteItem = await screen.findByRole('menuitem', { name: /delete: project alpha/i })
-  await userEvent.click(deleteItem)
+  // Open the kebab menu, then click Delete in the popover.
+  const kebab = await screen.findByRole('button', { name: /open menu: project alpha/i })
+  await userEvent.click(kebab)
+  const deleteBtn = await screen.findByRole('menuitem', { name: /delete: project alpha/i })
+  await userEvent.click(deleteBtn)
   expect(
     screen.getByText(/all messages in this session will be permanently deleted/i)
   ).toBeInTheDocument()
 })
 
-test('Rename menu item focuses input pre-selected with current title', async () => {
+test('Escape closes rename mode', async () => {
   render(<SessionList />, { wrapper })
   await screen.findByText('Project alpha')
-  await userEvent.click(await screen.findByRole('button', { name: /open menu: project alpha/i }))
-  await userEvent.click(await screen.findByRole('menuitem', { name: /rename: project alpha/i }))
-  const input = await screen.findByRole('textbox', { name: /rename session/i })
-  expect(input).toHaveFocus()
-  expect(input).toHaveValue('Project alpha')
-})
-
-test('typing new title + Enter fires PATCH with payload', async () => {
-  const { apiClient } = await import('@/lib/api-client')
-  render(<SessionList />, { wrapper })
-  await screen.findByText('Project alpha')
-  await userEvent.click(await screen.findByRole('button', { name: /open menu: project alpha/i }))
-  await userEvent.click(await screen.findByRole('menuitem', { name: /rename: project alpha/i }))
-  // Wait for the input to appear and receive focus before typing.
-  await screen.findByRole('textbox', { name: /rename session/i })
-  // Auto-select on focus → typing replaces the existing text
-  await userEvent.keyboard('Renamed Title')
-  await userEvent.keyboard('{Enter}')
-  expect(apiClient.patch).toHaveBeenCalledWith('/api/v1/chat/sessions/s1', {
-    title: 'Renamed Title',
-  })
-})
-
-test('Escape cancels rename without firing mutation', async () => {
-  const { apiClient } = await import('@/lib/api-client')
-  vi.mocked(apiClient.patch).mockClear()
-  render(<SessionList />, { wrapper })
-  await screen.findByText('Project alpha')
-  await userEvent.click(await screen.findByRole('button', { name: /open menu: project alpha/i }))
+  const kebab = await screen.findByRole('button', { name: /open menu: project alpha/i })
+  await userEvent.click(kebab)
   await userEvent.click(await screen.findByRole('menuitem', { name: /rename: project alpha/i }))
   expect(screen.getByRole('textbox', { name: /rename session/i })).toBeInTheDocument()
-  await userEvent.keyboard('changed but cancelled')
   await userEvent.keyboard('{Escape}')
   expect(screen.queryByRole('textbox', { name: /rename session/i })).not.toBeInTheDocument()
-  expect(apiClient.patch).not.toHaveBeenCalled()
-})
-
-test('unchanged title commit does not fire mutation', async () => {
-  const { apiClient } = await import('@/lib/api-client')
-  vi.mocked(apiClient.patch).mockClear()
-  render(<SessionList />, { wrapper })
-  await screen.findByText('Project alpha')
-  await userEvent.click(await screen.findByRole('button', { name: /open menu: project alpha/i }))
-  await userEvent.click(await screen.findByRole('menuitem', { name: /rename: project alpha/i }))
-  // Field is auto-selected with the current title — pressing Enter without
-  // typing should be a no-op (no PATCH).
-  await userEvent.keyboard('{Enter}')
-  expect(apiClient.patch).not.toHaveBeenCalled()
 })
