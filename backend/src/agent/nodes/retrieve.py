@@ -57,7 +57,12 @@ async def retrieve_context(
     if not query:
         return {"retrieved_chunks": []}
 
-    span = langfuse.start_span(
+    # Langfuse v2 SDK uses .span(...) (not .start_span(...) — that's v3).
+    # Project is pinned to <3 since v3 dropped the .trace() API used elsewhere
+    # (commit 1e64fe1).  Match every other node's pattern: pass trace_id so
+    # the span hangs off the request's trace.
+    span = langfuse.span(  # type: ignore[attr-defined]
+        trace_id=state["trace_id"],
         name="retrieve_context",
         input={"query": query, "source_ids": source_ids},
     )

@@ -58,7 +58,7 @@ class TestRetrieveContext:
 
         mock_langfuse = MagicMock()
         mock_span = MagicMock()
-        mock_langfuse.start_span.return_value = mock_span
+        mock_langfuse.span.return_value = mock_span
 
         result = await retrieve_context(
             base_state,
@@ -95,7 +95,7 @@ class TestRetrieveContext:
         mock_chunk_repo.similarity_search.return_value = [(fake_chunk, 0.05)]
 
         mock_langfuse = MagicMock()
-        mock_langfuse.start_span.return_value = MagicMock()
+        mock_langfuse.span.return_value = MagicMock()
 
         result = await retrieve_context(
             base_state,
@@ -124,7 +124,7 @@ class TestRetrieveContext:
         )
 
         assert result["retrieved_chunks"] == []
-        mock_langfuse.start_span.assert_not_called()
+        mock_langfuse.span.assert_not_called()
 
     async def test_empty_query_returns_empty(self, base_state):
         base_state["query"] = "   "
@@ -168,7 +168,7 @@ class TestRetrieveContext:
         mock_chunk_repo.similarity_search.return_value = [(fake_chunk, 0.05)]
 
         mock_langfuse = MagicMock()
-        mock_langfuse.start_span.return_value = MagicMock()
+        mock_langfuse.span.return_value = MagicMock()
 
         result = await retrieve_context(
             base_state,
@@ -196,7 +196,7 @@ class TestRetrieveContext:
         mock_chunk_repo = AsyncMock()
         mock_chunk_repo.similarity_search.return_value = []
         mock_langfuse = MagicMock()
-        mock_langfuse.start_span.return_value = MagicMock()
+        mock_langfuse.span.return_value = MagicMock()
 
         await retrieve_context(
             base_state,
