@@ -237,7 +237,15 @@ async def send_message(
     # turn — manual rename preservation hinges on the placeholder title
     # being intact at request entry.  We re-check before the LLM call so
     # a concurrent rename in another tab still wins the race.
-    should_title = session_obj.title == "New chat"
+    #
+    # Accept all three default-title sentinels that exist across the create
+    # paths in this codebase (lowercase 'New chat' from the frontend, capital
+    # 'New Chat' from ChatSessionCreate's pydantic default, 'New conversation'
+    # from the model + repo + service defaults).  Any of them indicates the
+    # user has not yet chosen / been-given a real title, so titling is fair
+    # game — but a manually-renamed title (anything else) is preserved.
+    _PLACEHOLDER_TITLES = {"New chat", "New Chat", "New conversation"}
+    should_title = session_obj.title in _PLACEHOLDER_TITLES
 
     # Persist the user message before the response stream begins so the
     # follow-up generator (which opens fresh sessions) sees a consistent state.
