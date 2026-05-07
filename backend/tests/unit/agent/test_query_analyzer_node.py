@@ -129,11 +129,16 @@ async def test_reflector_feedback_fed_back_into_llm_prompt() -> None:
 
 @pytest.mark.asyncio
 async def test_no_reflector_feedback_keeps_prompt_clean() -> None:
-    """Without feedback, the user message is just the query (no retry preamble)."""
+    """Without feedback, the user message has the query under the LATEST
+    USER MESSAGE label and no retry preamble."""
     http_client = _openai_returning({"variants": ["v1"]})
     resolver = _resolver_for(http_client)
     await analyze_query(_state(), ai_model_resolver=resolver, langfuse=_langfuse())
 
     kwargs = http_client.chat.completions.create.await_args.kwargs
     user_msg = next(m for m in kwargs["messages"] if m["role"] == "user")
-    assert user_msg["content"] == "What is the refund policy?"
+    # The query is now wrapped in a labelled section so the rewriter knows
+    # which line to act on; "rejected because" preamble must be absent.
+    assert "LATEST USER MESSAGE:" in user_msg["content"]
+    assert "What is the refund policy?" in user_msg["content"]
+    assert "rejected because" not in user_msg["content"]
