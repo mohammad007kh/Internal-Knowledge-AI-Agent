@@ -50,6 +50,18 @@ function wrapper({ children }: { children: ReactNode }) {
   return createElement(QueryClientProvider, { client: queryClient }, children)
 }
 
+/**
+ * Variant of {@link wrapper} that lets the test pre-seed the QueryClient with
+ * cached `['chat-sessions']` data. We need to share the same client between
+ * the hook render and the post-stream assertions, so the test owns the
+ * client and passes it through.
+ */
+function makeWrapperWithClient(client: QueryClient) {
+  return function Wrapped({ children }: { children: ReactNode }) {
+    return createElement(QueryClientProvider, { client }, children)
+  }
+}
+
 describe('useChat', () => {
   afterEach(() => {
     vi.restoreAllMocks()
@@ -204,5 +216,86 @@ describe('useChat', () => {
     expect(result.current.isPending).toBe(false)
 
     pending.close()
+  })
+
+  // Auto-title cache update — backend emits `event: title` on first user
+  // turn after PATCHing the session.title. Frontend optimistically patches
+  // the cache so the sidebar updates without a refetch round-trip.
+  it('patches the chat-sessions cache when SSE emits a title for a placeholder session', async () => {
+    const sseBody =
+      'event: title\ndata: {"title":"New summary"}\n\n' +
+      'event: done\ndata: {"message_id":"m1"}\n\n'
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        body: makeStream([sseBody]),
+      })
+    )
+
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    })
+    queryClient.setQueryData(['chat-sessions'], {
+      sessions: [{ id: 's1', title: 'New chat', message_count: 0 }],
+      total: 1,
+    })
+
+    const { result } = renderHook(() => useChat({ sessionId: 's1' }), {
+      wrapper: makeWrapperWithClient(queryClient),
+    })
+
+    await act(async () => {
+      result.current.send('Tell me about widgets')
+    })
+
+    await waitFor(() => {
+      const cached = queryClient.getQueryData<{
+        sessions: Array<{ id: string; title: string }>
+      }>(['chat-sessions'])
+      expect(cached?.sessions[0]?.title).toBe('New summary')
+    })
+  })
+
+  // Manual-rename guard: if the user has already renamed, the title SSE
+  // event must NOT clobber their choice.
+  it('does not overwrite a user-renamed title when SSE emits a title', async () => {
+    const sseBody =
+      'event: title\ndata: {"title":"New summary"}\n\n' +
+      'event: done\ndata: {"message_id":"m2"}\n\n'
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        body: makeStream([sseBody]),
+      })
+    )
+
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    })
+    queryClient.setQueryData(['chat-sessions'], {
+      sessions: [{ id: 's1', title: 'My custom name', message_count: 0 }],
+      total: 1,
+    })
+
+    const { result } = renderHook(() => useChat({ sessionId: 's1' }), {
+      wrapper: makeWrapperWithClient(queryClient),
+    })
+
+    await act(async () => {
+      result.current.send('Tell me about widgets')
+    })
+
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 0))
+    })
+
+    const cached = queryClient.getQueryData<{
+      sessions: Array<{ id: string; title: string }>
+    }>(['chat-sessions'])
+    expect(cached?.sessions[0]?.title).toBe('My custom name')
   })
 })

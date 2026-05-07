@@ -12,6 +12,21 @@ export interface OptimisticMessage {
   created_at: string
 }
 
+/**
+ * Minimal shape of the `['chat-sessions']` React Query cache used for the
+ * optimistic title patch. Mirrors `SessionsResponse` in `SessionList.tsx`
+ * and `ChatSidebarGroup.tsx` — kept loose here because we only touch the
+ * `id`/`title` fields of each item and don't want to drag in the full
+ * ChatSession type for an internal cache update.
+ */
+interface SessionsListSnapshot {
+  // Matches ChatSessionListResponse on the wire (backend/src/schemas/chat.py)
+  // — `sessions`, not `items`. Renamed from `items` in commit ebb9abd to
+  // align frontend cache with the actual response shape.
+  sessions: Array<{ id: string; title: string; [key: string]: unknown }>
+  total: number
+}
+
 export interface Clarification {
   question: string
   messageId: string
@@ -275,6 +290,33 @@ export function useChat({ sessionId }: { sessionId: string | null }): UseChatRet
       })
       .catch(() => {})
   }, [stream.isStreaming, clearOptimistic])
+
+  // Auto-titling: when the backend emits an SSE `title` frame on the first
+  // user turn, optimistically patch the chat-sessions list cache so the
+  // sidebar updates immediately. The backend has already PATCHed the title
+  // via the repo before emitting this frame, so the DB is canonical; this
+  // path only avoids the visual lag of waiting for the next list refetch.
+  //
+  // Cache shape: backend returns ChatSessionListResponse = {sessions, total}
+  // (renamed from items in commit ebb9abd to match the wire). Manual-rename
+  // guard accepts all 3 placeholder titles in the codebase ('New chat',
+  // 'New Chat', 'New conversation') — same set the backend's auto-title
+  // gate accepts — so a manually-renamed title in any form is preserved.
+  useEffect(() => {
+    const newTitle = stream.lastTitle
+    if (!newTitle || !sessionId) return
+    const PLACEHOLDERS = new Set(['New chat', 'New Chat', 'New conversation'])
+    queryClient.setQueryData<SessionsListSnapshot>(['chat-sessions'], (prev) => {
+      if (!prev) return prev
+      const cached = prev.sessions.find((s) => s.id === sessionId)
+      if (!cached || !PLACEHOLDERS.has(cached.title)) return prev
+      return {
+        ...prev,
+        sessions: prev.sessions.map((s) => (s.id === sessionId ? { ...s, title: newTitle } : s)),
+      }
+    })
+    queryClient.invalidateQueries({ queryKey: ['chat-sessions'] })
+  }, [stream.lastTitle, sessionId, queryClient])
 
   return {
     send,

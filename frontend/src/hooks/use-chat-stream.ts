@@ -39,6 +39,17 @@ export interface UseChatStreamReturn {
   errorMessage: string | null
   lastMessageId: string | null
   /**
+   * Title produced by the backend on the first user turn of a session.
+   *
+   * Emitted via SSE `event: title` at the START of the stream, before any
+   * tokens. Backend has already PATCHed the session title before emitting,
+   * so the DB is the source of truth — consumers use this purely to
+   * optimistically refresh React Query caches for instant sidebar updates.
+   *
+   * Reset to `null` on every `sendMessage()` call.
+   */
+  lastTitle: string | null
+  /**
    * Clears local stream state — useful after the caller has persisted the
    * final assistant message into the query cache and wants a fresh buffer.
    */
@@ -105,6 +116,7 @@ export function useChatStream(): UseChatStreamReturn {
   const [guardrailMessage, setGuardrailMessage] = useState<string | null>(null)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const [lastMessageId, setLastMessageId] = useState<string | null>(null)
+  const [lastTitle, setLastTitle] = useState<string | null>(null)
 
   const controllerRef = useRef<AbortController | null>(null)
 
@@ -129,6 +141,7 @@ export function useChatStream(): UseChatStreamReturn {
     setGuardrailMessage(null)
     setErrorMessage(null)
     setLastMessageId(null)
+    setLastTitle(null)
   }, [])
 
   const sendMessage = useCallback(
@@ -148,6 +161,7 @@ export function useChatStream(): UseChatStreamReturn {
       setGuardrailMessage(null)
       setErrorMessage(null)
       setLastMessageId(null)
+      setLastTitle(null)
 
       const token = getToken()
       const url = `${API_BASE}/api/v1/chat/sessions/${sessionId}/messages`
@@ -262,6 +276,17 @@ export function useChatStream(): UseChatStreamReturn {
                 sawTerminalEvent = true
                 break
               }
+              case 'title': {
+                // Auto-generated session title from the first user turn.
+                // Backend persists via PATCH BEFORE emitting this frame, so
+                // the DB is canonical; this state exists only so the
+                // consumer can optimistically refresh the sidebar cache.
+                const payload = safeJsonParse<{ title?: string }>(frame.data)
+                if (payload?.title) {
+                  setLastTitle(payload.title)
+                }
+                break
+              }
               case 'done': {
                 const payload = safeJsonParse<{ message_id?: string }>(frame.data)
                 if (payload?.message_id) {
@@ -322,6 +347,7 @@ export function useChatStream(): UseChatStreamReturn {
     guardrailMessage,
     errorMessage,
     lastMessageId,
+    lastTitle,
     reset,
   }
 }
