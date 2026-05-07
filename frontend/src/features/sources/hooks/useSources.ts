@@ -34,10 +34,22 @@ export const sourcesKeys = {
 // Queries
 // ---------------------------------------------------------------------------
 
-export function useListSources() {
+export interface UseListSourcesOptions {
+  /**
+   * When `true`, refetch every 5 seconds. Callers should set this when any
+   * visible row is in the `running` phase so the verb column transitions out
+   * of "Working on it…" promptly. When `false` (default), the query stays on
+   * the React Query default (no polling, refetch on focus).
+   */
+  pollWhileRunning?: boolean
+}
+
+export function useListSources(options: UseListSourcesOptions = {}) {
+  const { pollWhileRunning = false } = options
   return useQuery({
     queryKey: sourcesKeys.list(),
     queryFn: () => listSourcesApi(),
+    refetchInterval: pollWhileRunning ? 5_000 : false,
   })
 }
 

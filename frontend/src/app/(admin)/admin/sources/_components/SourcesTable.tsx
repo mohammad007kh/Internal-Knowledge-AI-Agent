@@ -1,5 +1,6 @@
 'use client'
 
+import { ActionCell } from '@/app/(admin)/admin/sources/_components/ActionCell'
 import { IngestionStrip } from '@/app/(admin)/admin/sources/_components/IngestionStrip'
 import { SourceRowCard } from '@/app/(admin)/admin/sources/_components/SourceRowCard'
 import {
@@ -7,6 +8,7 @@ import {
   type StatusFilter,
   type TypeGroup,
 } from '@/app/(admin)/admin/sources/_components/SourcesToolbar'
+import { derivePhase } from '@/app/(admin)/admin/sources/_components/sourcePhase'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -234,7 +236,18 @@ function SourcesEmpty({ filtered, onClearFilters }: SourcesEmptyProps) {
 }
 
 export function SourcesTable() {
-  const { data, isLoading } = useListSources()
+  // Read without polling first to compute whether any row is in `running`
+  // phase. Then re-subscribe with `pollWhileRunning` so the verb column
+  // transitions out of "Working on it…" promptly. Both calls share a single
+  // React Query cache entry (same query key), so this is one network request.
+  const { data: pollingProbe } = useListSources()
+  const probeSources = useMemo(() => pollingProbe?.items ?? [], [pollingProbe?.items])
+  const hasRunningRow = useMemo(
+    () => probeSources.some((s) => derivePhase(s) === 'running'),
+    [probeSources]
+  )
+
+  const { data, isLoading } = useListSources({ pollWhileRunning: hasRunningRow })
   const deleteMutation = useDeleteSource()
   const syncMutation = useTriggerSync()
 
@@ -332,13 +345,7 @@ export function SourcesTable() {
           {/* Mobile card list */}
           <div className="space-y-3 sm:hidden">
             {filtered.map((source) => (
-              <SourceRowCard
-                key={source.id}
-                source={source}
-                isSyncing={syncMutation.isPending && syncMutation.variables === source.id}
-                onSync={handleSyncOne}
-                onDelete={setDeletingId}
-              />
+              <SourceRowCard key={source.id} source={source} onDelete={setDeletingId} />
             ))}
           </div>
 
@@ -350,6 +357,7 @@ export function SourcesTable() {
                   <TableHead className="min-w-[220px]">Name</TableHead>
                   <TableHead>Type</TableHead>
                   <TableHead>Mode</TableHead>
+                  <TableHead className="min-w-[180px]">Next step</TableHead>
                   <TableHead className="min-w-[320px]">Ingestion</TableHead>
                   <TableHead>Last synced</TableHead>
                   <TableHead className="text-right">Actions</TableHead>
@@ -389,6 +397,9 @@ export function SourcesTable() {
                       </TableCell>
                       <TableCell>
                         <SourceModeBadge mode={source.source_mode} />
+                      </TableCell>
+                      <TableCell>
+                        <ActionCell source={source} />
                       </TableCell>
                       <TableCell>
                         <IngestionStrip source={source} />

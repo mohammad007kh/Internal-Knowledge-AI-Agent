@@ -1,19 +1,22 @@
 'use client'
 
+import { ActionCell } from '@/app/(admin)/admin/sources/_components/ActionCell'
 import { IngestionStrip } from '@/app/(admin)/admin/sources/_components/IngestionStrip'
 import { Button } from '@/components/ui/button'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { formatRelative } from '@/features/sources/format'
 import { SourceModeBadge, getSourceTypeMeta } from '@/features/sources/source-ui'
 import type { SourceListItem } from '@/lib/api/sources'
-import { Eye, Loader2, MoreHorizontal, RefreshCw, Trash2 } from 'lucide-react'
+import { Eye, MoreHorizontal, Trash2 } from 'lucide-react'
 import Link from 'next/link'
 import { useState } from 'react'
 
 interface SourceRowCardProps {
   source: SourceListItem
-  isSyncing: boolean
-  onSync: (id: string) => void
+  /** Retained for prop compatibility; mobile action now lives in `ActionCell`. */
+  isSyncing?: boolean
+  /** Retained for prop compatibility; mobile action now lives in `ActionCell`. */
+  onSync?: (id: string) => void
   onDelete: (id: string) => void
 }
 
@@ -21,7 +24,7 @@ interface SourceRowCardProps {
  * Compact card representation of a source row, used on small viewports where
  * the table would otherwise force horizontal scroll.
  */
-export function SourceRowCard({ source, isSyncing, onSync, onDelete }: SourceRowCardProps) {
+export function SourceRowCard({ source, onDelete }: SourceRowCardProps) {
   const [menuOpen, setMenuOpen] = useState(false)
   const meta = getSourceTypeMeta(source.source_type)
   const Icon = meta.icon
@@ -94,22 +97,8 @@ export function SourceRowCard({ source, isSyncing, onSync, onDelete }: SourceRow
         <p className="mt-0.5 text-foreground">{formatRelative(source.last_synced_at)}</p>
       </div>
 
-      <div className="mt-3 flex items-center justify-end">
-        <Button
-          variant="outline"
-          size="sm"
-          aria-label={`Sync ${source.name}`}
-          onClick={() => onSync(source.id)}
-          disabled={isSyncing}
-          className="gap-1.5"
-        >
-          {isSyncing ? (
-            <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
-          ) : (
-            <RefreshCw className="h-4 w-4" aria-hidden />
-          )}
-          Sync now
-        </Button>
+      <div className="mt-3">
+        <ActionCell source={source} layout="block" />
       </div>
     </div>
   )
