@@ -30,6 +30,7 @@ from src.api.v1.chat import (  # noqa: E402
     _get_chat_session_service,
     _get_db_session_factory,
     _get_pipeline,
+    _get_title_generator,
     _get_tracing,
     router,
 )
@@ -157,6 +158,14 @@ def mock_chat_session_service() -> AsyncMock:
 
 
 @pytest.fixture()
+def mock_title_generator() -> AsyncMock:
+    """Default: returns None so existing tests are unaffected by the titler hook."""
+    svc = AsyncMock()
+    svc.generate_title = AsyncMock(return_value=None)
+    return svc
+
+
+@pytest.fixture()
 def client(
     current_user: User,
     db: AsyncMock,
@@ -165,6 +174,7 @@ def client(
     mock_pipeline: AsyncMock,
     mock_tracing: MagicMock,
     mock_chat_session_service: AsyncMock,
+    mock_title_generator: AsyncMock,
 ) -> Generator[TestClient, None, None]:
     app = FastAPI()
     register_exception_handlers(app)
@@ -179,6 +189,7 @@ def client(
     app.dependency_overrides[_get_pipeline] = lambda: mock_pipeline
     app.dependency_overrides[_get_tracing] = lambda: mock_tracing
     app.dependency_overrides[_get_chat_session_service] = lambda: mock_chat_session_service
+    app.dependency_overrides[_get_title_generator] = lambda: mock_title_generator
 
     with TestClient(app, raise_server_exceptions=False) as tc:
         yield tc
@@ -672,3 +683,149 @@ class TestSendMessage:
 
         assert resp.headers.get("cache-control") == "no-cache"
         assert resp.headers.get("x-accel-buffering") == "no"
+
+
+# ---------------------------------------------------------------------------
+# Auto-titling — gates and SSE wiring
+# ---------------------------------------------------------------------------
+
+
+class TestAutoTitling:
+    """POST /chat/sessions/{id}/messages — first-turn auto-title behaviour."""
+
+    @staticmethod
+    def _empty_pipeline_events() -> "Any":
+        async def _events(  # noqa: ARG001
+            state: object, *, config: object, version: object
+        ) -> AsyncGenerator[Never, None]:
+            return
+            yield
+        return _events
+
+    def test_auto_titles_when_session_title_is_new_chat(
+        self,
+        client: TestClient,
+        mock_session_repo: AsyncMock,
+        mock_message_repo: AsyncMock,
+        mock_pipeline: AsyncMock,
+        mock_title_generator: AsyncMock,
+    ) -> None:
+        """When session.title == 'New chat' and titler returns a string,
+        the session is renamed AND the first SSE frame is event: title."""
+        session_obj = _make_session(title="New chat")
+        mock_session_repo.get.return_value = session_obj
+
+        user_msg = _make_message(role=MessageRole.USER, content="Tell me about Q3")
+        assistant_msg = _make_message(role=MessageRole.ASSISTANT, content="OK")
+        mock_message_repo.create.side_effect = [user_msg, assistant_msg]
+
+        mock_title_generator.generate_title = AsyncMock(return_value="Q3 EMEA growth")
+        mock_pipeline.astream_events = self._empty_pipeline_events()
+
+        resp = client.post(
+            f"/chat/sessions/{SESSION_ID}/messages",
+            json={"query": "Tell me about Q3"},
+        )
+
+        assert resp.status_code == 200
+        # Titler was actually invoked
+        mock_title_generator.generate_title.assert_awaited_once_with("Tell me about Q3")
+        # Session was renamed in the request-scoped DB session
+        mock_session_repo.rename.assert_awaited_once()
+        rename_args = mock_session_repo.rename.call_args
+        assert rename_args.args[1] == SESSION_ID
+        assert rename_args.args[2] == "Q3 EMEA growth"
+        # SSE body's first data frame carries the title event
+        body = resp.text
+        assert '"event":"title"' in body
+        assert '"title":"Q3 EMEA growth"' in body
+        # Title frame must precede the done frame in the stream
+        assert body.index('"event":"title"') < body.index('"event":"done"')
+
+    def test_no_titler_call_when_title_already_set(
+        self,
+        client: TestClient,
+        mock_session_repo: AsyncMock,
+        mock_message_repo: AsyncMock,
+        mock_pipeline: AsyncMock,
+        mock_title_generator: AsyncMock,
+    ) -> None:
+        """User-renamed sessions must skip the titler entirely."""
+        session_obj = _make_session(title="My custom title")
+        mock_session_repo.get.return_value = session_obj
+
+        user_msg = _make_message(role=MessageRole.USER, content="hi")
+        assistant_msg = _make_message(role=MessageRole.ASSISTANT, content="hello")
+        mock_message_repo.create.side_effect = [user_msg, assistant_msg]
+        mock_pipeline.astream_events = self._empty_pipeline_events()
+
+        resp = client.post(
+            f"/chat/sessions/{SESSION_ID}/messages",
+            json={"query": "hi"},
+        )
+
+        assert resp.status_code == 200
+        mock_title_generator.generate_title.assert_not_awaited()
+        mock_session_repo.rename.assert_not_awaited()
+        assert '"event":"title"' not in resp.text
+
+    def test_no_title_event_when_titler_returns_none(
+        self,
+        client: TestClient,
+        mock_session_repo: AsyncMock,
+        mock_message_repo: AsyncMock,
+        mock_pipeline: AsyncMock,
+        mock_title_generator: AsyncMock,
+    ) -> None:
+        """Timeout / refusal / empty: silent fallback — no rename, no SSE frame."""
+        session_obj = _make_session(title="New chat")
+        mock_session_repo.get.return_value = session_obj
+
+        user_msg = _make_message(role=MessageRole.USER, content="hi")
+        assistant_msg = _make_message(role=MessageRole.ASSISTANT, content="hello")
+        mock_message_repo.create.side_effect = [user_msg, assistant_msg]
+
+        mock_title_generator.generate_title = AsyncMock(return_value=None)
+        mock_pipeline.astream_events = self._empty_pipeline_events()
+
+        resp = client.post(
+            f"/chat/sessions/{SESSION_ID}/messages",
+            json={"query": "hi"},
+        )
+
+        assert resp.status_code == 200
+        mock_title_generator.generate_title.assert_awaited_once()
+        mock_session_repo.rename.assert_not_awaited()
+        assert '"event":"title"' not in resp.text
+
+    def test_titler_exception_falls_back_silently(
+        self,
+        client: TestClient,
+        mock_session_repo: AsyncMock,
+        mock_message_repo: AsyncMock,
+        mock_pipeline: AsyncMock,
+        mock_title_generator: AsyncMock,
+    ) -> None:
+        """If the titler itself raises, the chat path must continue uninterrupted."""
+        session_obj = _make_session(title="New chat")
+        mock_session_repo.get.return_value = session_obj
+
+        user_msg = _make_message(role=MessageRole.USER, content="hi")
+        assistant_msg = _make_message(role=MessageRole.ASSISTANT, content="hello")
+        mock_message_repo.create.side_effect = [user_msg, assistant_msg]
+
+        mock_title_generator.generate_title = AsyncMock(
+            side_effect=RuntimeError("titler exploded")
+        )
+        mock_pipeline.astream_events = self._empty_pipeline_events()
+
+        resp = client.post(
+            f"/chat/sessions/{SESSION_ID}/messages",
+            json={"query": "hi"},
+        )
+
+        assert resp.status_code == 200
+        mock_session_repo.rename.assert_not_awaited()
+        assert '"event":"title"' not in resp.text
+        # done event still fires — chat is never broken by the titler
+        assert '"event":"done"' in resp.text

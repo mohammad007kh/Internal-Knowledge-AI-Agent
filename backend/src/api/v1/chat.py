@@ -78,6 +78,12 @@ def _get_chat_session_service() -> Any:
     return Container.chat_session_service()
 
 
+def _get_title_generator() -> Any:
+    from src.core.container import Container  # noqa: PLC0415
+
+    return Container.title_generator_service()
+
+
 # ---------------------------------------------------------------------------
 # Ownership guard
 # ---------------------------------------------------------------------------
@@ -213,6 +219,7 @@ async def send_message(
     pipeline: Any = Depends(_get_pipeline),
     langfuse_tracing: LangfuseTracingService = Depends(_get_tracing),
     chat_session_service: Any = Depends(_get_chat_session_service),
+    title_generator_service: Any = Depends(_get_title_generator),
 ) -> StreamingResponse:
     """Stream an AI response for a user query within a chat session."""
 
@@ -226,6 +233,12 @@ async def send_message(
         override_ids=body.source_ids,
     )
 
+    # Decide BEFORE persisting whether this is the session's first user
+    # turn — manual rename preservation hinges on the placeholder title
+    # being intact at request entry.  We re-check before the LLM call so
+    # a concurrent rename in another tab still wins the race.
+    should_title = session_obj.title == "New chat"
+
     # Persist the user message before the response stream begins so the
     # follow-up generator (which opens fresh sessions) sees a consistent state.
     await chat_message_repo.create(
@@ -235,6 +248,26 @@ async def send_message(
         content=body.query,
     )
     await db.commit()
+
+    # Auto-titler — synchronous, 2 s timeout, silent fallback on any failure.
+    # Runs AFTER the user message is persisted so the chat record is durable
+    # even if the title call hangs all the way to its deadline.
+    generated_title: str | None = None
+    if should_title:
+        try:
+            candidate = await title_generator_service.generate_title(body.query)
+        except Exception:  # noqa: BLE001 — never block chat on titler errors
+            logger.warning("send_message: title generation raised", exc_info=True)
+            candidate = None
+        if candidate:
+            try:
+                await chat_session_repo.rename(db, session_id, candidate)
+                await db.commit()
+                generated_title = candidate
+            except Exception:  # noqa: BLE001 — silent fallback on rename failure
+                logger.warning(
+                    "send_message: persisting auto-title failed", exc_info=True
+                )
 
     # Start Langfuse trace
     trace_id: str = langfuse_tracing.start_trace(
@@ -273,6 +306,11 @@ async def send_message(
         final_answer = ""
         message_id = ""
         sources: list[Any] = []
+
+        # Emit the auto-generated title BEFORE the first pipeline event so
+        # the frontend can repaint the sidebar entry while the LLM warms up.
+        if generated_title:
+            yield ChatStreamEvent.title(generated_title).to_sse()
 
         try:
             async for event in pipeline.astream_events(initial_state, config=config, version="v2"):

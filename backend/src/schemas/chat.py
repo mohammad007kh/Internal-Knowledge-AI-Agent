@@ -132,6 +132,7 @@ class StreamEventType(StrEnum):
     DONE = "done"
     CLARIFICATION = "clarification"
     ERROR = "error"
+    TITLE = "title"
 
 
 class ChatStreamEvent(BaseModel):
@@ -155,6 +156,9 @@ class ChatStreamEvent(BaseModel):
     class ErrorData(BaseModel):
         message: str
         code: str = "internal_error"
+
+    class TitleData(BaseModel):
+        title: str
 
     def to_sse(self) -> str:
         """Format as a Server-Sent Event string.
@@ -209,3 +213,8 @@ class ChatStreamEvent(BaseModel):
             event=StreamEventType.ERROR,
             data={"message": message, "code": code},
         )
+
+    @classmethod
+    def title(cls, title: str) -> ChatStreamEvent:
+        """Emit the auto-generated session title as the first SSE frame."""
+        return cls(event=StreamEventType.TITLE, data={"title": title})

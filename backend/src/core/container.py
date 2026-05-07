@@ -40,6 +40,7 @@ from src.services.source_permission_service import SourcePermissionService
 from src.services.source_service import SourceService
 from src.services.storage_service import StorageService
 from src.services.sync_job_service import SyncJobService
+from src.services.title_generator import TitleGeneratorService
 from src.services.user_service import UserService
 
 import logging
@@ -218,6 +219,10 @@ class Container(containers.DeclarativeContainer):
         policy_repo=company_policy_repo,
         guardrail_event_repo=guardrail_event_repo,
         openai_client=openai_client,
+        ai_model_resolver=ai_model_resolver,
+    )
+    title_generator_service: providers.Factory[TitleGeneratorService] = providers.Factory(
+        TitleGeneratorService,
         ai_model_resolver=ai_model_resolver,
     )
     pipeline = providers.Factory(
