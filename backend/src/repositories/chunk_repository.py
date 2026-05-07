@@ -5,7 +5,8 @@ import uuid
 from collections.abc import Sequence
 
 from pgvector.sqlalchemy import Vector  # type: ignore[import-not-found]
-from sqlalchemy import bindparam, delete, func, select, text
+from sqlalchemy import ARRAY, bindparam, delete, func, select, text
+from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.models.chunk import Chunk
@@ -97,6 +98,16 @@ class ChunkRepository:
                 bindparam("embedder_id", value=str(embedder_id))
             )
 
+        # Coerce string ids to uuid.UUID — chunks.source_id is a Postgres
+        # UUID column, and asyncpg refuses to compare it against text values
+        # ("operator does not exist: uuid = character varying").  Bind the
+        # ARRAY column-type explicitly so the prepared statement carries
+        # uuid[] type info instead of text[].
+        source_uuids = [
+            sid if isinstance(sid, uuid.UUID) else uuid.UUID(sid)
+            for sid in source_ids
+        ]
+
         stmt = text(
             f"""
             SELECT
@@ -111,7 +122,7 @@ class ChunkRepository:
             """
         ).bindparams(
             bindparam("qvec", value=query_embedding, type_=Vector()),
-            bindparam("source_ids", value=source_ids),
+            bindparam("source_ids", value=source_uuids, type_=ARRAY(PGUUID(as_uuid=True))),
             bindparam("limit", value=limit),
             *extra_binds,
         )
