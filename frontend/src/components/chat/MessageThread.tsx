@@ -3,7 +3,7 @@
 import { apiClient } from '@/lib/api-client'
 import { cn } from '@/lib/utils'
 import { useQuery } from '@tanstack/react-query'
-import { BotIcon, CopyIcon, SparklesIcon, UserIcon } from 'lucide-react'
+import { BotIcon, CopyIcon, InfoIcon, SparklesIcon, UserIcon } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import { CitationPanel } from './CitationPanel'
@@ -15,6 +15,12 @@ interface MessageThreadProps {
   sessionId: string | null
   streamingToken?: string
   isStreaming?: boolean
+  /**
+   * True while a send is in flight — between user submit and either the first
+   * SSE token (`isStreaming` flips true) or a terminal event. Used to show a
+   * "thinking" bubble during the silent gap before the model emits tokens.
+   */
+  isPending?: boolean
   extraMessages?: Message[]
   onSend?: (text: string) => void
 }
@@ -34,6 +40,7 @@ export function MessageThread({
   sessionId,
   streamingToken = '',
   isStreaming = false,
+  isPending = false,
   extraMessages = [],
   onSend,
 }: MessageThreadProps) {
@@ -111,12 +118,7 @@ export function MessageThread({
   // suggestion grid (which is meant for "you have no messages yet").
   // Don't intercept when a stream is actively running (the streaming bubble
   // is its own visual signal that work is in progress).
-  if (
-    isLoading &&
-    !isStreaming &&
-    persisted.length === 0 &&
-    extraMessages.length === 0
-  ) {
+  if (isLoading && !isStreaming && persisted.length === 0 && extraMessages.length === 0) {
     return (
       <div className="flex flex-1 flex-col gap-4 px-4 py-4" aria-busy="true">
         <div className="h-12 animate-pulse rounded-lg bg-muted/40" />
@@ -169,22 +171,36 @@ export function MessageThread({
           />
         ))}
 
-        {isStreaming && (
-          <div className="flex items-start gap-3">
-            <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-muted">
-              <BotIcon className="h-4 w-4 text-muted-foreground" />
-            </div>
-            <div className="max-w-[75%] rounded-2xl rounded-tl-sm bg-muted px-4 py-2.5">
-              <div className="break-words text-sm">
-                <MarkdownLite content={streamingToken} />
-                <span
-                  className="ml-0.5 inline-block h-3.5 w-0.5 bg-foreground align-middle"
-                  aria-hidden="true"
-                />
+        {(() => {
+          // The "in flight" assistant bubble appears either:
+          //  - while SSE tokens are streaming (live text + caret), OR
+          //  - in the silent gap between submit and first token (pulsing dots).
+          // It always renders as a NEW row appended after the user bubble so
+          // we never overwrite the user's optimistic message.
+          const showThinkingBubble = isPending && !isStreaming
+          if (!isStreaming && !showThinkingBubble) return null
+          const hasToken = isStreaming && streamingToken.length > 0
+          return (
+            <div className="flex items-start gap-3">
+              <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-muted">
+                <BotIcon className="h-4 w-4 text-muted-foreground" />
+              </div>
+              <div className="max-w-[75%] rounded-2xl rounded-tl-sm bg-muted px-4 py-2.5">
+                {hasToken ? (
+                  <div className="break-words text-sm">
+                    <MarkdownLite content={streamingToken} />
+                    <span
+                      className="ml-0.5 inline-block h-3.5 w-0.5 bg-foreground align-middle"
+                      aria-hidden="true"
+                    />
+                  </div>
+                ) : (
+                  <PulsingDots />
+                )}
               </div>
             </div>
-          </div>
-        )}
+          )
+        })()}
 
         <div ref={bottomRef} aria-hidden="true" />
       </div>
@@ -200,8 +216,27 @@ interface MessageBubbleProps {
   onCitationClick: (c: Citation) => void
 }
 
+/**
+ * Heuristic detection of synthesizer "I don't know" / fallback replies. We
+ * dim and italicize these so a user can tell at a glance the system gave up
+ * vs produced a real grounded answer. Match list is intentionally narrow and
+ * length-bounded to avoid styling real answers that happen to begin with
+ * similar phrasing in the middle of a long response.
+ */
+const FALLBACK_PATTERNS: readonly RegExp[] = [
+  /^I don't (have|see) (enough information|anything|relevant)/i,
+  /no relevant context/i,
+  /could not find/i,
+]
+
+function isFallbackReply(content: string): boolean {
+  if (content.length >= 240) return false
+  return FALLBACK_PATTERNS.some((re) => re.test(content))
+}
+
 function MessageBubble({ message, sessionId, onCitationClick }: MessageBubbleProps) {
   const isUser = message.role === 'user'
+  const isFallback = !isUser && isFallbackReply(message.content)
 
   const handleCopy = () => {
     navigator.clipboard
@@ -211,7 +246,10 @@ function MessageBubble({ message, sessionId, onCitationClick }: MessageBubblePro
   }
 
   return (
-    <div className={cn('flex items-start gap-3', isUser && 'flex-row-reverse')}>
+    <div
+      className={cn('flex items-start gap-3', isUser && 'flex-row-reverse')}
+      aria-label={isFallback ? 'Assistant unable to answer' : undefined}
+    >
       <div
         className={cn(
           'flex h-7 w-7 shrink-0 items-center justify-center rounded-full',
@@ -231,13 +269,22 @@ function MessageBubble({ message, sessionId, onCitationClick }: MessageBubblePro
           'max-w-[75%] rounded-2xl px-4 py-2.5',
           isUser
             ? 'rounded-tr-sm bg-primary text-primary-foreground'
-            : 'group rounded-tl-sm bg-muted'
+            : 'group rounded-tl-sm bg-muted',
+          // Fallback assistant replies are visually softened so users can tell
+          // at a glance the system did not produce a grounded answer.
+          isFallback && 'bg-muted/40'
         )}
       >
         {isUser ? (
           <p className="whitespace-pre-wrap break-words text-sm">{message.content}</p>
         ) : (
-          <div className="break-words text-sm">
+          <div className={cn('break-words text-sm', isFallback && 'italic text-muted-foreground')}>
+            {isFallback && (
+              <InfoIcon
+                className="mr-1.5 inline-block h-3.5 w-3.5 align-[-2px]"
+                aria-hidden="true"
+              />
+            )}
             <MarkdownLite content={message.content} />
           </div>
         )}
@@ -295,6 +342,38 @@ function MessageBubble({ message, sessionId, onCitationClick }: MessageBubblePro
           })}
         </time>
       </div>
+    </div>
+  )
+}
+
+/**
+ * Three soft dots that fade in/out on staggered intervals to signal "thinking"
+ * while the model is processing but has not yet emitted its first SSE token.
+ * Pure Tailwind animation — no JS timer, no extra renders.
+ */
+function PulsingDots() {
+  return (
+    <div
+      className="flex items-center gap-1 py-0.5"
+      role="status"
+      aria-label="Assistant is thinking"
+      data-testid="thinking-dots"
+    >
+      <span
+        className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-foreground/40"
+        style={{ animationDelay: '0ms' }}
+        aria-hidden="true"
+      />
+      <span
+        className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-foreground/40"
+        style={{ animationDelay: '150ms' }}
+        aria-hidden="true"
+      />
+      <span
+        className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-foreground/40"
+        style={{ animationDelay: '300ms' }}
+        aria-hidden="true"
+      />
     </div>
   )
 }

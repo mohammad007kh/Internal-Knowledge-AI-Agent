@@ -4,7 +4,7 @@ import { Card } from '@/components/ui/card'
 import { apiClient } from '@/lib/api-client'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { MessageSquarePlusIcon, SparklesIcon } from 'lucide-react'
-import { useCallback } from 'react'
+import { startTransition, useCallback } from 'react'
 import { toast } from 'sonner'
 import { ChatInputBar } from './ChatInputBar'
 import { ClarificationCard } from './ClarificationCard'
@@ -68,10 +68,15 @@ export function ChatLayout({ sessionId: propSessionId }: ChatLayoutProps = {}) {
     },
     onSuccess: (session) => {
       queryClient.invalidateQueries({ queryKey: ['chat-sessions'] })
-      // `replace` (not `push`) so Back does not return to the empty-state
-      // hero we were just looking at — the user expects Back to leave chat,
-      // not to re-show the CTA they just clicked.
-      setSessionId(session.id, { replace: true })
+      // Wrap the selection swap in startTransition so React keeps the
+      // previous tree mounted until the new route segment is ready.
+      // Combined with `replace: true` (so Back doesn't return to the
+      // empty-state hero), this preserves the optimistic user bubble
+      // through the null → newId session transition on auto-create-
+      // on-send (UX fix P1-A).
+      startTransition(() => {
+        setSessionId(session.id, { replace: true })
+      })
     },
     onError: () => toast.error('Failed to create session.'),
   })
@@ -157,6 +162,7 @@ export function ChatLayout({ sessionId: propSessionId }: ChatLayoutProps = {}) {
           sessionId={sessionId}
           streamingToken={streamingToken}
           isStreaming={isStreaming}
+          isPending={isPending}
           extraMessages={optimisticMessages}
           onSend={handleSend}
         />

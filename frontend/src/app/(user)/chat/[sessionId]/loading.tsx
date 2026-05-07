@@ -1,23 +1,21 @@
 /**
- * Skeleton shown by Next.js while a `/chat/[sessionId]` route segment is
- * preparing.  In practice this fires during client-side navigation between
- * sessions while the new RSC payload is being fetched — without it, the
- * router falls back to "stay on previous content until ready" which makes
- * the new chat feel slow to commit.
+ * Route-segment loading slot for `/chat/[sessionId]`.
  *
- * Visuals match the message-thread shimmer in `MessageThread.tsx` so the
- * transition is seamless.  Keep this file dependency-free (no `'use client'`,
- * no hooks) so it can be served from cache.
+ * Returns `null` (not a skeleton) on purpose — when the user clicks
+ * between sessions or the auto-create-on-send flow lands a new session
+ * id, the previous chat tree stays mounted via `startTransition` and
+ * React paints a route-stable surface.  Showing a skeleton during that
+ * transition would replace the in-flight optimistic user bubble with a
+ * shimmer for ~80–200ms, which is exactly the "vanishing message" bug
+ * we just fixed (UX P1-A).  MessageThread already has its own internal
+ * shimmer (`isLoading && !persisted.length` branch) for the slower
+ * "session id is set, messages query is fetching" case — that path
+ * remains intact.
+ *
+ * Kept as a file (vs. deleted) to satisfy Next.js's loading-segment
+ * convention and as a documented hook point if a future page-level
+ * server fetch is added.
  */
 export default function ChatSessionLoading() {
-  return (
-    <div className="flex h-[calc(100vh-3.5rem)] flex-col bg-background md:h-screen">
-      <div className="flex flex-1 flex-col gap-4 px-4 py-4" aria-busy="true">
-        <div className="h-12 animate-pulse rounded-lg bg-muted/40" />
-        <div className="ml-auto h-16 w-2/3 animate-pulse rounded-lg bg-muted/40" />
-        <div className="h-20 w-3/4 animate-pulse rounded-lg bg-muted/40" />
-        <div className="ml-auto h-12 w-1/2 animate-pulse rounded-lg bg-muted/40" />
-      </div>
-    </div>
-  )
+  return null
 }

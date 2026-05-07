@@ -253,7 +253,7 @@ export function useChat({ sessionId }: { sessionId: string | null }): UseChatRet
   // terminal frame having marked the send as settled, the send is a zombie
   // (server connection died mid-flight, no `done`/`error`/`clarification`/
   // `guardrail` ever arrived). Surface a toast + error state so the existing
-  // retry path takes over and the textarea unlocks.
+  // retry path takes over and the thinking-dots bubble doesn't pulse forever.
   useEffect(() => {
     const wasStreaming = prevIsStreamingRef.current
     prevIsStreamingRef.current = stream.isStreaming
