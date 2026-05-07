@@ -225,8 +225,8 @@ interface MessageBubbleProps {
  */
 const FALLBACK_PATTERNS: readonly RegExp[] = [
   /^I don't (have|see) (enough information|anything|relevant)/i,
-  /no relevant context/i,
-  /could not find/i,
+  /^(no relevant context|i couldn't find|i could not find)/i,
+  /^sorry,?\s+i don't/i,
 ]
 
 function isFallbackReply(content: string): boolean {
