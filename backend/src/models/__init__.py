@@ -16,6 +16,7 @@ from src.models.embedder import Embedder
 from src.models.enums import SourceType, SyncStatus
 from src.models.llm_configuration import LLMConfiguration
 from src.models.refresh_token import UserRefreshToken
+from src.models.schema_study import SchemaStudy, SchemaStudyPhase
 from src.models.source import Source
 from src.models.source_description_history import SourceDescriptionHistory
 from src.models.source_permission import SourcePermission
@@ -35,6 +36,8 @@ __all__ = [
     "LLMConfiguration",
     "MessageRole",
     "PasswordResetToken",
+    "SchemaStudy",
+    "SchemaStudyPhase",
     "Source",
     "SourceDescriptionHistory",
     "SourcePermission",
