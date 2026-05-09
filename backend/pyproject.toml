@@ -23,7 +23,7 @@ dependencies = [
     "redis>=5.0",
     "langchain-core>=0.3",
     "langgraph>=0.2",
-    "langfuse>=2.43,<3",
+    "langfuse>=4.0.0",
     "langchain-openai>=0.2",
     "openai>=1.35.0",
     "tenacity>=8.3.0",
@@ -36,6 +36,7 @@ dependencies = [
     "PyPDF2>=3.0.0",
     "python-docx>=1.1.0",
     "openpyxl>=3.1.0",
+    "unstructured[docx,pdf,md]>=0.18.0",
     "structlog>=24.0",
     "asyncpg>=0.29",
     "uvicorn[standard]>=0.30",
@@ -56,6 +57,9 @@ dev = [
     "mypy>=1.11",
     "factory-boy>=3.3",
     "faker>=26.0",
+    # reportlab is used by tests/unit/connectors/test_file_upload_connector.py
+    # to generate PDF fixtures on the fly (no static binary checked in).
+    "reportlab>=4.0",
 ]
 test = [
     "pytest>=8.0",
