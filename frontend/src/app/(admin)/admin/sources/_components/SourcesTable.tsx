@@ -1,7 +1,9 @@
 'use client'
 
 import { ActionCell } from '@/app/(admin)/admin/sources/_components/ActionCell'
+import { DatabaseStudyStrip } from '@/app/(admin)/admin/sources/_components/DatabaseStudyStrip'
 import { IngestionStrip } from '@/app/(admin)/admin/sources/_components/IngestionStrip'
+import { SourceActionCell } from '@/app/(admin)/admin/sources/_components/SourceActionCell'
 import { SourceRowCard } from '@/app/(admin)/admin/sources/_components/SourceRowCard'
 import {
   SourcesToolbar,
@@ -235,7 +237,17 @@ function SourcesEmpty({ filtered, onClearFilters }: SourcesEmptyProps) {
   )
 }
 
-export function SourcesTable() {
+interface SourcesTableProps {
+  /**
+   * Optional canned dataset for visual QA / `?demo=db-states` mode. When
+   * provided, the table renders these rows instead of the live API result and
+   * skips polling. Wave 1D ships the demo set so designers can audit every
+   * DB-source state without having to seed a real database.
+   */
+  demoSources?: readonly SourceListItem[]
+}
+
+export function SourcesTable({ demoSources }: SourcesTableProps = {}) {
   // Read without polling first to compute whether any row is in `running`
   // phase. Then re-subscribe with `pollWhileRunning` so the verb column
   // transitions out of "Working on it…" promptly. Both calls share a single
@@ -259,7 +271,10 @@ export function SourcesTable() {
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all')
 
   const deferredSearch = useDeferredValue(search)
-  const sources = useMemo(() => data?.items ?? [], [data?.items])
+  const sources = useMemo<readonly SourceListItem[]>(
+    () => demoSources ?? data?.items ?? [],
+    [demoSources, data?.items]
+  )
 
   const filtersActive =
     deferredSearch.trim().length > 0 || typeFilter !== 'all' || statusFilter !== 'all'
@@ -399,10 +414,21 @@ export function SourcesTable() {
                         <SourceModeBadge mode={source.source_mode} />
                       </TableCell>
                       <TableCell>
-                        <ActionCell source={source} />
+                        <SourceActionCell source={source} />
                       </TableCell>
                       <TableCell>
-                        <IngestionStrip source={source} />
+                        {getTypeGroup(source.source_type) === 'database' ? (
+                          <DatabaseStudyStrip
+                            schemaStatus={source.schema_status ?? null}
+                            studyState={source.study_state ?? null}
+                            isApproved={source.is_active}
+                            tablesDocumented={source.tables_documented ?? null}
+                            lastErrorPhase={source.last_error_phase ?? null}
+                            sourceName={source.name}
+                          />
+                        ) : (
+                          <IngestionStrip source={source} />
+                        )}
                       </TableCell>
                       <TableCell className="text-sm text-muted-foreground">
                         {formatRelative(source.last_synced_at)}

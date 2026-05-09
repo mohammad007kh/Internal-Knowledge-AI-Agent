@@ -27,6 +27,39 @@ export type SyncMode = 'manual' | 'scheduled' | 'delta'
 export type SourceMode = 'snapshot' | 'live'
 export type RetrievalMode = 'vector_only' | 'text_to_query' | 'hybrid'
 
+// ---------------------------------------------------------------------------
+// DB-source studying agent (Wave 1A schema columns)
+//
+// These fields ship in the database in Wave 1A and are exposed on the
+// `SourceListItem` payload in Wave 3 once the studying agent is merged. They
+// are *optional* on the wire today — components must degrade gracefully when
+// the API has not yet populated them.
+// ---------------------------------------------------------------------------
+
+export type SchemaStatus = 'QUEUED' | 'STUDYING' | 'READY' | 'STALE' | 'FAILED'
+
+/**
+ * Phase the studying agent is in. The backend names match the LangGraph
+ * pipeline's node IDs. `READY_PARTIAL` means we shipped a usable schema doc
+ * but at least one table failed AI description.
+ */
+export type StudyState =
+  | 'QUEUED'
+  | 'CONNECTING'
+  | 'CONNECT_FAILED'
+  | 'INVENTORY'
+  | 'INVENTORY_FAILED'
+  | 'COLUMNS'
+  | 'COLUMNS_FAILED'
+  | 'SAMPLING'
+  | 'SAMPLING_FAILED'
+  | 'DESCRIBING'
+  | 'DESCRIBING_FAILED'
+  | 'INDEXING'
+  | 'INDEXING_FAILED'
+  | 'READY'
+  | 'READY_PARTIAL'
+
 export interface SyncJob {
   id: string
   source_id: string
@@ -44,28 +77,29 @@ export interface SyncJob {
 
 export interface SourceListItem {
   id: string
-  // is_active = "approved/available to users". New sources default to false
-  // — admin must explicitly approve via PATCH.
-  is_active: boolean
-  // Soft-delete marker. The list endpoint never returns soft-deleted rows;
-  // this field is kept for completeness when a single source is fetched.
-  deleted_at?: string | null
   name: string
   source_type: SourceType
+  is_active: boolean
   created_at: string
   // Phase-2 enriched fields (optional for backwards compatibility)
   source_mode?: SourceMode
-  status?: SourceStatus | null
-  sync_mode?: SyncMode | null
+  status?: SourceStatus
+  sync_mode?: SyncMode
   last_synced_at?: string | null
   description?: string | null
   latest_job?: SyncJob | null
-  // Ingestion-clarity fields (T-107). Populated server-side; defaulted to
-  // 0 / false on rows that pre-date the schema.  Drive the four-stage
-  // strip on /admin/sources (Uploaded / Parsed / Chunked / Approved).
+  // Ingestion counters surfaced on /admin/sources (IngestionStrip pip labels).
   document_count?: number
   chunk_count?: number
   has_upload?: boolean
+  // DB-source studying agent (Wave 3 wires real values; today undefined for
+  // every row — UI must fall back gracefully).
+  schema_status?: SchemaStatus | null
+  study_state?: StudyState | null
+  tables_documented?: number | null
+  tables_partial?: number | null
+  last_error_phase?: string | null
+  last_error_message?: string | null
 }
 
 export interface SourceDetail extends SourceListItem {
@@ -150,37 +184,9 @@ export interface GrantPermissionRequest {
 // Endpoints
 // ---------------------------------------------------------------------------
 
-interface ListSourcesOptions {
-  limit?: number
-  offset?: number
-  // When true, filter to admin-approved sources only (is_active=true).
-  // Use this from user-facing surfaces (e.g. the chat session source picker).
-  // Admin sources list omits this so pending-approval rows remain visible.
-  availableOnly?: boolean
-}
-
-export async function listSourcesApi(
-  limitOrOptions: number | ListSourcesOptions = 50,
-  offset = 0
-): Promise<PaginatedSources> {
-  const opts: Required<ListSourcesOptions> =
-    typeof limitOrOptions === 'number'
-      ? { limit: limitOrOptions, offset, availableOnly: false }
-      : {
-          limit: limitOrOptions.limit ?? 50,
-          offset: limitOrOptions.offset ?? 0,
-          availableOnly: limitOrOptions.availableOnly ?? false,
-        }
-
-  const params: Record<string, string | number> = {
-    limit: opts.limit,
-    offset: opts.offset,
-  }
-  if (opts.availableOnly) {
-    params.available_only = 'true'
-  }
+export async function listSourcesApi(limit = 50, offset = 0): Promise<PaginatedSources> {
   const { data } = await apiClient.get<PaginatedSources>('/api/v1/sources', {
-    params,
+    params: { limit, offset },
   })
   return data
 }

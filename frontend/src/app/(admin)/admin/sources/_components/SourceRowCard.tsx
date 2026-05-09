@@ -1,15 +1,23 @@
 'use client'
 
 import { ActionCell } from '@/app/(admin)/admin/sources/_components/ActionCell'
+import { DatabaseStudyStrip } from '@/app/(admin)/admin/sources/_components/DatabaseStudyStrip'
 import { IngestionStrip } from '@/app/(admin)/admin/sources/_components/IngestionStrip'
+import { SourceActionCell } from '@/app/(admin)/admin/sources/_components/SourceActionCell'
 import { Button } from '@/components/ui/button'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { formatRelative } from '@/features/sources/format'
 import { SourceModeBadge, getSourceTypeMeta } from '@/features/sources/source-ui'
-import type { SourceListItem } from '@/lib/api/sources'
+import type { SourceListItem, SourceType } from '@/lib/api/sources'
 import { Eye, MoreHorizontal, Trash2 } from 'lucide-react'
 import Link from 'next/link'
 import { useState } from 'react'
+
+const DATABASE_TYPES: readonly SourceType[] = ['postgresql', 'mysql', 'mssql', 'mongodb']
+
+function isDatabaseSource(type: SourceType | string): boolean {
+  return (DATABASE_TYPES as readonly string[]).includes(type)
+}
 
 interface SourceRowCardProps {
   source: SourceListItem
@@ -89,7 +97,18 @@ export function SourceRowCard({ source, onDelete }: SourceRowCardProps) {
       </div>
 
       <div className="mt-3">
-        <IngestionStrip source={source} />
+        {isDatabaseSource(source.source_type) ? (
+          <DatabaseStudyStrip
+            schemaStatus={source.schema_status ?? null}
+            studyState={source.study_state ?? null}
+            isApproved={source.is_active}
+            tablesDocumented={source.tables_documented ?? null}
+            lastErrorPhase={source.last_error_phase ?? null}
+            sourceName={source.name}
+          />
+        ) : (
+          <IngestionStrip source={source} />
+        )}
       </div>
 
       <div className="mt-3 text-xs">
@@ -98,7 +117,7 @@ export function SourceRowCard({ source, onDelete }: SourceRowCardProps) {
       </div>
 
       <div className="mt-3">
-        <ActionCell source={source} layout="block" />
+        <SourceActionCell source={source} layout="block" />
       </div>
     </div>
   )
