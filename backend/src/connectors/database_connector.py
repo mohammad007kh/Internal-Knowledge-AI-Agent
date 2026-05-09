@@ -136,6 +136,16 @@ class SqlDatabaseConnector(BaseConnector):
         the connection string in its message) if the test SELECT 1 fails.
         """
         conn_str: str = self._config["connection_string"]
+        # Phase 1: harden Postgres connections only.  For other dialects
+        # (mysql/mssql) this is a no-op and is expanded in Phase 2.
+        db_type = self._config.get("db_type")
+        if db_type == "postgresql" or (
+            db_type is None and conn_str.startswith(("postgresql", "postgres"))
+        ):
+            from src.services.db_safety import (  # noqa: PLC0415
+                harden_postgres_connection,
+            )
+            conn_str = await harden_postgres_connection(conn_str)
         try:
             engine = create_async_engine(
                 conn_str,
