@@ -6,13 +6,23 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from src.agent.nodes.text_to_query import (
-    is_safe_sql,
-    text_to_query,
-    wrap_with_limit,
-)
+from src.agent.nodes.text_to_query import text_to_query
 from src.models.enums import SourceType
 from src.services.ai_model_resolver import AIModelClient
+from src.services.db_safety import inject_limit, validate_sql
+
+
+def is_safe_sql(sql: str, dialect: str = "postgres") -> tuple[bool, str]:
+    """Test-local adaptor — keeps these tests' shape stable across the
+    rename from the old regex-based helper to :func:`validate_sql`."""
+    result = validate_sql(sql, dialect=dialect)
+    if result.is_safe:
+        return True, ""
+    return False, result.reason or ""
+
+
+def wrap_with_limit(sql: str, *, limit: int = 100) -> str:
+    return inject_limit(sql, n=limit)
 
 
 # ---------------------------------------------------------------------------
@@ -23,11 +33,11 @@ from src.services.ai_model_resolver import AIModelClient
 def test_rejects_non_select() -> None:
     safe, reason = is_safe_sql("UPDATE users SET role='admin'")
     assert not safe
-    assert "SELECT" in reason
+    assert reason  # non-empty reason on rejection
 
 
 def test_rejects_semicolon_multi_statement() -> None:
-    # A trailing semicolon is stripped, but an interior one is rejected.
+    # An interior semicolon is rejected as multi-statement.
     safe, _ = is_safe_sql("SELECT 1; DROP TABLE users")
     assert not safe
 
@@ -38,24 +48,14 @@ def test_strips_single_trailing_semicolon() -> None:
     assert reason == ""
 
 
-def test_rejects_inline_comment() -> None:
-    safe, _ = is_safe_sql("SELECT 1 -- malicious")
+def test_rejects_dml_in_cte() -> None:
+    safe, _ = is_safe_sql("WITH x AS (DELETE FROM t RETURNING *) SELECT 1 FROM x")
     assert not safe
 
 
-def test_rejects_block_comment() -> None:
-    safe, _ = is_safe_sql("SELECT 1 /* hidden */")
+def test_rejects_multistatement_with_dml() -> None:
+    safe, _ = is_safe_sql("SELECT 1; DELETE FROM t")
     assert not safe
-
-
-def test_rejects_forbidden_keywords() -> None:
-    for sql in (
-        "SELECT 1; DELETE FROM t",
-        "SELECT (DROP something) FROM t",
-        "WITH x AS (DELETE FROM t) SELECT 1",
-    ):
-        safe, reason = is_safe_sql(sql)
-        assert not safe, sql
 
 
 def test_accepts_plain_select() -> None:
@@ -63,15 +63,31 @@ def test_accepts_plain_select() -> None:
     assert safe
 
 
+def test_accepts_column_named_like_keyword() -> None:
+    """Old regex-blocklist impl rejected this on the substring ``update``.
+
+    The new sqlglot-based impl walks the AST, so column names that happen
+    to share spelling with DML keywords are no longer false-positives.
+    """
+    safe, reason = is_safe_sql(
+        "SELECT id, update_at, delete_at, call FROM events WHERE update_at IS NOT NULL"
+    )
+    assert safe, f"false-positive resurrected: {reason!r}"
+
+
 def test_wraps_with_limit_100() -> None:
-    wrapped = wrap_with_limit("SELECT 1")
-    assert wrapped == "SELECT * FROM (SELECT 1) AS _q LIMIT 100"
+    wrapped = wrap_with_limit("SELECT id FROM t")
+    upper = wrapped.upper()
+    assert "LIMIT" in upper
+    assert "100" in wrapped
+    # No more subquery-wrapping — that produced invalid MSSQL.
+    assert "AS _q" not in wrapped
 
 
-def test_wrap_strips_trailing_semicolon() -> None:
-    wrapped = wrap_with_limit("SELECT 1;")
-    assert ";" not in wrapped[: wrapped.rfind("LIMIT")]
-    assert wrapped.endswith("LIMIT 100")
+def test_wrap_replaces_larger_existing_limit() -> None:
+    wrapped = wrap_with_limit("SELECT id FROM t LIMIT 1000")
+    assert "100" in wrapped
+    assert "1000" not in wrapped
 
 
 # ---------------------------------------------------------------------------

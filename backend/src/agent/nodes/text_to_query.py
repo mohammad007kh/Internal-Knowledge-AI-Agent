@@ -8,8 +8,12 @@ For each such source the node:
 
 1. Resolves the source's connection config from the DB.
 2. Generates a SQL SELECT via the LLM.
-3. Validates the SQL is read-only (see :func:`is_safe_sql`).
-4. Wraps it as ``SELECT * FROM ({generated_sql}) AS _q LIMIT 100``.
+3. Validates the SQL is read-only via the shared sqlglot-based
+   :func:`src.services.db_safety.validate_sql` (no more regex
+   blocklist false-positives on column names like ``update_at``).
+4. Appends ``LIMIT 100`` via the dialect-aware
+   :func:`src.services.db_safety.inject_limit` (works on MSSQL's
+   ``OFFSET / FETCH NEXT`` too).
 5. Executes it; appends each row as a chunk so ``persist`` renders citations.
 
 State writes (merged into existing fields):
@@ -27,7 +31,6 @@ anything that is not a single ``SELECT`` statement.
 from __future__ import annotations
 
 import logging
-import re
 import uuid
 from typing import TYPE_CHECKING, Any
 
@@ -38,6 +41,7 @@ from src.agent.state import AgentState
 from src.core.crypto import decrypt
 from src.models.enums import SourceType
 from src.prompts import load_prompt
+from src.services.db_safety import inject_limit, validate_sql
 
 if TYPE_CHECKING:
     from langfuse import Langfuse
@@ -50,64 +54,30 @@ logger = logging.getLogger(__name__)
 
 _STAGE = "text_to_query"
 _LIMIT = 100
-_FORBIDDEN_KEYWORDS = (
-    "INSERT",
-    "UPDATE",
-    "DELETE",
-    "DROP",
-    "ALTER",
-    "CREATE",
-    "TRUNCATE",
-    "GRANT",
-    "REVOKE",
-    "EXEC",
-    "MERGE",
-    "CALL",
-)
+
+# Map ``config["db_type"]`` to a sqlglot dialect name.  ``mssql`` is sqlglot's
+# ``tsql``; everything else falls back to ``postgres`` (the strictest parser
+# of the supported set, which is the right safety default).
+_DIALECT_BY_DB_TYPE: dict[str, str] = {
+    "postgresql": "postgres",
+    "mysql": "mysql",
+    "mssql": "tsql",
+}
 
 
-def is_safe_sql(sql: str) -> tuple[bool, str]:
-    """Return (safe, reason).  reason is empty when safe.
-
-    TODO(slice-e-review): the ``\\bUPDATE\\b`` (and similar) whole-word
-    keyword check below produces false positives on legitimate column /
-    identifier names that happen to contain those tokens — e.g. an
-    ``update_at`` timestamp column triggers ``forbidden keyword UPDATE``
-    even though the SQL is read-only.  Out of scope for this fix; logged
-    here so the reviewer's example does not get lost.  A proper fix needs
-    a real SQL parser (sqlglot) rather than a regex.
-    """
-    if not isinstance(sql, str):
-        return False, "sql is not a string"
-    stripped = sql.strip()
-    # Strip a single trailing semicolon (some LLMs add one despite the prompt).
-    if stripped.endswith(";"):
-        stripped = stripped[:-1].rstrip()
-    if not stripped:
-        return False, "empty sql"
-    # Must start with SELECT (case-insensitive).
-    if not re.match(r"^\s*SELECT\b", stripped, flags=re.IGNORECASE):
-        return False, "must start with SELECT"
-    # Reject any further semicolons (multi-statement).
-    if ";" in stripped:
-        return False, "contains semicolon (multi-statement)"
-    # Reject SQL line / block comments.
-    if "--" in stripped or "/*" in stripped:
-        return False, "contains comments"
-    # Reject any forbidden keyword anywhere as a whole word.
-    upper = stripped.upper()
-    for kw in _FORBIDDEN_KEYWORDS:
-        if re.search(rf"\b{re.escape(kw)}\b", upper):
-            return False, f"forbidden keyword {kw}"
-    return True, ""
+def _dialect_for(config: dict[str, Any]) -> str:
+    return _DIALECT_BY_DB_TYPE.get(str(config.get("db_type", "")), "postgres")
 
 
-def wrap_with_limit(sql: str, *, limit: int = _LIMIT) -> str:
-    """Wrap *sql* with an outer ``SELECT * FROM (...) AS _q LIMIT N``."""
-    inner = sql.strip()
-    if inner.endswith(";"):
-        inner = inner[:-1].rstrip()
-    return f"SELECT * FROM ({inner}) AS _q LIMIT {limit}"
+# NOTE: The previous regex-based ``is_safe_sql`` and subquery-wrapping
+# ``wrap_with_limit`` helpers have been removed from this module.  All
+# callers now go through the shared sqlglot-based primitives:
+#
+#     from src.services.db_safety import validate_sql, inject_limit
+#
+# This eliminates the documented false-positive on column names like
+# ``update_at`` / ``call`` / ``delete_at`` that the old keyword blocklist
+# triggered on, and produces dialect-correct output on MSSQL.
 
 
 def _row_to_text(row: Any) -> str:
@@ -254,17 +224,29 @@ async def text_to_query(
                 skipped.append(sid)
                 continue
 
-            safe, reason = is_safe_sql(raw_sql)
-            if not safe:
+            dialect = _dialect_for(config)
+            validation = validate_sql(raw_sql, dialect=dialect)
+            if not validation.is_safe:
                 logger.warning(
                     "text_to_query: unsafe SQL for source=%s reason=%s — skipping",
                     sid,
-                    reason,
+                    validation.error_key,
                 )
                 skipped.append(sid)
                 continue
 
-            wrapped = wrap_with_limit(raw_sql, limit=_LIMIT)
+            try:
+                wrapped = inject_limit(raw_sql, n=_LIMIT, dialect=dialect)
+            except ValueError:
+                # Defensive: validate_sql passed but inject_limit choked.
+                # Skip this source rather than emit a half-formed query.
+                logger.warning(
+                    "text_to_query: limit injection failed for source=%s — skipping",
+                    sid,
+                    exc_info=True,
+                )
+                skipped.append(sid)
+                continue
             generated_sql[sid] = wrapped
 
             try:

@@ -6,13 +6,13 @@ import uuid
 from collections.abc import AsyncIterator
 from typing import Any
 
-import sqlparse
 import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from src.connectors.base import BaseConnector, Document
 from src.connectors.registry import register
 from src.models.enums import SourceType
+from src.services.db_safety import validate_sql
 
 logger = logging.getLogger(__name__)
 
@@ -95,35 +95,42 @@ class SqlDatabaseConnector(BaseConnector):
                It MUST NOT appear in any log entry or exception message.
     """
 
+    # Map ``config["db_type"]`` values to sqlglot dialect names. ``"mssql"``
+    # is sqlglot's ``"tsql"``. Anything else (or missing) falls back to
+    # ``"postgres"`` — the safest default for this project.
+    _DIALECT_BY_DB_TYPE: dict[str, str] = {
+        "postgresql": "postgres",
+        "mysql": "mysql",
+        "mssql": "tsql",
+    }
+
     def __init__(self, config: dict[str, Any]) -> None:
         super().__init__(config)
         # Hash the connection string immediately — never store it plain
         self._conn_str_hash: str = hashlib.sha256(
             config["connection_string"].encode()
         ).hexdigest()[:12]
+        self._dialect: str = self._DIALECT_BY_DB_TYPE.get(
+            str(config.get("db_type", "")), "postgres"
+        )
         self._validate_query(config["query"])
         self._query: str = config["query"]
         self._page_size: int = int(config.get("page_size", 1000))
         self._source_id: str | None = config.get("source_id")
         self._engine: Any | None = None
 
-    @staticmethod
-    def _validate_query(query: str) -> None:
-        """Allow only a single SELECT statement — reject DDL, DML, multi-statements, UNION."""
-        parsed = sqlparse.parse(query.strip())
-        if len(parsed) != 1:
-            raise ValueError("Query must be a single SQL statement.")
-        stmt = parsed[0]
-        if stmt.get_type() != "SELECT":
-            raise ValueError(f"Only SELECT statements are allowed; got {stmt.get_type()!r}.")
-        # Reject semicolons inside the body (multi-statement injection)
-        if ";" in sqlparse.format(query, strip_comments=True):
-            raise ValueError("Query must not contain semicolons.")
-        # Reject UNION / UNION ALL — prevents cross-table data exfiltration
-        import sqlparse.tokens as T  # noqa: PLC0415
-        for token in stmt.flatten():
-            if token.ttype is T.Keyword and token.normalized.upper() in ("UNION", "INTERSECT", "EXCEPT"):
-                raise ValueError(f"Query must not use set operations (UNION/INTERSECT/EXCEPT).")
+    def _validate_query(self, query: str) -> None:
+        """Allow only a single SELECT statement.
+
+        Delegates to the shared :func:`validate_sql` validator (sqlglot AST
+        based) so this connector and the text-to-query agent node enforce
+        identical rules. Raises :class:`ValueError` to preserve the
+        existing exception contract callers depend on.
+        """
+        result = validate_sql(query, dialect=self._dialect)
+        if not result.is_safe:
+            # ``reason`` never embeds the query text (FR-020).
+            raise ValueError(result.reason or "SQL validation failed.")
 
     # ------------------------------------------------------------------ #
     # Lifecycle
