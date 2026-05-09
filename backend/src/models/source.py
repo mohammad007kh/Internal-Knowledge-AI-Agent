@@ -37,7 +37,19 @@ class Source(Base, UUIDMixin, TimestampMixin):
 
     name: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
     source_type: Mapped[SourceType] = mapped_column(
-        Enum(SourceType, name="sourcetype", create_constraint=True),
+        # values_callable: bind the lowercase enum VALUE ("file_upload"), not
+        # the uppercase NAME ("FILE_UPLOAD"). The Postgres enum is created
+        # with the lowercase values; without this, asyncpg raises
+        # InvalidTextRepresentationError on insert AND SQLAlchemy raises
+        # LookupError on read. Same fix as messagerole / userrole / syncstatus.
+        # Originally added in 53de827, lost in 171612e during the soft-delete
+        # refactor — restored here.
+        Enum(
+            SourceType,
+            name="sourcetype",
+            create_constraint=True,
+            values_callable=lambda enum_cls: [m.value for m in enum_cls],
+        ),
         nullable=False,
     )
     # Fernet-encrypted JSON blob: {"url": ..., "credentials": ...}
