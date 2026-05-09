@@ -266,12 +266,19 @@ def test_inject_limit_works_on_mssql_fetch_next() -> None:
     )
     out = inject_limit(sql, n=100, dialect="tsql")
     upper = out.upper()
-    # On T-SQL, sqlglot may render either as ``LIMIT 100`` or ``FETCH NEXT
-    # 100 ROWS ONLY``.  Either is correct semantically — what matters is
-    # that the larger 1000 is gone and 100 is present somewhere.
+    # On T-SQL, sqlglot may render the row cap as any of ``LIMIT 100``,
+    # ``FETCH NEXT 100 ROWS ONLY``, or ``FETCH FIRST 100 ROWS ONLY``. All three
+    # are semantically equivalent (FETCH FIRST and FETCH NEXT are interchangeable
+    # in SQL Server / ANSI SQL). What matters is that the larger 1000 is gone
+    # and the 100 cap is present in one of the recognised forms.
     assert "100" in out
     assert "1000" not in out
-    assert upper.count("LIMIT") + upper.count("FETCH NEXT") >= 1
+    assert (
+        upper.count("LIMIT")
+        + upper.count("FETCH NEXT")
+        + upper.count("FETCH FIRST")
+        >= 1
+    )
 
 
 def test_inject_limit_rejects_non_positive() -> None:

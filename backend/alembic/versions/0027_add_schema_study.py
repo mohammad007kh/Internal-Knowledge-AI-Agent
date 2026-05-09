@@ -9,9 +9,14 @@ Creates:
 * Three new columns on ``sources``: ``schema_status``, ``drift_signal_count``,
   ``last_studied_at``, plus a partial index on ``schema_status``.
 
-Revision ID: 0025
-Revises:     0024
+Revision ID: 0027
+Revises:     0026
 Create Date: 2026-05-09
+
+Renumbered from 0025 to 0027 — the original 0025 slot was already taken by
+``0025_add_deleted_at_to_sources`` and 0026 by
+``0026_documents_chunks_timestamp_defaults``. Inserting after 0026 keeps the
+linear chain head-only.
 """
 
 from __future__ import annotations
@@ -21,8 +26,8 @@ from sqlalchemy.dialects import postgresql
 
 from alembic import op
 
-revision: str = "0025"
-down_revision: str | None = "0024"
+revision: str = "0027"
+down_revision: str | None = "0026"
 branch_labels = None
 depends_on = None
 

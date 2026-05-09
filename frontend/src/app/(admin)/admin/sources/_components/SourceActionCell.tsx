@@ -330,25 +330,11 @@ function DatabaseSourceVerb(props: VerbProps) {
     )
   }
 
-  // Ready and approved — green check.
-  if (status === 'READY' && source.is_active) {
-    return (
-      <div
-        className={cn(
-          'inline-flex items-center gap-1.5 text-xs font-medium text-emerald-700 dark:text-emerald-300',
-          block && 'w-full justify-center py-2'
-        )}
-        aria-label={`${source.name} ready`}
-      >
-        <CheckCircle2 className="h-3.5 w-3.5" aria-hidden />
-        <span>Ready</span>
-      </div>
-    )
-  }
-
   // Partial — amber, surface partial counts. READY_PARTIAL is a study_state
   // value (the studying agent shipped a usable schema doc but at least one
-  // table failed AI description); schema_status is still "READY" overall.
+  // table failed AI description); schema_status is still "READY" overall, so
+  // this branch MUST run before the plain "Ready" branch — otherwise an
+  // approved source with partial coverage shows a misleading green check.
   if (source.study_state === 'READY_PARTIAL') {
     const tableLabel = documented === 1 ? '1 table' : `${documented.toLocaleString()} tables`
     return (
@@ -366,6 +352,23 @@ function DatabaseSourceVerb(props: VerbProps) {
       >
         Documented · {tableLabel} · {partial.toLocaleString()} partial — review
       </Button>
+    )
+  }
+
+  // Ready and approved — green check. (Comes AFTER the READY_PARTIAL guard
+  // above so partial coverage on an approved source still surfaces as amber.)
+  if (status === 'READY' && source.is_active) {
+    return (
+      <div
+        className={cn(
+          'inline-flex items-center gap-1.5 text-xs font-medium text-emerald-700 dark:text-emerald-300',
+          block && 'w-full justify-center py-2'
+        )}
+        aria-label={`${source.name} ready`}
+      >
+        <CheckCircle2 className="h-3.5 w-3.5" aria-hidden />
+        <span>Ready</span>
+      </div>
     )
   }
 

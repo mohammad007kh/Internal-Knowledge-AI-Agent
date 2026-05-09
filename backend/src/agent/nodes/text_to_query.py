@@ -41,7 +41,11 @@ from src.agent.state import AgentState
 from src.core.crypto import decrypt
 from src.models.enums import SourceType
 from src.prompts import load_prompt
-from src.services.db_safety import inject_limit, validate_sql
+from src.services.db_safety import (
+    harden_postgres_connection,
+    inject_limit,
+    validate_sql,
+)
 
 if TYPE_CHECKING:
     from langfuse import Langfuse
@@ -135,8 +139,19 @@ def _decrypt_source_config(source: Any) -> dict[str, Any] | None:
 async def _execute(
     connection_string: str,
     sql: str,
+    *,
+    db_type: str,
 ) -> list[Any]:
-    """Run *sql* against *connection_string*; returns list of mapping rows."""
+    """Run *sql* against *connection_string*; returns list of mapping rows.
+
+    For Postgres sources the connection string is run through
+    ``harden_postgres_connection`` so ``default_transaction_read_only=on`` and
+    ``statement_timeout`` apply at the libpq level — defense in depth alongside
+    ``validate_sql``. Other dialects fall back to the raw string until Phase 2
+    ships their hardening helpers.
+    """
+    if db_type == "postgresql":
+        connection_string = await harden_postgres_connection(connection_string)
     engine = create_async_engine(
         connection_string,
         pool_size=1,
@@ -250,7 +265,11 @@ async def text_to_query(
             generated_sql[sid] = wrapped
 
             try:
-                rows = await _execute(config["connection_string"], wrapped)
+                rows = await _execute(
+                    config["connection_string"],
+                    wrapped,
+                    db_type=str(config.get("db_type", "")),
+                )
             except Exception:  # noqa: BLE001
                 logger.warning(
                     "text_to_query: execution failed for source=%s — skipping",

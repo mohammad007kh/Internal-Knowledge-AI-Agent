@@ -265,8 +265,32 @@ class SqlDatabaseConnector(BaseConnector):
         Execute SELECT 1 via a temporary engine.
         Returns False (not raises) on any failure.
         connection_string MUST NOT appear in any log or exception message.
+
+        Postgres connections are hardened the same way ``connect()`` hardens
+        them: ``default_transaction_read_only=on`` + ``statement_timeout`` are
+        applied at the libpq layer so even the connectivity probe cannot mutate
+        the source database.
         """
         conn_str: str = self._config["connection_string"]
+        db_type = self._config.get("db_type")
+        if db_type == "postgresql" or (
+            db_type is None and conn_str.startswith(("postgresql", "postgres"))
+        ):
+            from src.services.db_safety import (  # noqa: PLC0415
+                harden_postgres_connection,
+            )
+            try:
+                conn_str = await harden_postgres_connection(conn_str)
+            except ValueError:
+                # Defensive: fall back to the raw string if the hardener
+                # rejects the URL. test_connection still returns False if the
+                # raw connection itself fails, so we don't widen the blast
+                # radius by silently down-grading safety here.
+                logger.warning(
+                    "DatabaseConnector.test_connection: harden rejected URL "
+                    "[conn_hash=%s] — falling back to raw conn_str",
+                    self._conn_str_hash,
+                )
         try:
             engine = create_async_engine(conn_str, pool_size=1, max_overflow=0)
             async with engine.connect() as conn:

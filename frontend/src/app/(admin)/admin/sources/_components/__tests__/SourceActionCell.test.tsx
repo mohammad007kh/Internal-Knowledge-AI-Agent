@@ -234,11 +234,15 @@ describe('SourceActionCell — DB source verbs', () => {
   })
 
   it('renders amber "review" CTA on READY_PARTIAL', () => {
+    // schema_status stays "READY" — the studying agent shipped a usable doc;
+    // READY_PARTIAL is a study_state value indicating at least one table
+    // failed AI description. SourceActionCell branches on study_state for
+    // this case (see SourceActionCell.tsx:351).
     render(
       <SourceActionCell
         source={dbSource({
           is_active: true,
-          schema_status: 'READY_PARTIAL' as SchemaStatus,
+          schema_status: 'READY' as SchemaStatus,
           study_state: 'READY_PARTIAL' as StudyState,
           tables_documented: 30,
           tables_partial: 4,
