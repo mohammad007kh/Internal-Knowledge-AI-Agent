@@ -139,13 +139,19 @@ async def run_pipeline_stream(
             if kind == "on_chat_model_stream":
                 token = event.get("data", {}).get("chunk", {})
                 if hasattr(token, "content") and token.content:
-                    final_answer += token.content
                     streamed_answer += token.content
                     yield ChatStreamEvent.delta(token.content).to_sse()
             elif kind == "on_chain_end" and event.get("name") == "LangGraph":
                 output = event.get("data", {}).get("output", {})
                 final_answer = output.get("final_answer", final_answer)
                 sources = output.get("sources", sources)
+        # If the synthesizer streamed real tokens, prefer the streamed
+        # text — it's the canonical source of truth for what the user
+        # actually saw on-wire.  Falling back to the LangGraph
+        # ``on_chain_end`` output covers stages that bypass the chat
+        # model entirely (e.g. clarification / handle_clarification).
+        if streamed_answer and not final_answer:
+            final_answer = streamed_answer
 
     except Exception as exc:  # noqa: BLE001
         if GraphInterrupt is not None and isinstance(exc, GraphInterrupt):
@@ -189,25 +195,30 @@ async def run_pipeline_stream(
             logger.debug("end_trace failed after empty response", exc_info=True)
         return
 
-    # Synthetic-delta path. The synthesizer node (:mod:`src.agent.nodes.generate`)
-    # calls the OpenAI client directly rather than through a LangChain
-    # ``ChatModel`` Runnable, so LangGraph's ``astream_events`` never fires
-    # ``on_chat_model_stream`` and no ``delta`` frames have been yielded yet.
-    # Without an explicit fallback the frontend would drain the stream, see
-    # only ``done``, and never accumulate ``currentResponse`` — leaving the
-    # message bubble blank. That's the "I sent a message and got nothing
-    # back" symptom on both the persistent chat and the sandbox.
+    # The synthesizer (:mod:`src.agent.nodes.generate`) is now a LangChain
+    # ``BaseChatModel`` runnable, so LangGraph's ``astream_events(version="v2")``
+    # fires real ``on_chat_model_stream`` events and we yield ``delta`` frames
+    # in the loop above as tokens arrive.  The synthetic tail-delta band-aid
+    # that used to live here is gone.
     #
-    # Emit the final answer as a single delta frame so the wire grammar
-    # stays uniform regardless of whether the underlying LLM call streamed
-    # tokens or not. We only emit the ``unstreamed`` tail — i.e. the part
-    # of ``final_answer`` we did not already push as native deltas — so a
-    # future migration to a streaming ChatModel keeps working without
-    # double-rendering tokens.
-    if len(final_answer) > len(streamed_answer):
-        unstreamed_tail = final_answer[len(streamed_answer):]
-        if unstreamed_tail:
-            yield ChatStreamEvent.delta(unstreamed_tail).to_sse()
+    # Two narrow fallbacks remain so the wire grammar stays stable:
+    #
+    # 1. **Pure-Python answer paths** — clarification / handle_clarification
+    #    set ``final_answer`` in Python without calling a chat model, so
+    #    ``streamed_answer`` is empty.  Emit the whole answer as a single
+    #    delta so the frontend's ``currentResponse`` accumulator gets it.
+    # 2. **Post-synthesis rewrite** — ``format_response`` (today a no-op)
+    #    or a future ``guardrail_output`` could append text to the
+    #    synthesizer's stream.  When the canonical ``final_answer`` is a
+    #    proper prefix-extension of ``streamed_answer`` we emit just the
+    #    suffix as a corrective delta.  Divergent rewrites (e.g. a guardrail
+    #    fully replacing the answer) are NOT retracted mid-stream — the
+    #    persisted ``final_answer`` will surface on next reload.
+    if final_answer and final_answer != streamed_answer and final_answer.startswith(
+        streamed_answer
+    ):
+        tail = final_answer[len(streamed_answer):]
+        yield ChatStreamEvent.delta(tail).to_sse()
 
     # Success path. The session-chat caller passes a ``persist_assistant``
     # callback that writes ``chat_messages`` and returns the new message id.

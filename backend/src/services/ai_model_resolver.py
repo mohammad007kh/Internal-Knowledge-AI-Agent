@@ -24,6 +24,8 @@ import uuid
 from collections.abc import Callable
 from typing import Any
 
+from langchain_core.language_models import BaseChatModel
+from langchain_openai import ChatOpenAI
 from openai import AsyncOpenAI
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -48,6 +50,41 @@ class AIModelClient:
     custom_prompt: str | None
     capabilities: dict[str, Any]
     http_client: AsyncOpenAI
+    # api_key is the decrypted secret — repr=False keeps it out of dataclass
+    # __repr__ output and dataclasses.asdict() emits it normally (call sites
+    # must NEVER asdict() a client into Langfuse / logs). Same goes for
+    # http_client which holds the same secret in its config.
+    api_key: str = dataclasses.field(default="", repr=False)
+    base_url: str | None = None
+
+
+def build_chat_model(client: AIModelClient) -> BaseChatModel:
+    """Build a LangChain :class:`BaseChatModel` from an :class:`AIModelClient`.
+
+    The synthesizer node uses this to turn the resolved
+    provider/model_id/temperature/max_tokens into a LangChain Runnable so
+    LangGraph's ``astream_events(version="v2")`` can surface
+    ``on_chat_model_stream`` events to the SSE consumer in
+    :mod:`src.services.chat_stream_service`.
+
+    Today the resolver only materialises OpenAI-compatible providers
+    (every supported provider is reached through ``AsyncOpenAI`` with a
+    custom ``base_url``), so :class:`langchain_openai.ChatOpenAI` covers
+    every code path.  ``streaming=True`` is the critical bit — it makes
+    ``ainvoke`` route through ``_astream`` internally, which is what fires
+    the per-token callback events.
+    """
+    kwargs: dict[str, Any] = {
+        "model": client.model_id,
+        "temperature": client.temperature,
+        "max_tokens": client.max_tokens,
+        "streaming": True,
+    }
+    if client.api_key:
+        kwargs["api_key"] = client.api_key
+    if client.base_url:
+        kwargs["base_url"] = client.base_url
+    return ChatOpenAI(**kwargs)
 
 
 class AIModelResolver:
@@ -179,6 +216,8 @@ class AIModelResolver:
             custom_prompt=custom_prompt,
             capabilities=dict(ai_row.capabilities or {}),
             http_client=http_client,
+            api_key=api_key,
+            base_url=ai_row.base_url,
         )
 
     @staticmethod
