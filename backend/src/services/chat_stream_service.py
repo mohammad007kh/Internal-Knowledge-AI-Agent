@@ -128,6 +128,7 @@ async def run_pipeline_stream(
             yield frame
 
     final_answer = ""
+    streamed_answer = ""  # Tokens already shipped via ``on_chat_model_stream``.
     sources: list[Any] = []
 
     try:
@@ -139,6 +140,7 @@ async def run_pipeline_stream(
                 token = event.get("data", {}).get("chunk", {})
                 if hasattr(token, "content") and token.content:
                     final_answer += token.content
+                    streamed_answer += token.content
                     yield ChatStreamEvent.delta(token.content).to_sse()
             elif kind == "on_chain_end" and event.get("name") == "LangGraph":
                 output = event.get("data", {}).get("output", {})
@@ -186,6 +188,26 @@ async def run_pipeline_stream(
         except Exception:  # noqa: BLE001
             logger.debug("end_trace failed after empty response", exc_info=True)
         return
+
+    # Synthetic-delta path. The synthesizer node (:mod:`src.agent.nodes.generate`)
+    # calls the OpenAI client directly rather than through a LangChain
+    # ``ChatModel`` Runnable, so LangGraph's ``astream_events`` never fires
+    # ``on_chat_model_stream`` and no ``delta`` frames have been yielded yet.
+    # Without an explicit fallback the frontend would drain the stream, see
+    # only ``done``, and never accumulate ``currentResponse`` — leaving the
+    # message bubble blank. That's the "I sent a message and got nothing
+    # back" symptom on both the persistent chat and the sandbox.
+    #
+    # Emit the final answer as a single delta frame so the wire grammar
+    # stays uniform regardless of whether the underlying LLM call streamed
+    # tokens or not. We only emit the ``unstreamed`` tail — i.e. the part
+    # of ``final_answer`` we did not already push as native deltas — so a
+    # future migration to a streaming ChatModel keeps working without
+    # double-rendering tokens.
+    if len(final_answer) > len(streamed_answer):
+        unstreamed_tail = final_answer[len(streamed_answer):]
+        if unstreamed_tail:
+            yield ChatStreamEvent.delta(unstreamed_tail).to_sse()
 
     # Success path. The session-chat caller passes a ``persist_assistant``
     # callback that writes ``chat_messages`` and returns the new message id.

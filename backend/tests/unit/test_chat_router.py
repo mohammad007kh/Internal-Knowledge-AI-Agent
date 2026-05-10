@@ -735,12 +735,20 @@ class TestAutoTitling:
         rename_args = mock_session_repo.rename.call_args
         assert rename_args.args[1] == SESSION_ID
         assert rename_args.args[2] == "Q3 EMEA growth"
-        # SSE body's first data frame carries the title event
+        # SSE body's first data frame carries the title event. Format is
+        # the SSE wire shape ``event: <name>\ndata: <json>\n\n``.
         body = resp.text
-        assert '"event":"title"' in body
-        assert '"title":"Q3 EMEA growth"' in body
-        # Title frame must precede the done frame in the stream
-        assert body.index('"event":"title"') < body.index('"event":"done"')
+        assert 'event: title' in body
+        assert '"title": "Q3 EMEA growth"' in body
+        # Title frame must precede the terminal stream frame. With an empty
+        # pipeline output (mock produces no events), the new chat-stream
+        # contract emits ``event: error`` (empty_response) rather than a
+        # silent ``done`` — better UX. Either is a valid terminal.
+        terminal_index = (
+            body.index('event: error') if 'event: error' in body
+            else body.index('event: done')
+        )
+        assert body.index('event: title') < terminal_index
 
     def test_no_titler_call_when_title_already_set(
         self,
@@ -826,6 +834,12 @@ class TestAutoTitling:
 
         assert resp.status_code == 200
         mock_session_repo.rename.assert_not_awaited()
-        assert '"event":"title"' not in resp.text
-        # done event still fires — chat is never broken by the titler
-        assert '"event":"done"' in resp.text
+        assert 'event: title' not in resp.text
+        # A terminal frame still fires — chat is never broken by the titler.
+        # Empty pipeline output now correctly emits ``event: error``
+        # (empty_response) instead of a silent ``done``; either is a valid
+        # terminal that proves the stream wasn't aborted by the titler crash.
+        terminal_present = (
+            'event: error' in resp.text or 'event: done' in resp.text
+        )
+        assert terminal_present
