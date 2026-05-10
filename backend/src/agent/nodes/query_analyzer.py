@@ -183,6 +183,7 @@ async def analyze_query(
             "has_reflector_feedback": bool(reflector_feedback),
         },
     )
+    degraded = False
     try:
         try:
             rewritten, variants = await _call_llm(
@@ -191,28 +192,58 @@ async def analyze_query(
                 ai_model_resolver=ai_model_resolver,
                 reflector_feedback=reflector_feedback,
             )
-        except Exception:  # noqa: BLE001 - degrade
+        except Exception as exc:  # noqa: BLE001 - degrade
+            # FX5/RC4: don't swallow the failure silently. Mark the
+            # request as degraded so downstream retrieve_context can
+            # apply its prior-turn concatenation stop-gap, log at
+            # WARNING with the exception class+message, and surface a
+            # warning marker on the Langfuse span.  We still don't
+            # raise — pipeline continuity is more important than
+            # one stage failing cleanly.
+            degraded = True
             logger.warning(
-                "query_analyzer: LLM call failed, falling back to single variant",
+                "query_analyzer: LLM call failed, falling back to single variant: %s: %s",
+                type(exc).__name__,
+                exc,
                 exc_info=True,
             )
+            try:
+                # Best-effort warning marker on the span; the v2 SDK
+                # exposes no level field on .update(), so encode the
+                # warning in the output payload that the dashboard renders.
+                span.update(
+                    output={
+                        "level": "WARNING",
+                        "degraded": True,
+                        "error_class": type(exc).__name__,
+                        "error_message": str(exc)[:200],
+                    }
+                )
+            except Exception:  # noqa: BLE001 - never let tracing kill the request
+                logger.debug("query_analyzer: span warning emit failed", exc_info=True)
             rewritten = query
             variants = _fallback(query)
 
-        span.update(
-            output={"rewritten": rewritten[:200], "variant_count": len(variants)}
-        )
+        if not degraded:
+            span.update(
+                output={"rewritten": rewritten[:200], "variant_count": len(variants)}
+            )
         logger.info(
-            "query_analyzer: rewrote %r -> %r (%d variants)",
+            "query_analyzer: rewrote %r -> %r (%d variants)%s",
             query[:80],
             rewritten[:80],
             len(variants),
+            " [DEGRADED]" if degraded else "",
         )
         # Write the history-resolved rewrite back to state["query"] so
         # downstream nodes (retrieve_context, source_router) see the
         # self-contained version. The original user message is preserved
         # verbatim in state["messages"] (HumanMessage), so the synthesizer
         # still sees what the user actually typed.
-        return {"query": rewritten, "query_variants": variants}
+        return {
+            "query": rewritten,
+            "query_variants": variants,
+            "query_analyzer_degraded": degraded,
+        }
     finally:
         span.end()

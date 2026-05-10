@@ -86,6 +86,34 @@ async def test_falls_back_to_single_variant_on_llm_error() -> None:
 
 
 @pytest.mark.asyncio
+async def test_degraded_flag_set_on_exception() -> None:
+    """FX5/RC4: any LLM failure must mark the request as degraded so
+    retrieve_context can apply its prior-turn stop-gap, but the pipeline
+    must continue running (no exception bubbles).
+    """
+    failing = AsyncMock()
+    failing.chat.completions.create.side_effect = RuntimeError("upstream 503")
+    resolver = _resolver_for(failing)
+    result = await analyze_query(
+        _state(), ai_model_resolver=resolver, langfuse=_langfuse()
+    )
+    assert result["query_analyzer_degraded"] is True
+    # And the fallback variants are still emitted so retrieve has something.
+    assert result["query_variants"] == ["What is the refund policy?"]
+
+
+@pytest.mark.asyncio
+async def test_degraded_flag_false_on_success() -> None:
+    """The degraded flag must default to False on a clean call."""
+    payload = {"variants": ["What is the refund policy?", "refund timeline"]}
+    resolver = _resolver_for(_openai_returning(payload))
+    result = await analyze_query(
+        _state(), ai_model_resolver=resolver, langfuse=_langfuse()
+    )
+    assert result["query_analyzer_degraded"] is False
+
+
+@pytest.mark.asyncio
 async def test_falls_back_on_invalid_json() -> None:
     client = AsyncMock()
     completion = MagicMock()
