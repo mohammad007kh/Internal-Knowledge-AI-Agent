@@ -320,3 +320,204 @@ class TestSoftDelete:
 
         with pytest.raises(NotFoundError):
             await service.delete_source(source_id=uuid.uuid4())
+
+
+# ---------------------------------------------------------------------------
+# TestUpdateSource — schema-drift fix
+# ---------------------------------------------------------------------------
+#
+# Regression: ``SourceUpdate`` previously declared only name/is_active/config,
+# so the frontend's Regenerate name+description flow was silently dropping
+# the description (and citations_enabled, sync_mode, …). These tests lock
+# the contract: every editable field on the model must round-trip, and a
+# manual edit to name/description must flip the corresponding *_status flag
+# so the auto-naming worker doesn't overwrite human input.
+
+
+class TestUpdateSource:
+    """update_source must forward every editable field + status bookkeeping."""
+
+    async def test_name_only_updates_name_and_flips_name_status(self, mock_source_repo):
+        """Updating just ``name`` writes name + name_status, leaves description alone."""
+        from src.schemas.source import SourceUpdate
+
+        source = _make_source()
+        mock_source_repo.get_by_id = AsyncMock(return_value=source)
+        mock_source_repo.update = AsyncMock(return_value=source)
+
+        service = _make_source_service(mock_source_repo)
+
+        await service.update_source(
+            source_id=source.id,
+            payload=SourceUpdate(name="renamed"),
+        )
+
+        mock_source_repo.update.assert_awaited_once_with(
+            source.id,
+            name="renamed",
+            name_status="user_set",
+        )
+
+    async def test_description_only_flips_description_status(self, mock_source_repo):
+        """Updating just ``description`` writes description + description_status."""
+        from src.schemas.source import SourceUpdate
+
+        source = _make_source()
+        mock_source_repo.get_by_id = AsyncMock(return_value=source)
+        mock_source_repo.update = AsyncMock(return_value=source)
+
+        service = _make_source_service(mock_source_repo)
+
+        await service.update_source(
+            source_id=source.id,
+            payload=SourceUpdate(description="A useful source."),
+        )
+
+        mock_source_repo.update.assert_awaited_once_with(
+            source.id,
+            description="A useful source.",
+            description_status="user_set",
+        )
+
+    async def test_name_and_description_flip_both_statuses(self, mock_source_repo):
+        """Updating both fields writes both values and both *_status flags."""
+        from src.schemas.source import SourceUpdate
+
+        source = _make_source()
+        mock_source_repo.get_by_id = AsyncMock(return_value=source)
+        mock_source_repo.update = AsyncMock(return_value=source)
+
+        service = _make_source_service(mock_source_repo)
+
+        await service.update_source(
+            source_id=source.id,
+            payload=SourceUpdate(name="renamed", description="desc"),
+        )
+
+        mock_source_repo.update.assert_awaited_once_with(
+            source.id,
+            name="renamed",
+            description="desc",
+            name_status="user_set",
+            description_status="user_set",
+        )
+
+    async def test_citations_enabled_no_status_change(self, mock_source_repo):
+        """Toggling citations_enabled flips the bool — no name/description status touched."""
+        from src.schemas.source import SourceUpdate
+
+        source = _make_source()
+        mock_source_repo.get_by_id = AsyncMock(return_value=source)
+        mock_source_repo.update = AsyncMock(return_value=source)
+
+        service = _make_source_service(mock_source_repo)
+
+        await service.update_source(
+            source_id=source.id,
+            payload=SourceUpdate(citations_enabled=False),
+        )
+
+        mock_source_repo.update.assert_awaited_once_with(
+            source.id,
+            citations_enabled=False,
+        )
+
+    async def test_scheduled_without_cron_raises_validation_error(self):
+        """sync_mode='scheduled' WITHOUT sync_schedule → schema-level ValidationError.
+
+        Mirrors the create-time invariant in ``api/v1/sources.py`` — the
+        schema rejects the bad shape before the service is ever called.
+        """
+        from pydantic import ValidationError as PydanticValidationError
+
+        from src.schemas.source import SourceUpdate
+
+        with pytest.raises(PydanticValidationError):
+            SourceUpdate(sync_mode="scheduled")
+
+        with pytest.raises(PydanticValidationError):
+            SourceUpdate(sync_mode="scheduled", sync_schedule="   ")
+
+    async def test_scheduled_with_cron_validates_cleanly(self):
+        """sync_mode='scheduled' + non-empty sync_schedule constructs successfully."""
+        from src.schemas.source import SourceUpdate
+
+        payload = SourceUpdate(sync_mode="scheduled", sync_schedule="0 * * * *")
+        assert payload.sync_mode == "scheduled"
+        assert payload.sync_schedule == "0 * * * *"
+
+    async def test_empty_payload_is_no_op(self, mock_source_repo):
+        """Empty payload → no repo.update call; existing object returned."""
+        from src.schemas.source import SourceUpdate
+
+        source = _make_source()
+        mock_source_repo.get_by_id = AsyncMock(return_value=source)
+        mock_source_repo.update = AsyncMock(return_value=source)
+
+        service = _make_source_service(mock_source_repo)
+
+        result = await service.update_source(
+            source_id=source.id, payload=SourceUpdate()
+        )
+
+        mock_source_repo.update.assert_not_awaited()
+        assert result is source
+
+    async def test_all_fields_forwarded_including_config_reencrypted(
+        self, mock_source_repo
+    ):
+        """Every editable field (plus config_encrypted) round-trips to the repo."""
+        from src.schemas.source import SourceUpdate
+
+        source = _make_source()
+        mock_source_repo.get_by_id = AsyncMock(return_value=source)
+        mock_source_repo.update = AsyncMock(return_value=source)
+
+        service = _make_source_service(mock_source_repo)
+
+        await service.update_source(
+            source_id=source.id,
+            payload=SourceUpdate(
+                name="n",
+                description="d",
+                citations_enabled=True,
+                retrieval_mode="hybrid",
+                sync_mode="manual",
+                source_mode="snapshot",
+                is_active=True,
+                config={"foo": "bar"},
+            ),
+        )
+
+        mock_source_repo.update.assert_awaited_once()
+        call_kwargs = mock_source_repo.update.await_args.kwargs
+        assert call_kwargs["name"] == "n"
+        assert call_kwargs["description"] == "d"
+        assert call_kwargs["citations_enabled"] is True
+        assert call_kwargs["retrieval_mode"] == "hybrid"
+        assert call_kwargs["sync_mode"] == "manual"
+        assert call_kwargs["source_mode"] == "snapshot"
+        assert call_kwargs["is_active"] is True
+        assert call_kwargs["name_status"] == "user_set"
+        assert call_kwargs["description_status"] == "user_set"
+        # ``config`` is re-encrypted, never forwarded raw.
+        assert "config" not in call_kwargs
+        assert isinstance(call_kwargs["config_encrypted"], bytes)
+
+    async def test_invalid_retrieval_mode_rejected_by_schema(self):
+        """Unknown retrieval_mode → ValidationError at the schema boundary."""
+        from pydantic import ValidationError as PydanticValidationError
+
+        from src.schemas.source import SourceUpdate
+
+        with pytest.raises(PydanticValidationError):
+            SourceUpdate(retrieval_mode="banana")
+
+    async def test_name_with_slash_rejected(self):
+        """Slashes in names are rejected (matches SourceCreateRequest contract)."""
+        from pydantic import ValidationError as PydanticValidationError
+
+        from src.schemas.source import SourceUpdate
+
+        with pytest.raises(PydanticValidationError):
+            SourceUpdate(name="bad/name")

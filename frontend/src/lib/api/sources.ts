@@ -174,11 +174,25 @@ export interface CreateSourceRequest {
   auto_name_and_description?: boolean
 }
 
+/**
+ * PATCH /api/v1/sources/{id} payload.
+ *
+ * All fields are optional and additive — callers should send only the fields
+ * they intend to change. The form on the source detail page diffs against the
+ * loaded source and submits only the dirty fields.
+ *
+ * Schedule semantics (`sync_schedule`): a cron expression when `sync_mode ===
+ * 'scheduled'`, otherwise `null`. Sending `null` clears any prior schedule.
+ */
 export interface UpdateSourceRequest {
   name?: string
   description?: string | null
   citations_enabled?: boolean
   is_active?: boolean
+  retrieval_mode?: RetrievalMode
+  sync_mode?: SyncMode
+  sync_schedule?: string | null
+  source_mode?: SourceMode
 }
 
 export interface TestConnectionResponse {

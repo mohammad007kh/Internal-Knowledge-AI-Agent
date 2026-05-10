@@ -27,7 +27,12 @@ export const sourcesKeys = {
   list: () => [...sourcesKeys.all, 'list'] as const,
   detail: (id: string) => [...sourcesKeys.all, 'detail', id] as const,
   stats: (id: string) => [...sourcesKeys.all, 'stats', id] as const,
-  syncJobs: (id: string) => [...sourcesKeys.all, 'sync-jobs', id] as const,
+  // Sync jobs are paginated — the key includes limit/offset so each page is
+  // cached independently and Previous/Next don't blow away other pages.
+  syncJobs: (id: string, limit?: number, offset?: number) =>
+    limit === undefined && offset === undefined
+      ? ([...sourcesKeys.all, 'sync-jobs', id] as const)
+      : ([...sourcesKeys.all, 'sync-jobs', id, { limit, offset }] as const),
   documents: (id: string) => [...sourcesKeys.all, 'documents', id] as const,
 }
 
@@ -70,10 +75,26 @@ export function useSourceStats(sourceId: string | undefined) {
   })
 }
 
-export function useSyncJobs(sourceId: string | undefined) {
+export interface UseSyncJobsOptions {
+  limit?: number
+  offset?: number
+}
+
+/**
+ * Paginated sync-jobs query. `limit` defaults to the API's default (20) and
+ * `offset` to 0. Each (sourceId, limit, offset) tuple is cached independently
+ * — Previous/Next on the detail page reuse cached pages instantly.
+ *
+ * Backwards compatible with the previous `useSyncJobs(id)` call site: omit the
+ * options object and the hook keeps the original behavior.
+ */
+export function useSyncJobs(sourceId: string | undefined, options: UseSyncJobsOptions = {}) {
+  const { limit, offset } = options
   return useQuery({
-    queryKey: sourceId ? sourcesKeys.syncJobs(sourceId) : ['sources', 'sync-jobs', 'empty'],
-    queryFn: () => listSyncJobsApi(sourceId as string),
+    queryKey: sourceId
+      ? sourcesKeys.syncJobs(sourceId, limit, offset)
+      : ['sources', 'sync-jobs', 'empty'],
+    queryFn: () => listSyncJobsApi(sourceId as string, limit, offset),
     enabled: Boolean(sourceId),
   })
 }

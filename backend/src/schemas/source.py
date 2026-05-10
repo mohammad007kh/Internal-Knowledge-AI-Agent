@@ -272,8 +272,20 @@ class SourcePublicResponse(BaseModel):
     updated_at: str
 
 
+_SOURCE_MODES: frozenset[str] = frozenset({"snapshot", "live"})
+
+
 class SourceUpdate(BaseModel):
-    """Request body for PATCH /sources/{id} — all fields optional."""
+    """Request body for PATCH /sources/{id} — all fields optional.
+
+    Mirrors every editable field on the Source model so admin edits (Regenerate
+    name+description, citation toggles, sync-mode changes) are persisted
+    instead of silently dropped. Pydantic's default behavior of ignoring
+    unknown fields is intentionally preserved — adding ``extra="forbid"`` would
+    break older clients that send fields not listed here. To extend this
+    schema, add the field below and forward it from
+    :meth:`SourceService.update_source`.
+    """
 
     model_config = ConfigDict(str_strip_whitespace=True)
 
@@ -282,11 +294,79 @@ class SourceUpdate(BaseModel):
         min_length=1,
         max_length=255,
     )
+    description: str | None = Field(
+        None,
+        max_length=2000,
+        description="Free-text description shown in the admin UI and chat picker.",
+    )
+    citations_enabled: bool | None = None
+    retrieval_mode: str | None = None
+    sync_mode: str | None = None
+    sync_schedule: str | None = Field(
+        None,
+        description="Cron string. Required when sync_mode='scheduled'.",
+    )
+    source_mode: str | None = None
+    is_active: bool | None = None
     config: dict[str, Any] | None = Field(
         None,
         description="Full replacement of the connection config when provided.",
     )
-    is_active: bool | None = None
+
+    @field_validator("name")
+    @classmethod
+    def _name_no_slash(cls, v: str | None) -> str | None:
+        """Source names must not contain '/' (matches SourceCreateRequest)."""
+        if v is not None and "/" in v:
+            raise ValueError("Source name must not contain '/'.")
+        return v
+
+    @field_validator("retrieval_mode")
+    @classmethod
+    def _validate_retrieval_mode(cls, v: str | None) -> str | None:
+        if v is not None and v not in _RETRIEVAL_MODES:
+            raise ValueError(f"Invalid retrieval_mode: {v}")
+        return v
+
+    @field_validator("sync_mode")
+    @classmethod
+    def _validate_sync_mode(cls, v: str | None) -> str | None:
+        if v is not None and v not in _SYNC_MODES:
+            raise ValueError(f"Invalid sync_mode: {v}")
+        return v
+
+    @field_validator("source_mode")
+    @classmethod
+    def _validate_source_mode(cls, v: str | None) -> str | None:
+        if v is not None and v not in _SOURCE_MODES:
+            raise ValueError(f"Invalid source_mode: {v}")
+        return v
+
+    @field_validator("sync_schedule")
+    @classmethod
+    def _validate_sync_schedule(cls, v: str | None) -> str | None:
+        # Accept None (omitted) or a non-empty string. Full cron parsing is
+        # deferred to the scheduler — this only catches blank-string drift
+        # from the wire.
+        if v is not None and not v.strip():
+            raise ValueError("sync_schedule must not be blank when provided.")
+        return v
+
+    @model_validator(mode="after")
+    def _require_schedule_when_scheduled(self) -> SourceUpdate:
+        """Mirror the create-time invariant: scheduled sync needs a cron string.
+
+        See ``api/v1/sources.py`` create handler — this enforces the same
+        rule on the PATCH path so admins can't move a source into the
+        ``scheduled`` mode without supplying a cron expression.
+        """
+        if self.sync_mode == "scheduled" and (
+            self.sync_schedule is None or not self.sync_schedule.strip()
+        ):
+            raise ValueError(
+                "sync_schedule (cron) required when sync_mode='scheduled'."
+            )
+        return self
 
 
 # ---------------------------------------------------------------------------

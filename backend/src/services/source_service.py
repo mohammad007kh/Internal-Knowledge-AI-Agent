@@ -329,8 +329,15 @@ class SourceService:
     ) -> Source:
         """Partially update a Source.
 
-        Only non-``None`` payload fields are written.  If *config* is
-        supplied it is re-encrypted before storage.
+        Forwards every non-``None`` field from *payload* to the repository so
+        the admin UI's Regenerate / edit flows persist correctly. ``config``
+        is re-encrypted before storage.
+
+        When the admin manually sets ``name`` or ``description`` here (i.e.
+        not via the AI auto-naming pipeline), the corresponding
+        ``name_status`` / ``description_status`` columns are flipped to
+        ``"user_set"`` so the auto-naming worker knows not to overwrite the
+        human-typed value.
 
         Raises:
             NotFoundError: if *source_id* does not match an active Source.
@@ -339,10 +346,32 @@ class SourceService:
         await self.get_source(source_id)
 
         kwargs: dict[str, Any] = {}
+        # Forward every non-None editable field. Keep this list in lock-step
+        # with the editable fields declared on :class:`SourceUpdate`.
+        for field in (
+            "name",
+            "description",
+            "citations_enabled",
+            "retrieval_mode",
+            "sync_mode",
+            "sync_schedule",
+            "source_mode",
+            "is_active",
+        ):
+            value = getattr(payload, field)
+            if value is not None:
+                kwargs[field] = value
+
+        # Auto-naming bookkeeping: a manual edit to name/description means the
+        # admin explicitly set the value, so the auto-naming worker must not
+        # clobber it. Treat ``description=""`` (clear-to-empty) as an explicit
+        # intent too — the field-validator above strips it before we see it.
         if payload.name is not None:
-            kwargs["name"] = payload.name
-        if payload.is_active is not None:
-            kwargs["is_active"] = payload.is_active
+            kwargs["name_status"] = "user_set"
+        if payload.description is not None:
+            kwargs["description_status"] = "user_set"
+
+        # ``config`` stays a special case — re-encrypted before storage.
         if payload.config is not None:
             kwargs["config_encrypted"] = self._encrypt_config(payload.config)
 
