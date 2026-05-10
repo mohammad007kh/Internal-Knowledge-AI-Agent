@@ -19,7 +19,7 @@ from sqlalchemy import Boolean, DateTime, Enum, ForeignKey, Integer, String, Tex
 from sqlalchemy.dialects.postgresql import BYTEA, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from src.models.base import Base, TimestampMixin, UUIDMixin
+from src.models.base import Base, SoftDeleteMixin, TimestampMixin, UUIDMixin
 from src.models.enums import SourceType
 
 if TYPE_CHECKING:
@@ -30,8 +30,25 @@ if TYPE_CHECKING:
     from src.models.user import User
 
 
-class Source(Base, UUIDMixin, TimestampMixin):
-    """A configured data source owned by a user."""
+class Source(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
+    """A configured data source owned by a user.
+
+    Visibility / lifecycle semantics:
+    * ``deleted_at IS NULL`` means the row is not soft-deleted; admin and
+      user-facing list queries filter on this. ``SoftDeleteMixin`` provides
+      both the column and the helper methods that the repositories rely on.
+    * ``is_active = TRUE`` means "approved by an admin / available to
+      non-admin users". Admin views show every non-deleted source regardless
+      of approval; user-facing surfaces additionally restrict on is_active.
+
+    NOTE: SoftDeleteMixin was previously dropped from this class twice (once
+    in 171612e via the same regression class as the StrEnum binding fix, and
+    again in 2f50a16 during the SchemaStudy refactor). The Source repository
+    references ``Source.deleted_at`` in ~10 query sites; without the mixin,
+    EVERY list endpoint fails with AttributeError and /admin/sources renders
+    empty. The regression guard at
+    tests/unit/models/test_source_required_mixins.py catches this class.
+    """
 
     __tablename__ = "sources"
 
