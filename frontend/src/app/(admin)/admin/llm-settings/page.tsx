@@ -1,6 +1,8 @@
 'use client'
 
 import { EditStageDialog } from '@/app/(admin)/admin/llm-settings/_components/EditStageDialog'
+import { StagesToolbar } from '@/app/(admin)/admin/llm-settings/_components/StagesToolbar'
+import { useStageFilters } from '@/app/(admin)/admin/llm-settings/_components/useStageFilters'
 import { ErrorState } from '@/components/ui/ErrorState'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -15,6 +17,8 @@ import { CheckCircle2Icon, CpuIcon, PencilIcon, PlusIcon, XCircleIcon, ZapIcon }
 import Link from 'next/link'
 import { useState } from 'react'
 import { toast } from 'sonner'
+
+const EMPTY_STAGES: LlmStageConfig[] = []
 
 const SKELETON_KEYS = ['s1', 's2', 's3', 's4', 's5', 's6'] as const
 
@@ -180,6 +184,17 @@ export default function LlmSettingsPage() {
   const { data: aiModels, isLoading: isLoadingAiModels } = useAiModels({ limit: 1 })
   const [editing, setEditing] = useState<LlmStageConfig | null>(null)
 
+  const stages = data ?? EMPTY_STAGES
+  const {
+    state: filterState,
+    setState: setFilterState,
+    filteredStages,
+    availableProviders,
+    activeChips,
+    clearAll,
+    hasActiveFilters,
+  } = useStageFilters(stages)
+
   const noAiModelsConfigured = !isLoadingAiModels && (aiModels?.total ?? 0) === 0
 
   return (
@@ -204,11 +219,40 @@ export default function LlmSettingsPage() {
       {isError ? <ErrorState message={getErrorMessage(error)} onRetry={() => refetch()} /> : null}
 
       {data ? (
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {data.map((stage) => (
-            <StageCard key={stage.stage} stage={stage} onEdit={setEditing} />
-          ))}
-        </div>
+        <>
+          <StagesToolbar
+            state={filterState}
+            onChange={setFilterState}
+            availableProviders={availableProviders}
+            activeChips={activeChips}
+            onClearAll={clearAll}
+            totalCount={stages.length}
+            filteredCount={filteredStages.length}
+          />
+
+          {filteredStages.length === 0 ? (
+            <Card className="border-dashed">
+              <CardContent className="flex flex-col items-center gap-3 py-10 text-center">
+                <p className="text-base font-medium">No stages match your filters.</p>
+                {hasActiveFilters ? (
+                  <button
+                    type="button"
+                    onClick={clearAll}
+                    className="text-sm font-medium text-primary hover:underline"
+                  >
+                    Clear filters
+                  </button>
+                ) : null}
+              </CardContent>
+            </Card>
+          ) : (
+            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+              {filteredStages.map((stage) => (
+                <StageCard key={stage.stage} stage={stage} onEdit={setEditing} />
+              ))}
+            </div>
+          )}
+        </>
       ) : null}
 
       {editing ? (
