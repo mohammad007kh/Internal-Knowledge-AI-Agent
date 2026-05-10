@@ -18,7 +18,7 @@ const SheetOverlay = React.forwardRef<
   <DialogPrimitive.Overlay
     ref={ref}
     className={cn(
-      'liquid-scrim fixed inset-0 z-50 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0',
+      'fixed inset-0 z-50 bg-black/60 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0',
       className
     )}
     {...props}
@@ -43,7 +43,12 @@ const SheetContent = React.forwardRef<
       <SheetOverlay />
       <DialogPrimitive.Content
         ref={ref}
-        className={cn('liquid fixed z-50 duration-300', sideClasses, className)}
+        className={cn(
+          'fixed z-50 border bg-background shadow-lg duration-300',
+          side === 'left' ? 'border-r' : 'border-l',
+          sideClasses,
+          className
+        )}
         {...props}
       >
         {children}

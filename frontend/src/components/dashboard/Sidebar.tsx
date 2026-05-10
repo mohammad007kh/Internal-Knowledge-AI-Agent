@@ -132,7 +132,7 @@ export function MobileHeader({
           </SheetTrigger>
           <SheetContent
             side="left"
-            className="w-72 max-w-[80vw] border border-border bg-card p-0 shadow-lg [-webkit-backdrop-filter:none] [backdrop-filter:none]"
+            className="w-72 max-w-[80vw] border border-border bg-card p-0 shadow-lg"
           >
             <SheetTitle className="sr-only">{brand} navigation</SheetTitle>
             <SheetDescription className="sr-only">
