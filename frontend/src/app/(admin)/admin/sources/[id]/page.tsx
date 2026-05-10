@@ -44,6 +44,7 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { PermissionsManager } from '@/app/(admin)/admin/sources/[id]/permissions/_components/PermissionsManager'
 import { AINamingCard } from '@/app/(admin)/admin/sources/[id]/_components/AINamingCard'
+import { SchemaViewer } from '@/app/(admin)/admin/sources/[id]/_components/SchemaViewer'
 import {
   CoverageCard,
   FreshnessCard,
@@ -1549,24 +1550,7 @@ function DataTabBody({ source, documents, documentsTotal }: DataTabBodyProps) {
     kind === 'database' ? 'Table' : kind === 'file' ? 'File ID' : 'Page ID'
 
   if (kind === 'database') {
-    return (
-      <div className="space-y-3 rounded-md border bg-muted/20 p-6 text-sm" data-testid="data-tab-db">
-        <p className="font-medium">Schema details</p>
-        <p className="text-xs text-muted-foreground">
-          Schema details require the studying agent to complete. Click <strong>Re-study schema</strong>{' '}
-          in the Sync tab to refresh.
-        </p>
-        {source.tables_documented !== null && source.tables_documented !== undefined ? (
-          <p className="text-xs text-muted-foreground">
-            <strong className="tabular-nums">{source.tables_documented}</strong>{' '}
-            {source.tables_documented === 1 ? 'table' : 'tables'} documented
-            {source.tables_partial ? ` · ${source.tables_partial} partial` : null}
-          </p>
-        ) : (
-          <p className="text-xs text-muted-foreground">{emptyDataCopyFor(source.source_type)}</p>
-        )}
-      </div>
-    )
+    return <SchemaViewer sourceId={source.id} />
   }
 
   if (documents.length === 0) {

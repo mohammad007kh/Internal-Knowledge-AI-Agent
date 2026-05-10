@@ -44,6 +44,12 @@ vi.mock('@/lib/api/sources', async (importOriginal) => {
     deleteSourceApi: vi.fn(),
     refreshDescriptionApi: vi.fn(),
     autoNameApi: vi.fn(),
+    // U7 — SchemaViewer is mounted by the data-tab body for DB sources.
+    // Default to the empty-state path so the relabel test stays focused
+    // on the tab-label assertions and doesn't make real network calls.
+    getSchemaDocumentApi: () =>
+      Promise.reject(new actual.SchemaDocumentNotFoundError()),
+    emitSamplesRevealedApi: vi.fn(),
   }
 })
 
@@ -172,7 +178,13 @@ describe('Documents tab — empty-state copy per type', () => {
     expect(await screen.findByTestId('data-tab-empty')).toHaveTextContent(/No pages crawled yet/i)
   })
 
-  it('shows DB placeholder body for database sources', async () => {
+  it('mounts the SchemaViewer for database sources (U7)', async () => {
+    // U7 replaced the placeholder with the live SchemaViewer. The viewer
+    // calls `getSchemaDocumentApi` on mount; the file-scope mock above
+    // returns SchemaDocumentNotFoundError so the viewer falls into its
+    // empty-state branch (admin-readable copy that mirrors the spirit of
+    // the old placeholder). Full viewer behaviour lives in
+    // _components/__tests__/SchemaViewer.test.tsx.
     getSourceMock.mockResolvedValue(
       makeSource({
         source_type: 'postgresql',
@@ -187,8 +199,11 @@ describe('Documents tab — empty-state copy per type', () => {
     await waitFor(() => expect(screen.getByRole('tab', { name: /^Schema/i })).toBeInTheDocument())
     await user.click(screen.getByRole('tab', { name: /^Schema/i }))
 
-    expect(await screen.findByTestId('data-tab-db')).toHaveTextContent(
-      /Schema details require the studying agent/i
+    // Empty state copy from the SchemaViewer's not-yet-documented branch.
+    expect(await screen.findByTestId('schema-empty-state')).toHaveTextContent(
+      /Schema not yet documented/i
     )
+    // Old placeholder copy must NOT come back.
+    expect(screen.queryByText(/Schema details require the studying agent/i)).toBeNull()
   })
 })

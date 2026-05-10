@@ -43,6 +43,7 @@ from src.schemas.source import (
 )
 from src.schemas.sync_job import SyncJobListResponse, SyncJobResponse
 from src.services.audit_service import emit_audit
+from src.services.db_introspection.schema_doc import SchemaDocument
 from src.services.source_service import SourceService
 
 logger = logging.getLogger(__name__)
@@ -973,3 +974,159 @@ async def list_description_history(
         limit=limit,
         offset=offset,
     )
+
+
+# ---------------------------------------------------------------------------
+# Schema document (U7 — admin DB schema viewer)
+# ---------------------------------------------------------------------------
+
+
+class SchemaDocumentResponse(BaseModel):
+    """Wire envelope for ``GET /sources/{id}/schema-document``.
+
+    Wraps the canonical :class:`SchemaDocument` (which is the studying
+    agent's strict, validated model) with the few persistence-layer fields
+    the admin viewer needs: which study produced this document, when, what
+    pipeline state it terminated in, and a short fingerprint for
+    glance-comparison across runs.
+
+    The response intentionally does NOT include the source's connection
+    config, decrypted credentials, or any other secret material — the
+    studying agent persists a sanitised document that already has those
+    fields stripped, and we re-validate via ``SchemaDocument.model_validate``
+    on the way out so any tampered row is caught at the type boundary.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    study_id: UUID
+    state: str
+    started_at: datetime
+    finished_at: datetime | None
+    fingerprint_short: str = Field(
+        ...,
+        description="First 8 hex chars of the SchemaDocument fingerprint.",
+        min_length=8,
+        max_length=8,
+    )
+    schema_document: SchemaDocument
+
+
+@router.get(
+    "/{source_id}/schema-document",
+    response_model=SchemaDocumentResponse,
+    summary="Latest validated SchemaDocument for a DB source",
+)
+async def get_schema_document(
+    source_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    service: SourceService = Depends(_get_source_service),
+    db: AsyncSession = Depends(get_db),
+) -> SchemaDocumentResponse:
+    """Return the latest completed :class:`SchemaDocument` for *source_id*.
+
+    Admin or owner only — the source detail page mirrors the same auth
+    rule as the description-history endpoint above. Returns 404 when:
+
+    * the source itself does not exist (raised by ``SourceService.get_source``
+      which the FastAPI error handler maps to a 404), or
+    * no :class:`SchemaStudy` row exists with a non-null
+      ``schema_document_json`` (i.e. the studying agent has not yet
+      successfully completed a run).
+
+    The persisted JSON is re-validated against the strict
+    :class:`SchemaDocument` model so a hand-edited or otherwise corrupted
+    row surfaces as a 500 with the standard sanitised-error envelope
+    instead of leaking partial / wrong data.
+    """
+    source = await service.get_source(source_id)
+    _assert_ownership_or_admin(source.owner_id, current_user)
+
+    from src.repositories.source_repository import SourceRepository  # noqa: PLC0415
+
+    repo = SourceRepository(db)
+    study = await repo.get_latest_completed_study(source_id)
+    if study is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={
+                "type": "https://httpstatuses.com/404",
+                "title": "Not Found",
+                "status": 404,
+                "detail": "No completed schema study for this source.",
+            },
+        )
+
+    # Strict validation — raises ValidationError if the persisted JSON
+    # doesn't match SchemaDocument, which the global handler converts to
+    # a sanitised 500. Surface it as a generic 500 so we don't echo the
+    # exception text (which could leak DB internals).
+    from pydantic import ValidationError  # noqa: PLC0415
+
+    try:
+        schema_document = SchemaDocument.model_validate(study.schema_document_json)
+    except ValidationError as exc:
+        logger.exception(
+            "Persisted SchemaDocument failed strict validation for source_id=%s "
+            "study_id=%s",
+            source_id,
+            getattr(study, "id", None),
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={
+                "type": "https://httpstatuses.com/500",
+                "title": "Internal Server Error",
+                "status": 500,
+                "detail": "Persisted schema document failed validation.",
+            },
+        ) from exc
+
+    fingerprint = getattr(study, "fingerprint", None) or schema_document.fingerprint
+    return SchemaDocumentResponse(
+        study_id=study.id,
+        state=str(study.state),
+        started_at=study.started_at,
+        finished_at=study.finished_at,
+        fingerprint_short=fingerprint[:8],
+        schema_document=schema_document,
+    )
+
+
+@router.post(
+    "/{source_id}/schema-document/reveal-samples",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Audit-log emit for sample-values reveal in the admin viewer",
+)
+async def emit_samples_revealed(
+    source_id: uuid.UUID,
+    request: Request,
+    current_user: User = Depends(require_admin),
+    service: SourceService = Depends(_get_source_service),
+    db: AsyncSession = Depends(get_db),
+) -> Response:
+    """Emit a ``source.schema.samples_revealed`` audit row.
+
+    Admin-only. Called by the SchemaViewer when an admin flips the
+    "Show sample values" toggle ON. We do NOT log when the toggle is
+    flipped back to OFF — auditors only care about the moment of reveal.
+
+    Returns 204 No Content. The audit row metadata is intentionally
+    empty (``{}``) — the source identifier is on ``resource_id`` and the
+    admin user is on ``admin_user_id``, which is everything the audit
+    consumers need.
+    """
+    source = await service.get_source(source_id)
+    # Admin-only via require_admin, but we still want a sane 404 path if
+    # the source id doesn't exist — get_source raises NotFoundError → 404.
+    await emit_audit(
+        AdminAuditLogRepository(db),
+        admin_user_id=current_user.id,
+        action="source.schema.samples_revealed",
+        resource_type="source",
+        resource_id=source.id,
+        request=request,
+        metadata={},
+    )
+    await db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)

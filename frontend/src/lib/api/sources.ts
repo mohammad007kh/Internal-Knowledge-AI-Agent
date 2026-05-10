@@ -390,3 +390,160 @@ export async function grantPermissionApi(sourceId: string, userId: string): Prom
 export async function revokePermissionApi(sourceId: string, userId: string): Promise<void> {
   await apiClient.delete<void>(`/api/v1/sources/${sourceId}/permissions/${userId}`)
 }
+
+// ---------------------------------------------------------------------------
+// SchemaDocument (U7 — admin DB schema viewer)
+//
+// Mirrors the backend Pydantic models declared in
+// `backend/src/services/db_introspection/schema_doc.py` exactly. Fields are
+// kept verbatim (snake_case, optional/nullable matching) so the JSON we get
+// back does not need a transformer layer.
+// ---------------------------------------------------------------------------
+
+export type SchemaDialect = 'postgresql' | 'mysql' | 'mssql' | 'mongodb'
+
+export type TableKind = 'table' | 'view' | 'materialized_view' | 'collection'
+
+export type RelationshipKind = 'foreign_key' | 'embedded_hint'
+
+/** Pipeline phase identifier — string union matches the backend literal. */
+export type StudyPhase =
+  | 'CONNECTING'
+  | 'INVENTORY'
+  | 'COLUMNS'
+  | 'SAMPLING'
+  | 'DESCRIBING'
+  | 'INDEXING'
+
+/** One phase-level failure recorded during a partial study. */
+export interface PhaseError {
+  phase: string
+  error_key: string
+  message: string
+}
+
+export interface IndexDoc {
+  name: string
+  columns: string[]
+  unique: boolean
+}
+
+export interface Relationship {
+  from_columns: string[]
+  to_table: string
+  to_columns: string[]
+  kind: RelationshipKind
+}
+
+export interface ColumnDoc {
+  name: string
+  /**
+   * Normalised column type. The backend allows `array<T>` strings on top of
+   * the literal core types — we widen to `string` here to keep the wire
+   * shape lossless and let consumers branch on the literals when relevant.
+   */
+  type: string
+  native_type: string
+  nullable: boolean
+  default: string | null
+  sample_values: string[]
+  is_pii_candidate: boolean
+  inferred: boolean
+}
+
+export interface TableDoc {
+  name: string
+  kind: TableKind
+  row_count_estimate: number | null
+  primary_key: string[]
+  indexes: IndexDoc[]
+  columns: ColumnDoc[]
+  relationships: Relationship[]
+  description: string
+  tags: string[]
+}
+
+export interface SchemaDocument {
+  dialect: SchemaDialect
+  fingerprint: string
+  generated_at: string
+  agent_version: string
+  study_duration_ms: number
+  partial: boolean
+  phase_errors: PhaseError[]
+  tables: TableDoc[]
+  summary: string
+  vector_index_ref: string | null
+}
+
+export interface SchemaDocumentResponse {
+  study_id: string
+  state: string
+  started_at: string
+  finished_at: string | null
+  fingerprint_short: string
+  schema_document: SchemaDocument
+}
+
+/**
+ * Sentinel thrown by `getSchemaDocumentApi` when the backend returns 404
+ * for a source that has no completed study yet. Carries the HTTP status
+ * explicitly so callers (the SchemaViewer empty-state branch) can branch
+ * on it without parsing message strings — `parseErrorResponse` flattens
+ * RFC-7807 problem-details into a plain `Error` and drops the status.
+ */
+export class SchemaDocumentNotFoundError extends Error {
+  readonly status = 404
+  constructor(message = 'Schema not yet documented.') {
+    super(message)
+    this.name = 'SchemaDocumentNotFoundError'
+  }
+}
+
+/** Stable detail string the backend emits when no completed study exists. */
+const NO_COMPLETED_STUDY_DETAIL = 'No completed schema study for this source.'
+
+export async function getSchemaDocumentApi(
+  sourceId: string
+): Promise<SchemaDocumentResponse> {
+  try {
+    const { data } = await apiClient.get<SchemaDocumentResponse>(
+      `/api/v1/sources/${sourceId}/schema-document`
+    )
+    return data
+  } catch (error: unknown) {
+    // The shared `apiClient` response interceptor flattens RFC-7807
+    // problem-details into a plain `Error` and drops the status code.
+    // We try two fallbacks before giving up:
+    //   1. Inspect axios-like properties in case the interceptor was
+    //      bypassed (tests + non-problem+json responses).
+    //   2. Match the backend's stable detail text on a plain Error.
+    const maybeAxios = error as {
+      response?: { status?: number }
+      status?: number
+    }
+    const status = maybeAxios.response?.status ?? maybeAxios.status
+    if (status === 404) {
+      throw new SchemaDocumentNotFoundError()
+    }
+    if (
+      error instanceof Error &&
+      error.message === NO_COMPLETED_STUDY_DETAIL
+    ) {
+      throw new SchemaDocumentNotFoundError(error.message)
+    }
+    throw error
+  }
+}
+
+/**
+ * Audit-emit endpoint called when an admin flips the "Show sample values"
+ * toggle ON in the SchemaViewer. Fire-and-forget: we never need the response
+ * body and we do NOT call this when the toggle is flipped back to OFF —
+ * auditors only care about the moment of reveal.
+ */
+export async function emitSamplesRevealedApi(sourceId: string): Promise<void> {
+  await apiClient.post<void>(
+    `/api/v1/sources/${sourceId}/schema-document/reveal-samples`
+  )
+}

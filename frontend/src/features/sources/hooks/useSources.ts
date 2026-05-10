@@ -1,9 +1,11 @@
 'use client'
 
 import {
+  type SchemaDocumentResponse,
   type UpdateSourceRequest,
   autoNameApi,
   deleteSourceApi,
+  getSchemaDocumentApi,
   getSourceApi,
   getSourceStatsApi,
   listSourceDocumentsApi,
@@ -34,6 +36,8 @@ export const sourcesKeys = {
       ? ([...sourcesKeys.all, 'sync-jobs', id] as const)
       : ([...sourcesKeys.all, 'sync-jobs', id, { limit, offset }] as const),
   documents: (id: string) => [...sourcesKeys.all, 'documents', id] as const,
+  schemaDocument: (id: string) =>
+    [...sourcesKeys.all, 'schema-document', id] as const,
 }
 
 // ---------------------------------------------------------------------------
@@ -143,6 +147,43 @@ export function useSourceDocuments(sourceId: string | undefined) {
     queryKey: sourceId ? sourcesKeys.documents(sourceId) : ['sources', 'documents', 'empty'],
     queryFn: () => listSourceDocumentsApi(sourceId as string),
     enabled: Boolean(sourceId),
+  })
+}
+
+export interface UseSchemaDocumentOptions {
+  /**
+   * Gate the query — pass `sourceType === 'database'` so the hook stays
+   * dormant for file / web / Confluence sources where the endpoint would
+   * always 404. Defaults to `true` (always enabled when a sourceId is
+   * present) so calling code that already knows the source is a DB doesn't
+   * have to pass a redundant flag.
+   */
+  enabled?: boolean
+}
+
+/**
+ * Fetch the latest validated SchemaDocument for a DB source.
+ *
+ * No auto-polling — the document only changes when the studying agent
+ * completes a new run, and we invalidate the cache from `useTriggerSync`
+ * (which already invalidates `sourcesKeys.detail`). `staleTime: 60_000`
+ * because the document is large and changes rarely; we don't want to
+ * refetch on every tab switch.
+ */
+export function useSchemaDocument(
+  sourceId: string | undefined,
+  options: UseSchemaDocumentOptions = {}
+) {
+  const { enabled = true } = options
+  return useQuery<SchemaDocumentResponse>({
+    queryKey: sourceId
+      ? sourcesKeys.schemaDocument(sourceId)
+      : ['sources', 'schema-document', 'empty'],
+    queryFn: () => getSchemaDocumentApi(sourceId as string),
+    enabled: Boolean(sourceId) && enabled,
+    staleTime: 60_000,
+    // 404 is an expected state ("no study has run yet") — don't retry.
+    retry: false,
   })
 }
 

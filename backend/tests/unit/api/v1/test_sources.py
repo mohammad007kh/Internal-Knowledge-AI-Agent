@@ -455,3 +455,503 @@ class TestDescriptionHistoryEndpoint:
 
         resp = client.get(f"/sources/{source_id}/description-history")
         assert resp.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# GET /sources/{source_id}/schema-document — admin/owner DB schema viewer (U7)
+# ---------------------------------------------------------------------------
+
+
+class TestSchemaDocumentEndpoint:
+    """Unit tests for ``GET /sources/{source_id}/schema-document``.
+
+    Verifies admin/owner read access, 404 fall-through for unknown source,
+    404 when no completed study exists, and that a tampered persisted
+    document is rejected by the strict :class:`SchemaDocument` validator
+    (mapped to a sanitised 500). Plus auth checks for the
+    ``reveal-samples`` audit-emit endpoint.
+    """
+
+    @pytest.fixture()
+    def admin_id(self) -> uuid.UUID:
+        return uuid.UUID("00000000-0000-0000-0000-0000000000aa")
+
+    @pytest.fixture()
+    def owner_id(self) -> uuid.UUID:
+        return uuid.UUID("00000000-0000-0000-0000-0000000000bb")
+
+    @pytest.fixture()
+    def stranger_id(self) -> uuid.UUID:
+        return uuid.UUID("00000000-0000-0000-0000-0000000000cc")
+
+    @pytest.fixture()
+    def source_id(self) -> uuid.UUID:
+        return uuid.UUID("00000000-0000-0000-0000-0000000000a7")
+
+    @pytest.fixture()
+    def study_id(self) -> uuid.UUID:
+        return uuid.UUID("00000000-0000-0000-0000-000000000077")
+
+    @pytest.fixture()
+    def admin_user(self, admin_id: uuid.UUID):
+        from unittest.mock import MagicMock
+
+        from src.models.user import User, UserRole
+
+        u = MagicMock(spec=User)
+        u.id = admin_id
+        u.email = "admin@example.com"
+        u.role = UserRole.admin
+        u.is_active = True
+        return u
+
+    @pytest.fixture()
+    def owner_user(self, owner_id: uuid.UUID):
+        from unittest.mock import MagicMock
+
+        from src.models.user import User, UserRole
+
+        u = MagicMock(spec=User)
+        u.id = owner_id
+        u.email = "owner@example.com"
+        u.role = UserRole.user
+        u.is_active = True
+        return u
+
+    @pytest.fixture()
+    def stranger_user(self, stranger_id: uuid.UUID):
+        from unittest.mock import MagicMock
+
+        from src.models.user import User, UserRole
+
+        u = MagicMock(spec=User)
+        u.id = stranger_id
+        u.email = "stranger@example.com"
+        u.role = UserRole.user
+        u.is_active = True
+        return u
+
+    @pytest.fixture()
+    def source_row(self, source_id: uuid.UUID, owner_id: uuid.UUID):
+        from unittest.mock import MagicMock
+
+        src = MagicMock()
+        src.id = source_id
+        src.owner_id = owner_id
+        return src
+
+    @pytest.fixture()
+    def db(self):
+        from unittest.mock import AsyncMock, MagicMock
+
+        m = MagicMock()
+        m.commit = AsyncMock()
+        m.execute = AsyncMock()
+        return m
+
+    @pytest.fixture()
+    def schema_document_dict(self) -> dict:
+        """A minimal but valid SchemaDocument JSON dict.
+
+        Mirrors the shape :class:`SchemaDocument.model_validate` accepts —
+        keeps the test independent of any future drift in optional fields.
+        """
+        return {
+            "dialect": "postgresql",
+            "fingerprint": "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2",
+            "generated_at": "2026-05-09T12:00:00+00:00",
+            "agent_version": "0.4.2",
+            "study_duration_ms": 14_300,
+            "partial": False,
+            "phase_errors": [],
+            "tables": [
+                {
+                    "name": "public.orders",
+                    "kind": "table",
+                    "row_count_estimate": 410_000,
+                    "primary_key": ["id"],
+                    "indexes": [
+                        {"name": "orders_pkey", "columns": ["id"], "unique": True}
+                    ],
+                    "columns": [
+                        {
+                            "name": "id",
+                            "type": "uuid",
+                            "native_type": "uuid",
+                            "nullable": False,
+                            "default": None,
+                            "sample_values": [],
+                            "is_pii_candidate": False,
+                            "inferred": False,
+                        }
+                    ],
+                    "relationships": [],
+                    "description": "Customer orders.",
+                    "tags": ["transactional"],
+                }
+            ],
+            "summary": "Two-table demo",
+            "vector_index_ref": None,
+        }
+
+    @pytest.fixture()
+    def study_row(
+        self, study_id: uuid.UUID, schema_document_dict: dict
+    ):
+        from datetime import datetime, timezone
+        from unittest.mock import MagicMock
+
+        s = MagicMock()
+        s.id = study_id
+        s.state = "READY"
+        s.started_at = datetime(2026, 5, 9, 12, 0, tzinfo=timezone.utc)
+        s.finished_at = datetime(2026, 5, 9, 12, 0, 14, tzinfo=timezone.utc)
+        s.fingerprint = schema_document_dict["fingerprint"]
+        s.schema_document_json = schema_document_dict
+        return s
+
+    @pytest.fixture()
+    def app(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        admin_user,
+        db,
+        source_row,
+        study_row,
+    ):
+        """FastAPI app with deps overridden for the schema-document endpoint."""
+        from unittest.mock import AsyncMock
+
+        from fastapi import FastAPI
+
+        from src.api.middleware.error_handler import register_exception_handlers
+        from src.api.v1.sources import _get_source_service, router
+        from src.core.database import get_db
+        from src.core.deps import get_current_user, require_admin
+        from src.repositories.source_repository import SourceRepository
+
+        service_stub = AsyncMock()
+        service_stub.get_source = AsyncMock(return_value=source_row)
+
+        async def _get_latest(self, _src_id):  # noqa: ANN001
+            return study_row
+
+        monkeypatch.setattr(
+            SourceRepository,
+            "get_latest_completed_study",
+            _get_latest,
+            raising=True,
+        )
+
+        app = FastAPI()
+        register_exception_handlers(app)
+        app.include_router(router, prefix="/sources")
+
+        app.dependency_overrides[get_current_user] = lambda: admin_user
+        app.dependency_overrides[require_admin] = lambda: admin_user
+        app.dependency_overrides[get_db] = lambda: db
+        app.dependency_overrides[_get_source_service] = lambda: service_stub
+
+        return app
+
+    @pytest.fixture()
+    def client(self, app):
+        from fastapi.testclient import TestClient
+
+        with TestClient(app, raise_server_exceptions=False) as tc:
+            yield tc
+
+    # ---------------------------------------------------------------- #
+    # Success cases
+    # ---------------------------------------------------------------- #
+
+    def test_admin_gets_schema_document(
+        self, client, source_id, study_id, schema_document_dict
+    ):
+        """Admin sees the full envelope plus the strictly-validated document."""
+        resp = client.get(f"/sources/{source_id}/schema-document")
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["study_id"] == str(study_id)
+        assert body["state"] == "READY"
+        assert body["fingerprint_short"] == schema_document_dict["fingerprint"][:8]
+        # Schema document round-trips through the strict validator.
+        assert body["schema_document"]["dialect"] == "postgresql"
+        assert body["schema_document"]["tables"][0]["name"] == "public.orders"
+        assert body["schema_document"]["partial"] is False
+
+    def test_owner_gets_schema_document(
+        self, app, client, owner_user, source_id
+    ):
+        """Source owner has the same read access as an admin."""
+        from src.core.deps import get_current_user
+
+        app.dependency_overrides[get_current_user] = lambda: owner_user
+
+        resp = client.get(f"/sources/{source_id}/schema-document")
+        assert resp.status_code == 200
+
+    # ---------------------------------------------------------------- #
+    # Auth + 404 cases
+    # ---------------------------------------------------------------- #
+
+    def test_non_owner_non_admin_403(
+        self, app, client, stranger_user, source_id
+    ):
+        """A user who is neither admin nor owner gets 403."""
+        from src.core.deps import get_current_user
+
+        app.dependency_overrides[get_current_user] = lambda: stranger_user
+
+        resp = client.get(f"/sources/{source_id}/schema-document")
+        assert resp.status_code == 403
+
+    def test_no_completed_study_returns_404(
+        self, app, client, source_id, monkeypatch
+    ):
+        """When no SchemaStudy has finished, the endpoint returns 404."""
+        from src.repositories.source_repository import SourceRepository
+
+        async def _none(self, _src_id):  # noqa: ANN001
+            return None
+
+        monkeypatch.setattr(
+            SourceRepository,
+            "get_latest_completed_study",
+            _none,
+            raising=True,
+        )
+
+        resp = client.get(f"/sources/{source_id}/schema-document")
+        assert resp.status_code == 404
+
+    def test_unknown_source_returns_404(self, app, client, source_id):
+        """Unknown source id surfaces as 404 (raised by SourceService)."""
+        from unittest.mock import AsyncMock
+
+        from src.api.v1.sources import _get_source_service
+        from src.core.exceptions import NotFoundError
+
+        service_stub = AsyncMock()
+        service_stub.get_source = AsyncMock(
+            side_effect=NotFoundError(f"Source {source_id} not found.")
+        )
+        app.dependency_overrides[_get_source_service] = lambda: service_stub
+
+        resp = client.get(f"/sources/{source_id}/schema-document")
+        assert resp.status_code == 404
+
+    def test_tampered_document_returns_500(
+        self, app, client, source_id, study_row, monkeypatch
+    ):
+        """Tampered ``schema_document_json`` fails strict validation → 500.
+
+        We mutate the persisted JSON to inject an unknown top-level key,
+        which the strict ``extra='forbid'`` model rejects. The endpoint
+        must NOT echo the raw ValidationError text.
+        """
+        from src.repositories.source_repository import SourceRepository
+
+        broken = dict(study_row.schema_document_json)
+        broken["unexpected_field"] = "hostile"  # extra=forbid → ValidationError
+
+        async def _broken(self, _src_id):  # noqa: ANN001
+            from unittest.mock import MagicMock
+
+            s = MagicMock()
+            s.id = study_row.id
+            s.state = study_row.state
+            s.started_at = study_row.started_at
+            s.finished_at = study_row.finished_at
+            s.fingerprint = study_row.fingerprint
+            s.schema_document_json = broken
+            return s
+
+        monkeypatch.setattr(
+            SourceRepository,
+            "get_latest_completed_study",
+            _broken,
+            raising=True,
+        )
+
+        resp = client.get(f"/sources/{source_id}/schema-document")
+        assert resp.status_code == 500
+        body = resp.json()
+        # Sanitised — does not include raw Pydantic error details.
+        haystack = str(body).lower()
+        assert "unexpected_field" not in haystack
+        assert "validationerror" not in haystack
+
+
+class TestRevealSamplesEndpoint:
+    """Unit tests for ``POST /sources/{id}/schema-document/reveal-samples``.
+
+    Admin-only audit emit. Returns 204 on success, writes one
+    ``source.schema.samples_revealed`` audit row, and 403/404 otherwise.
+    """
+
+    @pytest.fixture()
+    def admin_id(self) -> uuid.UUID:
+        return uuid.UUID("00000000-0000-0000-0000-0000000000aa")
+
+    @pytest.fixture()
+    def owner_id(self) -> uuid.UUID:
+        return uuid.UUID("00000000-0000-0000-0000-0000000000bb")
+
+    @pytest.fixture()
+    def source_id(self) -> uuid.UUID:
+        return uuid.UUID("00000000-0000-0000-0000-0000000000d7")
+
+    @pytest.fixture()
+    def admin_user(self, admin_id: uuid.UUID):
+        from unittest.mock import MagicMock
+
+        from src.models.user import User, UserRole
+
+        u = MagicMock(spec=User)
+        u.id = admin_id
+        u.email = "admin@example.com"
+        u.role = UserRole.admin
+        u.is_active = True
+        return u
+
+    @pytest.fixture()
+    def regular_user(self, owner_id: uuid.UUID):
+        from unittest.mock import MagicMock
+
+        from src.models.user import User, UserRole
+
+        u = MagicMock(spec=User)
+        u.id = owner_id
+        u.email = "owner@example.com"
+        u.role = UserRole.user
+        u.is_active = True
+        return u
+
+    @pytest.fixture()
+    def source_row(self, source_id: uuid.UUID, owner_id: uuid.UUID):
+        from unittest.mock import MagicMock
+
+        src = MagicMock()
+        src.id = source_id
+        src.owner_id = owner_id
+        return src
+
+    @pytest.fixture()
+    def db(self):
+        from unittest.mock import AsyncMock, MagicMock
+
+        m = MagicMock()
+        m.commit = AsyncMock()
+        m.execute = AsyncMock()
+        return m
+
+    @pytest.fixture()
+    def audit_calls(self):
+        return []
+
+    @pytest.fixture()
+    def app(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        admin_user,
+        db,
+        source_row,
+        audit_calls,
+    ):
+        from unittest.mock import AsyncMock
+
+        from fastapi import FastAPI
+
+        from src.api.middleware.error_handler import register_exception_handlers
+        from src.api.v1.sources import _get_source_service, router
+        from src.core.database import get_db
+        from src.core.deps import get_current_user, require_admin
+        from src.repositories.admin_audit_log_repository import (
+            AdminAuditLogRepository,
+        )
+
+        service_stub = AsyncMock()
+        service_stub.get_source = AsyncMock(return_value=source_row)
+
+        async def _capture_insert(self, **kwargs):  # noqa: ANN001
+            audit_calls.append(kwargs)
+            from src.models.admin_audit_log import AdminAuditLog
+
+            return AdminAuditLog(
+                admin_user_id=kwargs.get("admin_user_id"),
+                action=kwargs.get("action"),
+                resource_type=kwargs.get("resource_type"),
+                resource_id=kwargs.get("resource_id"),
+                ip_address=kwargs.get("ip_address"),
+                metadata_=kwargs.get("metadata") or {},
+            )
+
+        monkeypatch.setattr(
+            AdminAuditLogRepository, "insert", _capture_insert, raising=True
+        )
+
+        app = FastAPI()
+        register_exception_handlers(app)
+        app.include_router(router, prefix="/sources")
+
+        app.dependency_overrides[get_current_user] = lambda: admin_user
+        app.dependency_overrides[require_admin] = lambda: admin_user
+        app.dependency_overrides[get_db] = lambda: db
+        app.dependency_overrides[_get_source_service] = lambda: service_stub
+
+        return app
+
+    @pytest.fixture()
+    def client(self, app):
+        from fastapi.testclient import TestClient
+
+        with TestClient(app, raise_server_exceptions=False) as tc:
+            yield tc
+
+    def test_admin_emits_audit_204(
+        self, client, source_id, audit_calls, admin_id
+    ):
+        resp = client.post(f"/sources/{source_id}/schema-document/reveal-samples")
+        assert resp.status_code == 204
+        assert len(audit_calls) == 1
+        row = audit_calls[0]
+        assert row["action"] == "source.schema.samples_revealed"
+        assert row["resource_type"] == "source"
+        assert row["resource_id"] == source_id
+        assert row["admin_user_id"] == admin_id
+        # Metadata is empty by spec — we never echo connection strings or
+        # any source config here.
+        assert row["metadata"] == {}
+
+    def test_non_admin_gets_403(self, app, client, regular_user, source_id):
+        from src.core.deps import require_admin
+
+        # Recreate require_admin's actual behaviour for non-admins.
+        from fastapi import HTTPException, status as _status
+
+        def _deny():
+            raise HTTPException(
+                status_code=_status.HTTP_403_FORBIDDEN,
+                detail="Admin role required",
+            )
+
+        app.dependency_overrides[require_admin] = _deny
+
+        resp = client.post(f"/sources/{source_id}/schema-document/reveal-samples")
+        assert resp.status_code == 403
+
+    def test_unknown_source_returns_404(self, app, client, source_id):
+        from unittest.mock import AsyncMock
+
+        from src.api.v1.sources import _get_source_service
+        from src.core.exceptions import NotFoundError
+
+        service_stub = AsyncMock()
+        service_stub.get_source = AsyncMock(
+            side_effect=NotFoundError(f"Source {source_id} not found.")
+        )
+        app.dependency_overrides[_get_source_service] = lambda: service_stub
+
+        resp = client.post(f"/sources/{source_id}/schema-document/reveal-samples")
+        assert resp.status_code == 404

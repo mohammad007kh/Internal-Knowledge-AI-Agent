@@ -468,6 +468,38 @@ class SourceRepository(BaseRepository[Source]):
         result = await self._session.execute(stmt)
         return int(result.scalar_one())
 
+    # ------------------------------------------------------------------ #
+    # Schema studies (U7 — admin DB schema viewer)
+    # ------------------------------------------------------------------ #
+
+    async def get_latest_completed_study(
+        self, source_id: uuid.UUID
+    ) -> Any | None:
+        """Return the newest :class:`SchemaStudy` for *source_id* with a
+        non-null ``schema_document_json``, or None when no run has finished.
+
+        Newest is determined by ``started_at`` (descending) — multiple studies
+        may queue, but only the last one to actually persist a document is
+        the canonical view for the admin schema-viewer endpoint.
+
+        We deliberately filter on ``schema_document_json IS NOT NULL`` rather
+        than ``state IN ('READY', 'READY_PARTIAL')`` so a future state name
+        (e.g. ``READY_DEGRADED``) doesn't silently break this read.
+        """
+        from src.models.schema_study import SchemaStudy  # noqa: PLC0415
+
+        stmt = (
+            select(SchemaStudy)
+            .where(
+                SchemaStudy.source_id == source_id,
+                SchemaStudy.schema_document_json.isnot(None),
+            )
+            .order_by(SchemaStudy.started_at.desc())
+            .limit(1)
+        )
+        result = await self._session.execute(stmt)
+        return result.scalar_one_or_none()
+
     async def list_by_ids(self, source_ids: list[uuid.UUID]) -> list[Source]:
         """Bulk fetch by list of PKs; returns only non-deleted, approved sources.
 
