@@ -25,6 +25,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.database import get_db
 from src.core.deps import get_current_user, require_admin
+from src.models.enums import SourceType
 from src.models.user import User, UserRole
 from src.repositories.admin_audit_log_repository import AdminAuditLogRepository
 from src.schemas.source import (
@@ -329,7 +330,43 @@ async def create_source(
 
         _celery.send_task("tasks.sync_source", args=[str(source.id)])
     except Exception:  # noqa: BLE001
-        pass
+        # Match the study_source pattern: a broker outage must not 500 the
+        # create call, but we want the failure on the record so an admin
+        # can correlate "source created but never ingested".
+        logger.warning(
+            "sync_source enqueue failed for source_id=%s — proceeding",
+            source.id,
+            exc_info=True,
+        )
+
+    # Slice E1: kick off the studying-agent for DB sources so the U7 schema
+    # viewer has a SchemaStudy to render. Best-effort — a Celery / broker
+    # outage MUST NOT 500 the create endpoint. Schema studies are also
+    # idempotent at the task level (see ``SchemaStudyRepository.is_running``)
+    # so a duplicate enqueue is harmless.
+    #
+    # We dispatch via ``study_source.delay`` rather than the plain
+    # ``send_task`` path so unit tests can monkeypatch ``.delay`` directly
+    # on the task object (matching the slice-E1 contract).
+    if source.source_type == SourceType.DATABASE:
+        try:
+            from src.tasks.study_source import study_source as _study  # noqa: PLC0415
+
+            _study.delay(str(source.id))
+        except ImportError:
+            # Module-level import failure means the deployment is broken —
+            # this is NOT a transient broker outage we want to swallow.
+            logger.error(
+                "study_source module failed to import — deployment broken",
+                exc_info=True,
+            )
+            raise
+        except Exception:  # noqa: BLE001
+            logger.warning(
+                "study_source enqueue failed for source_id=%s (broker?) — proceeding",
+                source.id,
+                exc_info=True,
+            )
 
     return SourcePublicResponse(
         id=str(source.id),
@@ -761,12 +798,7 @@ async def update_source_credentials(  # noqa: PLR0913 — FastAPI deps
     # Step 3: ownership/admin gate + DB-only check.
     source = await service.get_source(source_id)
     _assert_ownership_or_admin(source.owner_id, current_user)
-    source_type_value = (
-        source.source_type.value
-        if hasattr(source.source_type, "value")
-        else str(source.source_type)
-    )
-    if source_type_value != "database":
+    if source.source_type != SourceType.DATABASE:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail={
@@ -842,6 +874,30 @@ async def update_source_credentials(  # noqa: PLR0913 — FastAPI deps
         metadata={"changed_fields": changed_fields},
     )
     await db.commit()
+
+    # Slice E1: re-study the schema after a credential rotation so the U7
+    # schema viewer reflects the new connection. Best-effort enqueue —
+    # broker outage MUST NOT 500 the credential update. ImportError of
+    # the task module is a deployment problem (NOT a transient broker
+    # outage) so we surface it instead of swallowing.
+    try:
+        from src.tasks.study_source import study_source as _study  # noqa: PLC0415
+
+        _study.delay(str(updated.id))
+    except ImportError:
+        logger.error(
+            "study_source module failed to import — deployment broken",
+            exc_info=True,
+        )
+        raise
+    except Exception:  # noqa: BLE001
+        logger.warning(
+            "study_source enqueue failed for source_id=%s after credential "
+            "rotation (broker?) — proceeding",
+            updated.id,
+            exc_info=True,
+        )
+
     return SourceResponse.model_validate(updated)
 
 

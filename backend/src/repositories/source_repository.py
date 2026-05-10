@@ -293,6 +293,38 @@ class SourceRepository(BaseRepository[Source]):
     # Writes
     # ------------------------------------------------------------------ #
 
+    async def set_schema_status(
+        self,
+        source_id: uuid.UUID,
+        status: str,
+    ) -> None:
+        """Stamp ``schema_status`` on a Source row (Slice E1).
+
+        The studying-agent celery task calls this on every state transition
+        so the admin sources list can render "studying / completed / failed"
+        without joining ``schema_studies`` for every row. The caller owns
+        the transaction — this method only emits the UPDATE.
+
+        Accepts any string; the canonical vocabulary is enforced upstream
+        by the model docstring (QUEUED | STUDYING | READY | STALE | FAILED
+        plus the ``completed`` / ``failed`` aliases the task uses).
+
+        On ``status == "completed"`` we additionally stamp
+        ``last_studied_at = now()`` so the admin sources list can render
+        "studied 4 min ago" without joining ``schema_studies``. We do
+        NOT touch ``last_studied_at`` on failure so admins still see the
+        previous successful study time after a transient breakage.
+        """
+        values: dict[str, Any] = {"schema_status": status}
+        if status == "completed":
+            values["last_studied_at"] = func.now()
+        stmt = (
+            update(Source)
+            .where(Source.id == source_id)
+            .values(**values)
+        )
+        await self._session.execute(stmt)
+
     async def update_connection_health(
         self,
         source_id: uuid.UUID,

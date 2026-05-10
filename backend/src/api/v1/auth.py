@@ -33,7 +33,7 @@ from src.schemas.auth import (
     PasswordResetRequest,
     TokenResponse,
 )
-from src.services.audit_service import emit_audit
+from src.services.audit_service import emit_audit, mask_email
 from src.services.auth_service import AuthService
 from src.services.password_service import PasswordService
 from src.services.user_service import UserService
@@ -141,6 +141,11 @@ async def login(
     try:
         access, refresh, mcp = await auth_service.login(body.email, body.password)
     except UnauthorizedError:
+        # Never store the caller-supplied email in plaintext — a botnet
+        # spraying random addresses against /login would accumulate PII
+        # in admin_audit_log.metadata. Hash + mask instead so support
+        # staff can still correlate repeat failures.
+        masked, email_hash = mask_email(body.email)
         await emit_audit(
             audit_repo,
             admin_user_id=None,
@@ -148,7 +153,11 @@ async def login(
             resource_type="user",
             resource_id=None,
             request=request,
-            metadata={"email": body.email, "reason": "invalid_credentials"},
+            metadata={
+                "email_masked": masked,
+                "email_hash": email_hash,
+                "reason": "invalid_credentials",
+            },
         )
         await db.commit()
         raise

@@ -955,3 +955,215 @@ class TestRevealSamplesEndpoint:
 
         resp = client.post(f"/sources/{source_id}/schema-document/reveal-samples")
         assert resp.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# POST /sources — DB sources enqueue tasks.study_source.delay (Slice E1)
+# ---------------------------------------------------------------------------
+
+
+class TestCreateSourceEnqueuesStudySource:
+    """Slice E1: ``POST /sources`` for ``type=database`` schedules the
+    studying-agent so the U7 schema viewer has a SchemaStudy to render.
+
+    Non-database sources MUST NOT enqueue ``study_source`` — only the
+    sync_source task fires for them. The enqueue happens AFTER the create
+    transaction commits so a failed insert leaves no orphan job in the queue.
+    """
+
+    @pytest.fixture()
+    def admin_id(self) -> uuid.UUID:
+        return uuid.UUID("00000000-0000-0000-0000-0000000000aa")
+
+    @pytest.fixture()
+    def admin_user(self, admin_id: uuid.UUID):
+        from unittest.mock import MagicMock
+
+        from src.models.user import User, UserRole
+
+        u = MagicMock(spec=User)
+        u.id = admin_id
+        u.email = "admin@example.com"
+        u.role = UserRole.admin
+        u.is_active = True
+        return u
+
+    @pytest.fixture()
+    def db(self):
+        from unittest.mock import AsyncMock, MagicMock
+
+        m = MagicMock()
+        m.commit = AsyncMock()
+        m.execute = AsyncMock()
+        m.flush = AsyncMock()
+        return m
+
+    def _make_persisted_source(
+        self, source_type_value: str, source_id: uuid.UUID, owner_id: uuid.UUID
+    ):
+        """Build a Source-shaped MagicMock for the route's response_model."""
+        from datetime import datetime, timezone
+        from unittest.mock import MagicMock
+
+        from src.models.enums import SourceType
+
+        src = MagicMock()
+        src.id = source_id
+        src.owner_id = owner_id
+        src.name = "DB source"
+        if source_type_value == "database":
+            src.source_type = SourceType.DATABASE
+        else:
+            src.source_type = SourceType(source_type_value)
+        src.is_active = True
+        src.deleted_at = None
+        now = datetime.now(tz=timezone.utc)
+        src.created_at = now
+        src.updated_at = now
+        src.description = None
+        src.source_mode = "live"
+        src.retrieval_mode = "vector_only"
+        src.sync_mode = "manual"
+        src.sync_schedule = None
+        src.last_synced_at = None
+        src.next_sync_due_at = None
+        src.status = "ready"
+        src.citations_enabled = True
+        src.embedder_id = None
+        src.name_status = "user_set"
+        src.description_status = "user_set"
+        src.auto_name_and_description = False
+        src.schema_status = None
+        src.drift_signal_count = 0
+        src.last_studied_at = None
+        src.connection_status = "unknown"
+        src.connection_last_checked_at = now
+        src.connection_last_error = None
+        return src
+
+    @pytest.fixture()
+    def app(self, monkeypatch: pytest.MonkeyPatch, admin_user, admin_id, db):
+        from unittest.mock import AsyncMock, MagicMock
+
+        from fastapi import FastAPI
+
+        from src.api.middleware.error_handler import register_exception_handlers
+        from src.api.v1.sources import _get_source_service, router
+        from src.core.database import get_db
+        from src.core.deps import get_current_user, require_admin
+        from src.repositories.admin_audit_log_repository import (
+            AdminAuditLogRepository,
+        )
+
+        # Patch the audit-log insert so we don't need a real DB session.
+        monkeypatch.setattr(
+            AdminAuditLogRepository,
+            "insert",
+            AsyncMock(return_value=None),
+            raising=True,
+        )
+
+        # Patch the celery .delay so it never reaches a broker. Tests
+        # introspect this spy directly.
+        from src.tasks import study_source as _study_module
+
+        delay_spy = MagicMock()
+        monkeypatch.setattr(
+            _study_module.study_source, "delay", delay_spy, raising=True
+        )
+
+        # The route's existing sync_source ``current_app.send_task`` call is
+        # already wrapped in ``try/except Exception: pass`` so a broker
+        # outage during the test silently no-ops — no need to patch it. The
+        # study_source ``.delay`` call is the only one we assert on.
+
+        service_stub = AsyncMock()
+
+        app = FastAPI()
+        register_exception_handlers(app)
+        app.include_router(router, prefix="/sources")
+        app.dependency_overrides[get_db] = lambda: db
+        app.dependency_overrides[get_current_user] = lambda: admin_user
+        app.dependency_overrides[require_admin] = lambda: admin_user
+        app.dependency_overrides[_get_source_service] = lambda: service_stub
+        app.state.service = service_stub
+        app.state.delay_spy = delay_spy
+        return app
+
+    @pytest.fixture()
+    def client(self, app):
+        from fastapi.testclient import TestClient
+
+        with TestClient(app, raise_server_exceptions=False) as tc:
+            yield tc
+
+    def test_database_source_enqueues_study_source_delay(
+        self, app, client, admin_id
+    ):
+        """POST /sources for ``type=database`` calls study_source.delay(source_id)."""
+        from unittest.mock import AsyncMock
+
+        source_id = uuid.UUID("00000000-0000-0000-0000-000000000099")
+        persisted = self._make_persisted_source(
+            source_type_value="database", source_id=source_id, owner_id=admin_id
+        )
+        app.state.service.create_source_v2 = AsyncMock(return_value=persisted)
+
+        resp = client.post(
+            "/sources",
+            json={
+                "name": "Reporting DB",
+                "source_type": "database",
+                "connection": {
+                    "db_type": "postgresql",
+                    "host": "h",
+                    "port": 5432,
+                    "username": "u",
+                    "password": "p",
+                    "database": "d",
+                    "query": "SELECT 1",
+                },
+                "description": "",
+                "sync_mode": "manual",
+                "retrieval_mode": "text_to_query",
+                "citations_enabled": True,
+                "auto_name_and_description": False,
+            },
+        )
+        assert resp.status_code == 201, resp.text
+
+        # study_source.delay called exactly once with the new source's id.
+        delay_spy = app.state.delay_spy
+        delay_spy.assert_called_once()
+        args = delay_spy.call_args.args
+        assert args == (str(source_id),)
+
+    def test_non_database_source_does_not_enqueue_study_source(
+        self, app, client, admin_id
+    ):
+        """Non-DB sources skip the studying-agent — only sync_source fires."""
+        from unittest.mock import AsyncMock
+
+        source_id = uuid.UUID("00000000-0000-0000-0000-0000000000a1")
+        persisted = self._make_persisted_source(
+            source_type_value="web_url", source_id=source_id, owner_id=admin_id
+        )
+        app.state.service.create_source_v2 = AsyncMock(return_value=persisted)
+
+        resp = client.post(
+            "/sources",
+            json={
+                "name": "Web crawl",
+                "source_type": "web_url",
+                "connection": {"url": "https://example.com"},
+                "description": "",
+                "sync_mode": "manual",
+                "retrieval_mode": "vector_only",
+                "citations_enabled": True,
+                "auto_name_and_description": False,
+            },
+        )
+        assert resp.status_code == 201, resp.text
+
+        delay_spy = app.state.delay_spy
+        delay_spy.assert_not_called()

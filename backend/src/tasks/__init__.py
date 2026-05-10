@@ -22,6 +22,7 @@ TASK_MODULES: list[str] = [
     "src.tasks.check_scheduled_syncs",
     "src.tasks.trigger_all_syncs",
     "src.tasks.auto_name_source",
+    "src.tasks.study_source",
 ]
 
 celery_app: Celery = Celery(
