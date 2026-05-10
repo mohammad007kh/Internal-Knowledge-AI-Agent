@@ -35,7 +35,7 @@ import { cn } from '@/lib/utils'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { type ColumnDef, flexRender, getCoreRowModel, useReactTable } from '@tanstack/react-table'
 import { BanIcon, CheckCircleIcon, PencilIcon, ShieldCheckIcon, UserIcon } from 'lucide-react'
-import Link from 'next/link'
+import { useRouter } from 'next/navigation'
 import { useMemo, useState } from 'react'
 import { toast } from 'sonner'
 
@@ -75,6 +75,7 @@ async function reactivateUser(id: string): Promise<void> {
 
 export function UsersTable() {
   const queryClient = useQueryClient()
+  const router = useRouter()
   const { user: authUser } = useAuth()
   const [offset, setOffset] = useState(0)
   const [search, setSearch] = useState('')
@@ -133,13 +134,14 @@ export function UsersTable() {
       accessorKey: 'email',
       header: 'Email',
       cell: ({ row }) => (
-        <Link
-          href={`/admin/users/${row.original.id}`}
-          className="block max-w-[180px] truncate font-medium hover:underline sm:max-w-[260px]"
+        <button
+          type="button"
+          onClick={() => router.push(`/admin/users?user=${row.original.id}`)}
+          className="block max-w-[180px] truncate text-left font-medium hover:underline sm:max-w-[260px]"
           title={row.original.email}
         >
           {row.original.email}
-        </Link>
+        </button>
       ),
     },
     {
@@ -208,12 +210,10 @@ export function UsersTable() {
             size="icon"
             variant="ghost"
             className="h-9 w-9"
-            asChild
+            onClick={() => router.push(`/admin/users?user=${row.original.id}`)}
             aria-label={`Edit ${row.original.email}`}
           >
-            <Link href={`/admin/users/${row.original.id}`}>
-              <PencilIcon className="h-4 w-4" />
-            </Link>
+            <PencilIcon className="h-4 w-4" />
           </Button>
           {row.original.is_active && row.original.id !== authUser?.id ? (
             <Button
@@ -328,7 +328,24 @@ export function UsersTable() {
               </TableRow>
             ) : (
               table.getRowModel().rows.map((row) => (
-                <TableRow key={row.id}>
+                <TableRow
+                  key={row.id}
+                  className="cursor-pointer"
+                  onClick={(e) => {
+                    // Ignore clicks that originated on interactive children
+                    // (buttons, links, inputs) — those handle navigation /
+                    // mutations themselves and shouldn't double-fire.
+                    const target = e.target as HTMLElement | null
+                    if (
+                      target?.closest(
+                        'button, a, input, [role="menuitem"], [role="menu"]'
+                      )
+                    ) {
+                      return
+                    }
+                    router.push(`/admin/users?user=${row.original.id}`)
+                  }}
+                >
                   {row.getVisibleCells().map((cell) => (
                     <TableCell key={cell.id}>
                       {flexRender(cell.column.columnDef.cell, cell.getContext())}

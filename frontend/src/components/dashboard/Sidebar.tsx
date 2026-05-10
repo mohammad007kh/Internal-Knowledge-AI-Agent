@@ -130,7 +130,10 @@ export function MobileHeader({
               <MenuIcon className="h-5 w-5" />
             </button>
           </SheetTrigger>
-          <SheetContent side="left" className="w-72 max-w-[80vw] bg-card p-0">
+          <SheetContent
+            side="left"
+            className="w-72 max-w-[80vw] border border-border bg-card p-0 shadow-lg [-webkit-backdrop-filter:none] [backdrop-filter:none]"
+          >
             <SheetTitle className="sr-only">{brand} navigation</SheetTitle>
             <SheetDescription className="sr-only">
               Primary navigation links for {brand}.

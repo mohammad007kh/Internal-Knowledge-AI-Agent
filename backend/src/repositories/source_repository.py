@@ -394,6 +394,80 @@ class SourceRepository(BaseRepository[Source]):
             "sync_job_count": int(sync_job_count),
         }
 
+    # ------------------------------------------------------------------ #
+    # Description history (T-014 audit trail)
+    # ------------------------------------------------------------------ #
+
+    async def list_description_history(
+        self,
+        source_id: uuid.UUID,
+        *,
+        limit: int = 20,
+        offset: int = 0,
+    ) -> list[dict[str, Any]]:
+        """Return paginated description-history rows for *source_id*.
+
+        Newest-first (FIFO from the audit trail's perspective: the most
+        recently replaced description appears at the top of the list). Each
+        row joins to ``users`` so callers can render "replaced by alice@"
+        without a second round-trip; ``replaced_by_email`` is ``None`` when
+        the replacement was performed by the AI auto-naming pipeline (which
+        leaves ``replaced_by`` NULL).
+
+        The query is hand-rolled so the JOIN stays a single LEFT JOIN — no
+        relationship attribute is wired on the model and we don't need one
+        for this read-only audit endpoint.
+        """
+        from src.models.source_description_history import (  # noqa: PLC0415
+            SourceDescriptionHistory,
+        )
+        from src.models.user import User  # noqa: PLC0415
+
+        stmt = (
+            select(
+                SourceDescriptionHistory.id,
+                SourceDescriptionHistory.description,
+                SourceDescriptionHistory.replaced_at,
+                SourceDescriptionHistory.replaced_by,
+                User.email.label("replaced_by_email"),
+            )
+            .select_from(SourceDescriptionHistory)
+            .join(
+                User,
+                User.id == SourceDescriptionHistory.replaced_by,
+                isouter=True,
+            )
+            .where(SourceDescriptionHistory.source_id == source_id)
+            .order_by(SourceDescriptionHistory.replaced_at.desc())
+            .offset(offset)
+            .limit(limit)
+        )
+        result = await self._session.execute(stmt)
+        return [
+            {
+                "id": row.id,
+                "description": row.description,
+                "replaced_at": row.replaced_at,
+                "replaced_by": row.replaced_by,
+                "replaced_by_email": row.replaced_by_email,
+            }
+            for row in result.all()
+        ]
+
+    async def count_description_history(self, source_id: uuid.UUID) -> int:
+        """Return total description-history rows for *source_id* (for pagination)."""
+        from src.models.source_description_history import (  # noqa: PLC0415
+            SourceDescriptionHistory,
+        )
+
+        stmt = (
+            select(func.count())
+            .select_from(SourceDescriptionHistory)
+            .where(SourceDescriptionHistory.source_id == source_id)
+        )
+        result = await self._session.execute(stmt)
+        return int(result.scalar_one())
+
     async def list_by_ids(self, source_ids: list[uuid.UUID]) -> list[Source]:
         """Bulk fetch by list of PKs; returns only non-deleted, approved sources.
 

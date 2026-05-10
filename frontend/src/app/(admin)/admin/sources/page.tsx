@@ -28,14 +28,19 @@ import { DEMO_DB_SOURCES } from './_components/demoSources'
  * fixed array of mocked DB rows that exercise every `schema_status` ×
  * `study_state` combination — useful for reviewing the new
  * `DatabaseStudyStrip` + `SourceActionCell` visuals BEFORE Wave 3 wires the
- * real columns onto the API payload. The escape hatch is admin-only because
- * the page itself is gated by the admin layout. It will be removed once
- * Wave 3 ships.
+ * real columns onto the API payload.
+ *
+ * The URL trigger is gated to development builds only. In production the
+ * `?demo=db-states` query param is silently ignored so a curious admin
+ * (or a phishing link) cannot flip an operator into "live data hidden"
+ * mode. The mock dataset import stays — it's harmless dev tooling — but
+ * the only path that activates it is `process.env.NODE_ENV === 'development'`.
+ * It will be removed entirely once Wave 3 ships.
  */
 export default function SourcesPage() {
   const searchParams = useSearchParams()
-  const demo = searchParams.get('demo')
-  const isDemoDbStates = demo === 'db-states'
+  const isDemoDbStates =
+    process.env.NODE_ENV === 'development' && searchParams.get('demo') === 'db-states'
 
   return (
     <div className="space-y-4 p-4 md:space-y-6 md:p-6">

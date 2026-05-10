@@ -59,11 +59,36 @@ export function useListSources(options: UseListSourcesOptions = {}) {
   })
 }
 
-export function useSource(sourceId: string | undefined) {
+export interface UseSourceOptions {
+  /**
+   * When `true`, refetch the source detail every 3 seconds. Callers can pass
+   * the static `true`/`false`, but the more useful pattern is to derive this
+   * from the query's own data — e.g. "poll while `latest_job.status` is in
+   * flight". To support that without a chicken-and-egg, the hook also accepts
+   * `'auto'`: it inspects the cached `latest_job.status` and polls when in
+   * `{pending, running}`. Defaults to `false` (no polling).
+   */
+  pollWhileRunning?: boolean | 'auto'
+}
+
+export function useSource(
+  sourceId: string | undefined,
+  options: UseSourceOptions = {}
+) {
+  const { pollWhileRunning = false } = options
   return useQuery({
     queryKey: sourceId ? sourcesKeys.detail(sourceId) : ['sources', 'detail', 'empty'],
     queryFn: () => getSourceApi(sourceId as string),
     enabled: Boolean(sourceId),
+    refetchInterval:
+      pollWhileRunning === 'auto'
+        ? (query) => {
+            const status = query.state.data?.latest_job?.status
+            return status === 'pending' || status === 'running' ? 3_000 : false
+          }
+        : pollWhileRunning
+          ? 3_000
+          : false,
   })
 }
 
@@ -78,6 +103,12 @@ export function useSourceStats(sourceId: string | undefined) {
 export interface UseSyncJobsOptions {
   limit?: number
   offset?: number
+  /**
+   * When `true`, refetch the sync-jobs page every 3 seconds. Callers should
+   * set this while a sync is in flight so the freshly-completed row appears
+   * in the history without manual refresh. Defaults to `false`.
+   */
+  pollWhileRunning?: boolean
 }
 
 /**
@@ -89,15 +120,23 @@ export interface UseSyncJobsOptions {
  * options object and the hook keeps the original behavior.
  */
 export function useSyncJobs(sourceId: string | undefined, options: UseSyncJobsOptions = {}) {
-  const { limit, offset } = options
+  const { limit, offset, pollWhileRunning = false } = options
   return useQuery({
     queryKey: sourceId
       ? sourcesKeys.syncJobs(sourceId, limit, offset)
       : ['sources', 'sync-jobs', 'empty'],
     queryFn: () => listSyncJobsApi(sourceId as string, limit, offset),
     enabled: Boolean(sourceId),
+    refetchInterval: pollWhileRunning ? 3_000 : false,
   })
 }
+
+/**
+ * Paginated sync-jobs query that auto-polls while a job is in flight. Takes
+ * the latest job status off the source detail (passed in by the caller — we
+ * don't fetch it again). This keeps polling in sync with the detail query
+ * without each tab maintaining its own timer.
+ */
 
 export function useSourceDocuments(sourceId: string | undefined) {
   return useQuery({

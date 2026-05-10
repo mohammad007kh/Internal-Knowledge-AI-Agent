@@ -15,14 +15,6 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog'
-import {
   Form,
   FormControl,
   FormDescription,
@@ -51,6 +43,7 @@ import {
 } from '@/components/ui/table'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { PermissionsManager } from '@/app/(admin)/admin/sources/[id]/permissions/_components/PermissionsManager'
+import { AINamingCard } from '@/app/(admin)/admin/sources/[id]/_components/AINamingCard'
 import {
   CoverageCard,
   FreshnessCard,
@@ -58,7 +51,9 @@ import {
   SourceTypeOverview,
   StatusCard,
 } from '@/app/(admin)/admin/sources/[id]/_components/OverviewCards'
+import { SyncStatusPill } from '@/app/(admin)/admin/sources/[id]/_components/SyncStatusPill'
 import { TestTab } from '@/app/(admin)/admin/sources/[id]/_components/TestTab'
+import { useSyncJobToast } from '@/app/(admin)/admin/sources/[id]/_components/useSyncJobToast'
 import {
   type FormFieldConfig,
   dataNounFor,
@@ -76,8 +71,6 @@ import {
 import { Textarea } from '@/components/ui/textarea'
 import {
   useDeleteSource,
-  useAutoNameSource,
-  useRefreshDescription,
   useSource,
   useSourceDocuments,
   useSourceStats,
@@ -97,6 +90,7 @@ import type {
   SourceDetail,
   SourceMode,
   SourceType,
+  SyncJob,
   SyncMode,
   UpdateSourceRequest,
 } from '@/lib/api/sources'
@@ -104,14 +98,10 @@ import { getErrorMessage } from '@/lib/errors'
 import { cn } from '@/lib/utils'
 import { zodResolver } from '@hookform/resolvers/zod'
 import {
-  AlertTriangleIcon,
   CheckCircle2Icon,
+  ChevronDownIcon,
   ChevronLeftIcon,
   ChevronRightIcon,
-  CircleAlertIcon,
-  DatabaseIcon,
-  FileTextIcon,
-  GlobeIcon,
   Loader2Icon,
   LockIcon,
   PlugIcon,
@@ -121,7 +111,7 @@ import {
 } from 'lucide-react'
 import Link from 'next/link'
 import { useParams, useRouter } from 'next/navigation'
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useForm } from 'react-hook-form'
 import { toast } from 'sonner'
 import { z } from 'zod'
@@ -286,31 +276,71 @@ export default function SourceDetailPage() {
   const router = useRouter()
 
   const [syncJobsPage, setSyncJobsPage] = useState(0)
+  const [activeTab, setActiveTab] = useState('overview')
 
-  const { data: source, isLoading, isError, error, refetch } = useSource(id)
-  const { data: stats } = useSourceStats(id)
-  const { data: syncJobsData } = useSyncJobs(id, {
+  // --- Smart polling (U2) ---
+  // The detail query auto-polls every 3s whenever its own cached data shows
+  // `latest_job.status` in `{pending, running}`. The 'auto' mode reads the
+  // status off the cache via React Query's `refetchInterval(query)` callback,
+  // so we don't need a separate trigger.
+  const {
+    data: source,
+    isLoading,
+    isError,
+    error,
+    refetch,
+  } = useSource(id, { pollWhileRunning: 'auto' })
+  const isJobInFlight =
+    source?.latest_job?.status === 'pending' ||
+    source?.latest_job?.status === 'running'
+
+  const syncJobsData = useSyncJobs(id, {
     limit: SYNC_JOBS_PAGE_SIZE,
     offset: syncJobsPage * SYNC_JOBS_PAGE_SIZE,
-  })
+    pollWhileRunning: isJobInFlight,
+  }).data
+
+  const stats = useSourceStats(id).data
   const { data: documentsData } = useSourceDocuments(id)
 
   const syncMutation = useTriggerSync()
   const testConnectionMutation = useTestConnection()
   const deleteMutation = useDeleteSource()
   const updateMutation = useUpdateSource(id)
-  const refreshDesc = useRefreshDescription(id)
-  const autoName = useAutoNameSource(id)
 
   const [confirmDelete, setConfirmDelete] = useState(false)
-  const [proposedDesc, setProposedDesc] = useState<string | null>(null)
-  // Holds the AI's proposed { name, description } pair from the Regenerate
-  // button. Distinct from `proposedDesc` (which is a single string from the
-  // legacy refresh-description flow) because Regenerate proposes BOTH and
-  // the admin gets to confirm both at once.
-  const [proposedAutoName, setProposedAutoName] = useState<
-    { name: string; description: string } | null
-  >(null)
+
+  // Session-scoped set of job IDs the admin started in this tab. Beat-driven
+  // jobs that arrive on the wire are NOT in this set, so the toast hook stays
+  // silent on success for them. Failure toasts ALWAYS fire regardless.
+  const sessionTriggeredJobIdsRef = useRef<Set<string>>(new Set())
+
+  // Live-source / DB derivation — needed for the status pill label and the
+  // sync-tab copy. Derived as soon as `source` is available.
+  const DB_TYPES = useMemo(
+    () => new Set<SourceType>(['postgresql', 'mysql', 'mssql', 'mongodb']),
+    []
+  )
+
+  // Smart-toast hook: fires once per terminal transition. Hooks must be
+  // called unconditionally — pass `null` until the source has loaded.
+  const isDbLiveSource = source
+    ? DB_TYPES.has(source.source_type) &&
+      (source.source_mode === 'live' || source.retrieval_mode === 'text_to_query')
+    : false
+
+  useSyncJobToast({
+    sourceId: id ?? '',
+    latestJob: source?.latest_job ?? null,
+    sessionTriggeredJobIds: sessionTriggeredJobIdsRef.current,
+    isDbLiveSource,
+    onViewError: () => {
+      // Switch to the Sync tab so the row is visible. Scrolling exact rows
+      // requires a row-id ref map we don't yet maintain — surfacing the tab
+      // is enough for v1.
+      setActiveTab('sync')
+    },
+  })
 
   if (isLoading) {
     return (
@@ -350,11 +380,11 @@ export default function SourceDetailPage() {
   // there are no documents to ingest. Re-running the pipeline triggers the
   // studying-agent to refresh the schema document. Re-label the action and
   // the Sync History heading accordingly.
-  const DB_TYPES = new Set(['postgresql', 'mysql', 'mssql', 'mongodb'])
   const isDbSource = DB_TYPES.has(source.source_type)
-  const isDbLiveSource =
-    isDbSource &&
-    (source.source_mode === 'live' || source.retrieval_mode === 'text_to_query')
+
+  function trackSessionJob(job: SyncJob) {
+    sessionTriggeredJobIdsRef.current.add(job.id)
+  }
 
   return (
     <div className="space-y-4 p-4 md:space-y-6 md:p-6">
@@ -385,6 +415,7 @@ export default function SourceDetailPage() {
             >
               {source.is_active ? 'Available' : 'Pending review'}
             </Badge>
+            <SyncStatusPill source={source} isDbLiveSource={isDbLiveSource} />
           </div>
           {source.description && (
             <p className="text-sm text-muted-foreground">{source.description}</p>
@@ -398,7 +429,10 @@ export default function SourceDetailPage() {
               size="sm"
               onClick={() =>
                 syncMutation.mutate(id, {
-                  onSuccess: () => toast.success('Sync started'),
+                  onSuccess: (job) => {
+                    trackSessionJob(job)
+                    toast.success('Sync started')
+                  },
                   onError: (err) => toast.error(getErrorMessage(err)),
                 })
               }
@@ -446,7 +480,7 @@ export default function SourceDetailPage() {
         </div>
       </div>
 
-      <Tabs defaultValue="overview">
+      <Tabs value={activeTab} onValueChange={setActiveTab}>
         <TabsList className="w-full justify-start overflow-x-auto">
           <TabsTrigger value="overview">Overview</TabsTrigger>
           <TabsTrigger value="test">Test</TabsTrigger>
@@ -479,7 +513,10 @@ export default function SourceDetailPage() {
             isDbSource={isDbSource}
             onRetrySync={() =>
               syncMutation.mutate(id, {
-                onSuccess: () => toast.success('Retry started'),
+                onSuccess: (job) => {
+                  trackSessionJob(job)
+                  toast.success('Retry started')
+                },
                 onError: (err) => toast.error(getErrorMessage(err)),
               })
             }
@@ -500,48 +537,9 @@ export default function SourceDetailPage() {
               file count + size breakdown. */}
           <SourceTypeOverview source={source} stats={stats} documents={documents} />
 
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between gap-2 pb-2">
-              <CardTitle className="text-sm font-medium">AI Description</CardTitle>
-              <div className="flex items-center gap-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  disabled={refreshDesc.isPending || autoName.isPending}
-                  onClick={() =>
-                    refreshDesc.mutate(undefined, {
-                      onSuccess: (data) => setProposedDesc(data.proposed_description),
-                      onError: (err) => toast.error(getErrorMessage(err)),
-                    })
-                  }
-                >
-                  {refreshDesc.isPending ? 'Generating…' : 'Refresh description'}
-                </Button>
-                <Button
-                  variant="default"
-                  size="sm"
-                  disabled={autoName.isPending || refreshDesc.isPending}
-                  onClick={() =>
-                    autoName.mutate(undefined, {
-                      onSuccess: (data) =>
-                        setProposedAutoName({
-                          name: data.proposed_name,
-                          description: data.proposed_description,
-                        }),
-                      onError: (err) => toast.error(getErrorMessage(err)),
-                    })
-                  }
-                >
-                  {autoName.isPending ? 'Regenerating…' : 'Regenerate name + description'}
-                </Button>
-              </div>
-            </CardHeader>
-            <CardContent>
-              <p className="text-sm text-muted-foreground">
-                {source.description || 'No description yet. Click Refresh to generate one.'}
-              </p>
-            </CardContent>
-          </Card>
+          {/* AI Description card removed — see AINamingCard on Settings tab.
+              The new flow proposes name/description into the form and lets
+              the sticky save bar persist, eliminating the dual-writer race. */}
         </TabsContent>
 
         {/* TEST — admin-only sandbox chat scoped to this source */}
@@ -558,16 +556,20 @@ export default function SourceDetailPage() {
           />
         </TabsContent>
 
-        {/* SYNC */}
-        <TabsContent value="sync" className="mt-4 space-y-4">
-          <SyncActions
+        {/* SYNC — density redesign (U1):
+            - Inline header band (Sync now + Test connection + last-tested status)
+            - Collapsed sync-config metadata strip with Edit-in-Settings link
+            - Sync history dominates the tab */}
+        <TabsContent value="sync" className="mt-4 space-y-3">
+          <SyncHeaderBand
             sourceType={source.source_type}
             sourceName={source.name}
             isDbLiveSource={isDbLiveSource}
             isSyncing={syncMutation.isPending}
             onSyncNow={() =>
               syncMutation.mutate(id, {
-                onSuccess: () => {
+                onSuccess: (job) => {
+                  trackSessionJob(job)
                   toast.success('Sync started')
                   // Reset to first page so the freshly-queued job is visible.
                   setSyncJobsPage(0)
@@ -579,36 +581,20 @@ export default function SourceDetailPage() {
             onTestConnection={() => testConnectionMutation.mutate(id)}
             testConnectionResult={
               testConnectionMutation.isSuccess
-                ? { ok: testConnectionMutation.data.success, message: testConnectionMutation.data.message }
+                ? {
+                    ok: testConnectionMutation.data.success,
+                    message: testConnectionMutation.data.message,
+                  }
                 : testConnectionMutation.isError
                   ? { ok: false, message: getErrorMessage(testConnectionMutation.error) }
                   : null
             }
           />
 
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-sm font-medium">Sync configuration</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-3 text-sm">
-              <div className="flex items-center justify-between">
-                <span className="text-muted-foreground">Mode</span>
-                <SyncModeBadge mode={source.sync_mode} />
-              </div>
-              {source.sync_schedule && (
-                <div className="flex items-center justify-between">
-                  <span className="text-muted-foreground">Schedule</span>
-                  <code className="rounded bg-muted px-1.5 py-0.5 text-xs">
-                    {source.sync_schedule}
-                  </code>
-                </div>
-              )}
-              <div className="flex items-center justify-between">
-                <span className="text-muted-foreground">Source mode</span>
-                <SourceModeBadge mode={source.source_mode} />
-              </div>
-            </CardContent>
-          </Card>
+          <SyncConfigStrip
+            source={source}
+            onEditInSettings={() => setActiveTab('settings')}
+          />
 
           <SyncHistorySection
             jobs={syncJobs}
@@ -671,7 +657,7 @@ export default function SourceDetailPage() {
                 }
                 if (descMissing && !descPending) {
                   blockers.push(
-                    'Description is empty — write one or use "Regenerate name + description".'
+                    'Description is empty — write one in Settings, or use "Regenerate description" in the AI naming assistant.'
                   )
                 }
                 const gateBlocked = !source.is_active && blockers.length > 0
@@ -761,103 +747,6 @@ export default function SourceDetailPage() {
         </TabsContent>
       </Tabs>
 
-      {/* Proposed name+description dialog (Regenerate flow). Confirms BOTH at
-          once, distinguishing the AI-name update from a description-only
-          refresh. Persists via the same updateMutation. */}
-      <Dialog
-        open={!!proposedAutoName}
-        onOpenChange={(o) => !o && setProposedAutoName(null)}
-      >
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Proposed name + description</DialogTitle>
-            <DialogDescription>
-              The assistant read this source and drafted a clear name and
-              retrieval-friendly description. Review both, then save to replace
-              the current values.
-            </DialogDescription>
-          </DialogHeader>
-          {proposedAutoName ? (
-            <div className="space-y-3 text-sm">
-              <div>
-                <p className="text-xs uppercase tracking-wide text-muted-foreground">
-                  Name
-                </p>
-                <p className="font-medium">{proposedAutoName.name}</p>
-              </div>
-              <div>
-                <p className="text-xs uppercase tracking-wide text-muted-foreground">
-                  Description
-                </p>
-                <p>{proposedAutoName.description}</p>
-              </div>
-            </div>
-          ) : null}
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setProposedAutoName(null)}>
-              Discard
-            </Button>
-            <Button
-              disabled={updateMutation.isPending || !proposedAutoName}
-              onClick={() => {
-                if (!proposedAutoName) return
-                updateMutation.mutate(
-                  {
-                    name: proposedAutoName.name,
-                    description: proposedAutoName.description,
-                  },
-                  {
-                    onSuccess: () => {
-                      toast.success('Name + description updated')
-                      setProposedAutoName(null)
-                    },
-                    onError: (err) => toast.error(getErrorMessage(err)),
-                  }
-                )
-              }}
-            >
-              {updateMutation.isPending ? 'Saving…' : 'Save both'}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* Proposed description dialog */}
-      <Dialog open={!!proposedDesc} onOpenChange={(o) => !o && setProposedDesc(null)}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Proposed description</DialogTitle>
-            <DialogDescription>
-              AI-generated draft. Review the text below and save it to replace the source's current
-              description.
-            </DialogDescription>
-          </DialogHeader>
-          <p className="text-sm">{proposedDesc}</p>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setProposedDesc(null)}>
-              Discard
-            </Button>
-            <Button
-              disabled={updateMutation.isPending}
-              onClick={() =>
-                updateMutation.mutate(
-                  { description: proposedDesc ?? undefined },
-                  {
-                    onSuccess: () => {
-                      toast.success('Description updated')
-                      setProposedDesc(null)
-                    },
-                    onError: (err) => toast.error(getErrorMessage(err)),
-                  }
-                )
-              }
-            >
-              {updateMutation.isPending ? 'Saving…' : 'Save'}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
       {/* Delete confirmation */}
       <AlertDialog open={confirmDelete} onOpenChange={setConfirmDelete}>
         <AlertDialogContent>
@@ -931,10 +820,13 @@ function ConnectionLastTestedLine({ source }: ConnectionLastTestedLineProps) {
 }
 
 // ---------------------------------------------------------------------------
-// Sync tab — action buttons (Sync now + Test connection)
+// Sync tab — inline header band (replaces the standalone Actions Card)
+//
+// Density redesign (U1): a single-row band with Sync now + Test connection +
+// inline status text. ~44px tall. NO CardHeader/CardContent chrome.
 // ---------------------------------------------------------------------------
 
-interface SyncActionsProps {
+interface SyncHeaderBandProps {
   sourceType: SourceType
   sourceName: string
   isSyncing: boolean
@@ -947,7 +839,7 @@ interface SyncActionsProps {
   isDbLiveSource?: boolean
 }
 
-function SyncActions({
+function SyncHeaderBand({
   sourceType,
   sourceName,
   isSyncing,
@@ -956,93 +848,185 @@ function SyncActions({
   onTestConnection,
   testConnectionResult,
   isDbLiveSource,
-}: SyncActionsProps) {
+}: SyncHeaderBandProps) {
   const showTestConnection = isConnectionTestable(sourceType)
   const primaryLabel = isDbLiveSource ? 'Re-study schema' : 'Sync now'
   const primaryActiveLabel = isDbLiveSource ? 'Studying…' : 'Starting…'
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="text-sm font-medium">Actions</CardTitle>
-      </CardHeader>
-      <CardContent className="space-y-3">
-        <div className="flex flex-wrap items-center gap-2">
+    <div
+      data-testid="sync-header-band"
+      className="flex flex-col gap-2 rounded-md border bg-card px-3 py-2 sm:flex-row sm:items-center sm:gap-3"
+    >
+      <div className="flex flex-wrap items-center gap-2">
+        <Button
+          variant="default"
+          size="sm"
+          onClick={onSyncNow}
+          disabled={isSyncing}
+          className="w-full sm:w-auto"
+          aria-label={
+            isDbLiveSource
+              ? `Re-study schema for ${sourceName}`
+              : `Sync source ${sourceName} now`
+          }
+        >
+          {isSyncing ? (
+            <>
+              <Loader2Icon className="mr-1.5 h-4 w-4 animate-spin" aria-hidden />
+              {primaryActiveLabel}
+            </>
+          ) : (
+            <>
+              <RefreshCwIcon className="mr-1.5 h-4 w-4" aria-hidden />
+              {primaryLabel}
+            </>
+          )}
+        </Button>
+
+        {showTestConnection && (
           <Button
-            variant="default"
+            variant="outline"
             size="sm"
-            onClick={onSyncNow}
-            disabled={isSyncing}
-            aria-label={
-              isDbLiveSource
-                ? `Re-study schema for ${sourceName}`
-                : `Sync source ${sourceName} now`
-            }
+            onClick={onTestConnection}
+            disabled={isTestingConnection}
+            className="w-full sm:w-auto"
+            aria-label="Test connection"
           >
-            {isSyncing ? (
+            {isTestingConnection ? (
               <>
                 <Loader2Icon className="mr-1.5 h-4 w-4 animate-spin" aria-hidden />
-                {primaryActiveLabel}
+                Testing…
               </>
             ) : (
               <>
-                <RefreshCwIcon className="mr-1.5 h-4 w-4" aria-hidden />
-                {primaryLabel}
+                <PlugIcon className="mr-1.5 h-4 w-4" aria-hidden />
+                Test connection
               </>
             )}
           </Button>
-
-          {showTestConnection && (
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={onTestConnection}
-              disabled={isTestingConnection}
-              aria-label="Test connection"
-            >
-              {isTestingConnection ? (
-                <>
-                  <Loader2Icon className="mr-1.5 h-4 w-4 animate-spin" aria-hidden />
-                  Testing…
-                </>
-              ) : (
-                <>
-                  <PlugIcon className="mr-1.5 h-4 w-4" aria-hidden />
-                  Test connection
-                </>
-              )}
-            </Button>
-          )}
-        </div>
-
-        {showTestConnection && testConnectionResult !== null && (
-          <div
-            data-testid="test-connection-result"
-            role={testConnectionResult.ok ? 'status' : 'alert'}
-            aria-live="polite"
-            className={
-              testConnectionResult.ok
-                ? 'flex items-start gap-2 rounded-md border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-xs text-emerald-700 dark:text-emerald-300'
-                : 'flex items-start gap-2 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive'
-            }
-          >
-            {testConnectionResult.ok ? (
-              <CheckCircle2Icon className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
-            ) : (
-              <XCircleIcon className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
-            )}
-            <span>
-              {testConnectionResult.message || (testConnectionResult.ok ? 'Connection succeeded' : 'Connection failed')}
-            </span>
-          </div>
         )}
-      </CardContent>
-    </Card>
+      </div>
+
+      {showTestConnection && testConnectionResult !== null && (
+        <div
+          data-testid="test-connection-result"
+          role={testConnectionResult.ok ? 'status' : 'alert'}
+          aria-live="polite"
+          className={cn(
+            'flex items-start gap-1.5 rounded px-2 py-1 text-xs sm:ml-auto',
+            testConnectionResult.ok
+              ? 'text-emerald-700 dark:text-emerald-300'
+              : 'text-destructive'
+          )}
+        >
+          {testConnectionResult.ok ? (
+            <CheckCircle2Icon className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
+          ) : (
+            <XCircleIcon className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
+          )}
+          <span>
+            {testConnectionResult.message ||
+              (testConnectionResult.ok ? 'Connection succeeded' : 'Connection failed')}
+          </span>
+        </div>
+      )}
+    </div>
   )
 }
 
 // ---------------------------------------------------------------------------
-// Sync tab — paginated history
+// Sync tab — collapsed config metadata strip
+//
+// Density redesign (U1): single-row "Mode: Manual · Source mode: Snapshot ·
+// Schedule: 0 2 * * *" with a chevron disclosure. Read-only chips when
+// expanded; the "Edit in Settings" link switches the active tab so the
+// admin can change values via the existing form.
+// ---------------------------------------------------------------------------
+
+interface SyncConfigStripProps {
+  source: SourceDetail
+  onEditInSettings: () => void
+}
+
+function SyncConfigStrip({ source, onEditInSettings }: SyncConfigStripProps) {
+  // Default-collapsed on mobile is a CSS-only concern — there's no `expanded`
+  // server state to remember. Default to collapsed everywhere so the history
+  // table dominates the tab.
+  const [expanded, setExpanded] = useState(false)
+
+  const summary: string = [
+    `Mode: ${SYNC_MODE_LABELS[source.sync_mode]}`,
+    `Source mode: ${SOURCE_MODE_LABELS[source.source_mode]}`,
+    source.sync_schedule ? `Schedule: ${source.sync_schedule}` : null,
+  ]
+    .filter(Boolean)
+    .join(' · ')
+
+  return (
+    <div
+      data-testid="sync-config-strip"
+      data-expanded={expanded}
+      className="rounded-md border bg-card"
+    >
+      <button
+        type="button"
+        onClick={() => setExpanded((v) => !v)}
+        className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-xs"
+        aria-expanded={expanded}
+        aria-controls="sync-config-strip-body"
+        data-testid="sync-config-strip-toggle"
+      >
+        <span className="truncate text-muted-foreground">{summary}</span>
+        <ChevronDownIcon
+          className={cn(
+            'h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform',
+            expanded && 'rotate-180'
+          )}
+          aria-hidden
+        />
+      </button>
+      {expanded && (
+        <div
+          id="sync-config-strip-body"
+          className="space-y-2 border-t px-3 py-3 text-sm"
+        >
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-muted-foreground">Mode</span>
+              <SyncModeBadge mode={source.sync_mode} />
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-muted-foreground">Source mode</span>
+              <SourceModeBadge mode={source.source_mode} />
+            </div>
+            {source.sync_schedule && (
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-muted-foreground">Schedule</span>
+                <code className="rounded bg-muted px-1.5 py-0.5 text-xs">
+                  {source.sync_schedule}
+                </code>
+              </div>
+            )}
+          </div>
+          <Button
+            type="button"
+            variant="link"
+            size="sm"
+            onClick={onEditInSettings}
+            className="h-auto p-0 text-xs"
+            data-testid="sync-config-edit-in-settings"
+          >
+            Edit in Settings →
+          </Button>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Sync tab — paginated history (density redesign)
 // ---------------------------------------------------------------------------
 
 interface SyncHistorySectionProps {
@@ -1083,7 +1067,18 @@ function SyncHistorySection({
 
   return (
     <div>
-      <h3 className="mb-3 text-sm font-medium">{sectionTitle}</h3>
+      <div className="mb-2 flex flex-wrap items-baseline justify-between gap-2">
+        <h3 className="text-sm font-medium">{sectionTitle}</h3>
+        {/* Counter moves into the header (density redesign U1). */}
+        {total > 0 && (
+          <span
+            className="text-xs text-muted-foreground"
+            data-testid="sync-jobs-page-summary"
+          >
+            Showing {start}–{end} of {total}
+          </span>
+        )}
+      </div>
       {total === 0 ? (
         <p className="py-4 text-sm text-muted-foreground">{emptyCopy}</p>
       ) : (
@@ -1091,8 +1086,10 @@ function SyncHistorySection({
           <div className="divide-y">
             {jobs.map((job) => (
               <div
-                className="flex flex-col gap-1 px-3 py-3 sm:flex-row sm:items-center sm:justify-between sm:gap-3 sm:px-4"
+                /* Tightened from py-3 → py-2.5 so 15 rows fit at 1080p (was 10). */
+                className="flex flex-col gap-1 px-3 py-2.5 sm:flex-row sm:items-center sm:justify-between sm:gap-3 sm:px-4"
                 key={job.id}
+                data-testid="sync-jobs-row"
               >
                 <div className="min-w-0 space-y-0.5">
                   <div className="flex flex-wrap items-center gap-2">
@@ -1114,34 +1111,29 @@ function SyncHistorySection({
             ))}
           </div>
           {showFooter && (
-            <div className="flex flex-wrap items-center justify-between gap-2 border-t px-3 py-2 text-xs text-muted-foreground sm:px-4">
-              <span data-testid="sync-jobs-page-summary">
-                Showing {start}–{end} of {total}
-              </span>
-              <div className="flex items-center gap-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => onPageChange(page - 1)}
-                  disabled={isFirstPage}
-                  aria-label="Previous page of sync history"
-                  data-testid="sync-jobs-prev"
-                >
-                  <ChevronLeftIcon className="mr-1 h-3.5 w-3.5" aria-hidden />
-                  Previous
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => onPageChange(page + 1)}
-                  disabled={isLastPage}
-                  aria-label="Next page of sync history"
-                  data-testid="sync-jobs-next"
-                >
-                  Next
-                  <ChevronRightIcon className="ml-1 h-3.5 w-3.5" aria-hidden />
-                </Button>
-              </div>
+            <div className="flex flex-wrap items-center justify-end gap-2 border-t px-3 py-2 text-xs text-muted-foreground sm:px-4">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => onPageChange(page - 1)}
+                disabled={isFirstPage}
+                aria-label="Previous page of sync history"
+                data-testid="sync-jobs-prev"
+              >
+                <ChevronLeftIcon className="mr-1 h-3.5 w-3.5" aria-hidden />
+                Previous
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => onPageChange(page + 1)}
+                disabled={isLastPage}
+                aria-label="Next page of sync history"
+                data-testid="sync-jobs-next"
+              >
+                Next
+                <ChevronRightIcon className="ml-1 h-3.5 w-3.5" aria-hidden />
+              </Button>
             </div>
           )}
         </div>
@@ -1151,7 +1143,7 @@ function SyncHistorySection({
 }
 
 // ---------------------------------------------------------------------------
-// Settings tab — editable form
+// Settings tab — editable form (now also hosts the AI naming card)
 // ---------------------------------------------------------------------------
 
 interface EditableSettingsFormProps {
@@ -1210,194 +1202,219 @@ function EditableSettingsForm({ source }: EditableSettingsFormProps) {
     form.reset(defaultValues)
   }
 
+  // AI naming proposal accepted → fill the form fields. shouldDirty:true so
+  // the sticky save bar lights up. `shouldValidate:true` runs the schema
+  // immediately so the user sees inline errors before they click Save.
+  function applyAiProposal(proposed: { name?: string; description: string }) {
+    if (typeof proposed.name === 'string') {
+      form.setValue('name', proposed.name, {
+        shouldDirty: true,
+        shouldValidate: true,
+        shouldTouch: true,
+      })
+    }
+    form.setValue('description', proposed.description, {
+      shouldDirty: true,
+      shouldValidate: true,
+      shouldTouch: true,
+    })
+  }
+
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="text-sm font-medium">Source settings</CardTitle>
-      </CardHeader>
-      <CardContent>
-        <Form {...form}>
-          <form onSubmit={onSubmit} className="space-y-4" aria-label="Edit source settings">
-            <FormField
-              control={form.control}
-              name="name"
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Name</FormLabel>
-                  {isPendingName && (
-                    <p className="text-xs text-muted-foreground" data-testid="naming-hint">
-                      Naming… the assistant is still drafting a name. Typing here will replace its
-                      draft.
-                    </p>
-                  )}
-                  <FormControl>
-                    <Input
-                      placeholder="My Knowledge Base"
-                      maxLength={255}
-                      autoComplete="off"
-                      {...field}
-                    />
-                  </FormControl>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
+    <>
+      {/* AI naming assistant lives ABOVE the form (U3). It calls the form's
+          setValue via the onApply callback, so the sticky save bar updates
+          instead of writing directly. */}
+      <AINamingCard source={source} onApply={applyAiProposal} />
 
-            <FormField
-              control={form.control}
-              name="description"
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Description</FormLabel>
-                  <FormControl>
-                    <Textarea
-                      placeholder="What documents does this source contain?"
-                      maxLength={2000}
-                      rows={3}
-                      {...field}
-                    />
-                  </FormControl>
-                  <FormDescription>
-                    Up to 2000 characters. Used to help users find this source in the picker.
-                  </FormDescription>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
-
-            {/* Retrieval mode + Source mode — gated by source type. DB sources
-                show read-only chips with a tooltip explaining why; files /
-                web / connectors hide the field entirely (vector_only is the
-                only sensible value, set at creation). */}
-            {(fieldConfig.retrievalMode !== 'hidden' ||
-              fieldConfig.sourceMode !== 'hidden') && (
-              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                {fieldConfig.retrievalMode === 'edit' ? (
-                  <FormField
-                    control={form.control}
-                    name="retrieval_mode"
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>Retrieval mode</FormLabel>
-                        <Select onValueChange={field.onChange} value={field.value}>
-                          <FormControl>
-                            <SelectTrigger>
-                              <SelectValue />
-                            </SelectTrigger>
-                          </FormControl>
-                          <SelectContent>
-                            {RETRIEVAL_MODES_EDITABLE.map((mode) => (
-                              <SelectItem key={mode} value={mode}>
-                                {RETRIEVAL_MODE_LABELS[mode]}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
-                ) : fieldConfig.retrievalMode === 'readonly-chip' ? (
-                  <ReadonlyFieldChip
-                    label="Retrieval mode"
-                    value={RETRIEVAL_MODE_LABELS[source.retrieval_mode]}
-                    tooltip="Database sources answer queries by translating natural language to SQL — vector retrieval doesn't apply."
-                    testId="retrieval-mode-chip"
-                  />
-                ) : null}
-
-                {fieldConfig.sourceMode === 'edit' ? (
-                  <FormField
-                    control={form.control}
-                    name="source_mode"
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>Source mode</FormLabel>
-                        <Select onValueChange={field.onChange} value={field.value}>
-                          <FormControl>
-                            <SelectTrigger>
-                              <SelectValue />
-                            </SelectTrigger>
-                          </FormControl>
-                          <SelectContent>
-                            {SOURCE_MODES.map((mode) => (
-                              <SelectItem key={mode} value={mode}>
-                                {SOURCE_MODE_LABELS[mode]}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
-                ) : fieldConfig.sourceMode === 'readonly-chip' ? (
-                  <ReadonlyFieldChip
-                    label="Source mode"
-                    value={SOURCE_MODE_LABELS[source.source_mode]}
-                    tooltip="Database sources query the live database at retrieval time — they don't snapshot rows into the index."
-                    testId="source-mode-chip"
-                  />
-                ) : null}
-              </div>
-            )}
-
-            {fieldConfig.syncModeOptions.length > 0 ? (
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-sm font-medium">Source settings</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <Form {...form}>
+            <form onSubmit={onSubmit} className="space-y-4" aria-label="Edit source settings">
               <FormField
                 control={form.control}
-                name="sync_mode"
+                name="name"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Sync mode</FormLabel>
-                    <Select onValueChange={field.onChange} value={field.value}>
-                      <FormControl>
-                        <SelectTrigger>
-                          <SelectValue />
-                        </SelectTrigger>
-                      </FormControl>
-                      <SelectContent>
-                        {fieldConfig.syncModeOptions.map((mode) => (
-                          <SelectItem key={mode} value={mode}>
-                            {SYNC_MODE_LABELS[mode]}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                    <FormLabel>Name</FormLabel>
+                    {isPendingName && (
+                      <p className="text-xs text-muted-foreground" data-testid="naming-hint">
+                        Naming… the assistant is still drafting a name. Typing here will replace its
+                        draft.
+                      </p>
+                    )}
+                    <FormControl>
+                      <Input
+                        placeholder="My Knowledge Base"
+                        maxLength={255}
+                        autoComplete="off"
+                        {...field}
+                      />
+                    </FormControl>
                     <FormMessage />
                   </FormItem>
                 )}
               />
-            ) : null}
 
-            {syncMode === 'scheduled' && fieldConfig.syncModeOptions.includes('scheduled') && (
               <FormField
                 control={form.control}
-                name="sync_schedule"
+                name="description"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Cron schedule</FormLabel>
+                    <FormLabel>Description</FormLabel>
                     <FormControl>
-                      <Input placeholder="0 2 * * *" autoComplete="off" {...field} />
+                      <Textarea
+                        placeholder="What documents does this source contain?"
+                        maxLength={2000}
+                        rows={3}
+                        {...field}
+                      />
                     </FormControl>
                     <FormDescription>
-                      Cron expression (UTC). Example: <code>0 2 * * *</code> = daily at 02:00 UTC.
+                      Up to 2000 characters. Used to help users find this source in the picker.
                     </FormDescription>
                     <FormMessage />
                   </FormItem>
                 )}
               />
-            )}
 
-            <SettingsSaveBar
-              isDirty={isDirty}
-              dirtyFieldCount={dirtyFieldCount}
-              isSaving={updateMutation.isPending}
-              onDiscard={onDiscard}
-            />
-          </form>
-        </Form>
-      </CardContent>
-    </Card>
+              {/* Retrieval mode + Source mode — gated by source type. DB sources
+                  show read-only chips with a tooltip explaining why; files /
+                  web / connectors hide the field entirely (vector_only is the
+                  only sensible value, set at creation). */}
+              {(fieldConfig.retrievalMode !== 'hidden' ||
+                fieldConfig.sourceMode !== 'hidden') && (
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                  {fieldConfig.retrievalMode === 'edit' ? (
+                    <FormField
+                      control={form.control}
+                      name="retrieval_mode"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Retrieval mode</FormLabel>
+                          <Select onValueChange={field.onChange} value={field.value}>
+                            <FormControl>
+                              <SelectTrigger>
+                                <SelectValue />
+                              </SelectTrigger>
+                            </FormControl>
+                            <SelectContent>
+                              {RETRIEVAL_MODES_EDITABLE.map((mode) => (
+                                <SelectItem key={mode} value={mode}>
+                                  {RETRIEVAL_MODE_LABELS[mode]}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                  ) : fieldConfig.retrievalMode === 'readonly-chip' ? (
+                    <ReadonlyFieldChip
+                      label="Retrieval mode"
+                      value={RETRIEVAL_MODE_LABELS[source.retrieval_mode]}
+                      tooltip="Database sources answer queries by translating natural language to SQL — vector retrieval doesn't apply."
+                      testId="retrieval-mode-chip"
+                    />
+                  ) : null}
+
+                  {fieldConfig.sourceMode === 'edit' ? (
+                    <FormField
+                      control={form.control}
+                      name="source_mode"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Source mode</FormLabel>
+                          <Select onValueChange={field.onChange} value={field.value}>
+                            <FormControl>
+                              <SelectTrigger>
+                                <SelectValue />
+                              </SelectTrigger>
+                            </FormControl>
+                            <SelectContent>
+                              {SOURCE_MODES.map((mode) => (
+                                <SelectItem key={mode} value={mode}>
+                                  {SOURCE_MODE_LABELS[mode]}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                  ) : fieldConfig.sourceMode === 'readonly-chip' ? (
+                    <ReadonlyFieldChip
+                      label="Source mode"
+                      value={SOURCE_MODE_LABELS[source.source_mode]}
+                      tooltip="Database sources query the live database at retrieval time — they don't snapshot rows into the index."
+                      testId="source-mode-chip"
+                    />
+                  ) : null}
+                </div>
+              )}
+
+              {fieldConfig.syncModeOptions.length > 0 ? (
+                <FormField
+                  control={form.control}
+                  name="sync_mode"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Sync mode</FormLabel>
+                      <Select onValueChange={field.onChange} value={field.value}>
+                        <FormControl>
+                          <SelectTrigger>
+                            <SelectValue />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          {fieldConfig.syncModeOptions.map((mode) => (
+                            <SelectItem key={mode} value={mode}>
+                              {SYNC_MODE_LABELS[mode]}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              ) : null}
+
+              {syncMode === 'scheduled' && fieldConfig.syncModeOptions.includes('scheduled') && (
+                <FormField
+                  control={form.control}
+                  name="sync_schedule"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Cron schedule</FormLabel>
+                      <FormControl>
+                        <Input placeholder="0 2 * * *" autoComplete="off" {...field} />
+                      </FormControl>
+                      <FormDescription>
+                        Cron expression (UTC). Example: <code>0 2 * * *</code> = daily at 02:00 UTC.
+                      </FormDescription>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              )}
+
+              <SettingsSaveBar
+                isDirty={isDirty}
+                dirtyFieldCount={dirtyFieldCount}
+                isSaving={updateMutation.isPending}
+                onDiscard={onDiscard}
+              />
+            </form>
+          </Form>
+        </CardContent>
+      </Card>
+    </>
   )
 }
 

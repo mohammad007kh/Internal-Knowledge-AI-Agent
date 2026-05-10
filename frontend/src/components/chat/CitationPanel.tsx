@@ -33,7 +33,7 @@ export function CitationPanel({ citation, onClose }: CitationPanelProps) {
   return (
     <div
       className={cn(
-        'fixed inset-y-0 right-0 z-50 flex w-full max-w-sm flex-col border-l border-border bg-background shadow-lg',
+        'liquid fixed inset-y-0 right-0 z-50 flex w-full max-w-sm flex-col',
         'transition-transform duration-200',
         citation ? 'translate-x-0' : 'translate-x-full'
       )}

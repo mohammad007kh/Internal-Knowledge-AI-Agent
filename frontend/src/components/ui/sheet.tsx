@@ -18,7 +18,7 @@ const SheetOverlay = React.forwardRef<
   <DialogPrimitive.Overlay
     ref={ref}
     className={cn(
-      'fixed inset-0 z-50 bg-black/60 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0',
+      'liquid-scrim fixed inset-0 z-50 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0',
       className
     )}
     {...props}
@@ -36,14 +36,14 @@ const SheetContent = React.forwardRef<
 >(({ className, children, side = 'right', ...props }, ref) => {
   const sideClasses =
     side === 'left'
-      ? 'left-0 top-0 h-full w-3/4 max-w-xs border-r data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:slide-out-to-left data-[state=open]:slide-in-from-left'
-      : 'right-0 top-0 h-full w-3/4 max-w-xs border-l data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:slide-out-to-right data-[state=open]:slide-in-from-right'
+      ? 'left-0 top-0 h-full w-3/4 max-w-xs data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:slide-out-to-left data-[state=open]:slide-in-from-left'
+      : 'right-0 top-0 h-full w-3/4 max-w-xs data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:slide-out-to-right data-[state=open]:slide-in-from-right'
   return (
     <SheetPortal>
       <SheetOverlay />
       <DialogPrimitive.Content
         ref={ref}
-        className={cn('fixed z-50 bg-background shadow-lg duration-300', sideClasses, className)}
+        className={cn('liquid fixed z-50 duration-300', sideClasses, className)}
         {...props}
       >
         {children}

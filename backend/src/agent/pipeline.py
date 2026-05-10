@@ -160,7 +160,11 @@ def _build_v1_pipeline(
     langfuse: Langfuse,
     guardrail_service: GuardrailService | None,
 ) -> CompiledStateGraph[Any, Any, Any, Any]:
-    workflow: StateGraph[AgentState] = StateGraph[AgentState](AgentState)
+    # Note: ``StateGraph`` is not generic-subscriptable in the installed
+    # langgraph version (``TypeError: type 'StateGraph' is not subscriptable``).
+    # The function annotation above already documents the state type — the
+    # variable annotation alone is sufficient to keep static analyzers happy.
+    workflow: StateGraph = StateGraph(AgentState)
 
     _load_history = functools.partial(
         load_history,
@@ -267,7 +271,9 @@ def _build_v2_pipeline(
     guardrail_service: GuardrailService | None,
     source_repository: SourceRepository,
 ) -> CompiledStateGraph[Any, Any, Any, Any]:
-    workflow: StateGraph[AgentState] = StateGraph[AgentState](AgentState)
+    # See note in :func:`_build_v1_pipeline` — drop the generic subscript;
+    # the installed langgraph version does not support it.
+    workflow: StateGraph = StateGraph(AgentState)
 
     _load_history = functools.partial(
         load_history,

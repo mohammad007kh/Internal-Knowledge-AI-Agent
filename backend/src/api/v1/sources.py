@@ -16,11 +16,11 @@ import logging
 import uuid
 from datetime import datetime, timezone
 from typing import Any
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import Response
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.database import get_db
@@ -899,3 +899,77 @@ async def refresh_description(
     """
     proposal = await _propose_naming(source_id, service=service, db=db)
     return {"proposed_description": proposal["proposed_description"]}
+
+
+# ---------------------------------------------------------------------------
+# Description history (read-only audit trail)
+# ---------------------------------------------------------------------------
+
+
+class DescriptionHistoryItem(BaseModel):
+    """One row of the description-replacement audit trail.
+
+    ``description`` is the OLD value that was replaced — i.e. what the
+    source displayed before the replacement landed. ``replaced_by_email``
+    is joined from the ``users`` table for UI convenience and is ``None``
+    when ``replaced_by`` is ``None`` (AI-driven replacement).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: UUID
+    description: str
+    replaced_at: datetime
+    replaced_by: UUID | None
+    replaced_by_email: str | None
+
+
+class PaginatedDescriptionHistory(BaseModel):
+    """Paginated container for :class:`DescriptionHistoryItem` rows."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    items: list[DescriptionHistoryItem]
+    total: int
+    limit: int
+    offset: int
+
+
+@router.get(
+    "/{source_id}/description-history",
+    response_model=PaginatedDescriptionHistory,
+    summary="Paginated description-replacement audit trail",
+)
+async def list_description_history(
+    source_id: uuid.UUID,
+    limit: int = Query(20, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+    current_user: User = Depends(get_current_user),
+    service: SourceService = Depends(_get_source_service),
+    db: AsyncSession = Depends(get_db),
+) -> PaginatedDescriptionHistory:
+    """Return the source's description-replacement history (newest first).
+
+    Admins see every source's history; regular users only see their own
+    sources. Raises 404 if the source does not exist, 403 if the caller
+    is neither an admin nor the source's owner.
+
+    The endpoint reads from ``source_description_history`` and joins
+    ``users`` so each row carries the replacing admin's email. Rows where
+    ``replaced_by`` is ``NULL`` (AI auto-rename) surface
+    ``replaced_by_email = None``.
+    """
+    source = await service.get_source(source_id)
+    _assert_ownership_or_admin(source.owner_id, current_user)
+
+    from src.repositories.source_repository import SourceRepository  # noqa: PLC0415
+
+    repo = SourceRepository(db)
+    rows = await repo.list_description_history(source_id, limit=limit, offset=offset)
+    total = await repo.count_description_history(source_id)
+    return PaginatedDescriptionHistory(
+        items=[DescriptionHistoryItem(**row) for row in rows],
+        total=total,
+        limit=limit,
+        offset=offset,
+    )

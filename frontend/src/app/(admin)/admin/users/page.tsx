@@ -28,9 +28,11 @@ import { apiClient } from '@/lib/api-client'
 import { getErrorMessage } from '@/lib/errors'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { MailIcon, PlusIcon, Trash2Icon } from 'lucide-react'
-import Link from 'next/link'
+import { useRouter } from 'next/navigation'
 import { useState } from 'react'
 import { toast } from 'sonner'
+import { InviteUserDialog } from './_components/InviteUserDialog'
+import { ViewUserSheet } from './_components/ViewUserSheet'
 
 interface Invitation {
   id: string
@@ -73,6 +75,7 @@ function useRevokeInvitation() {
 }
 
 function InvitationsTable() {
+  const router = useRouter()
   const { data: invitations, isLoading } = useInvitations()
   const revoke = useRevokeInvitation()
   const [revokingId, setRevokingId] = useState<string | null>(null)
@@ -97,11 +100,13 @@ function InvitationsTable() {
             Invite teammates to give them access to the knowledge base.
           </p>
         </div>
-        <Button asChild size="sm" className="mt-2">
-          <Link href="/admin/users/new">
-            <PlusIcon className="mr-1.5 h-4 w-4" />
-            Invite user
-          </Link>
+        <Button
+          size="sm"
+          className="mt-2"
+          onClick={() => router.push('/admin/users?invite=1')}
+        >
+          <PlusIcon className="mr-1.5 h-4 w-4" />
+          Invite user
         </Button>
       </div>
     )
@@ -190,6 +195,7 @@ function InvitationsTable() {
 }
 
 export default function UsersPage() {
+  const router = useRouter()
   const { data: invitations } = useInvitations()
   const pendingCount = invitations?.length ?? 0
 
@@ -197,11 +203,13 @@ export default function UsersPage() {
     <div className="space-y-4 p-4 md:p-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h1 className="text-xl font-semibold">Users</h1>
-        <Button asChild size="sm" className="w-full sm:w-auto">
-          <Link href="/admin/users/new">
-            <PlusIcon className="mr-1.5 h-4 w-4" />
-            Invite user
-          </Link>
+        <Button
+          size="sm"
+          className="w-full sm:w-auto"
+          onClick={() => router.push('/admin/users?invite=1')}
+        >
+          <PlusIcon className="mr-1.5 h-4 w-4" />
+          Invite user
         </Button>
       </div>
 
@@ -227,6 +235,10 @@ export default function UsersPage() {
           <InvitationsTable />
         </TabsContent>
       </Tabs>
+
+      {/* URL-driven modals: each reads its own ?param and renders accordingly. */}
+      <InviteUserDialog />
+      <ViewUserSheet />
     </div>
   )
 }
