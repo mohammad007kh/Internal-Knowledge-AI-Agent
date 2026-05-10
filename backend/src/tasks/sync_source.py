@@ -169,6 +169,36 @@ async def _run_sync_pipeline(  # noqa: C901
     span_meta.end(output={"source_type": source.source_type})
 
     # ── 3. Fetch raw documents ───────────────────────────────────────────────
+    # Database sources have no documents to ingest — the agent queries them
+    # at retrieval time via text_to_query. Phase 1 Wave 2 will wire a
+    # dedicated studying-agent task; until then "Sync now" / "Re-study
+    # schema" on a DB source is a no-op success so it doesn't crash with
+    # ``DatabaseConnector does not implement fetch_documents()`` and trip
+    # the auto-demote path. The Sync tab still records the run for the
+    # admin's history but with zero counts.
+    if str(source.source_type) == "database" or getattr(
+        source.source_type, "value", None
+    ) == "database":
+        logger.info(
+            "sync_source: skipping fetch for DB source %s — "
+            "documents are queried live at retrieval time",
+            source_id,
+        )
+        await job_svc.mark_success(
+            job_id,
+            documents_synced=0,
+            chunks_created=0,
+        )
+        result_db: dict[str, Any] = {
+            "source_id": source_id,
+            "documents_synced": 0,
+            "chunks_created": 0,
+            "skipped_reason": "db_source_uses_live_retrieval",
+        }
+        trace.update(output={"status": "success", **result_db})
+        langfuse.flush()
+        return result_db
+
     span_fetch = trace.span(name="fetch_documents")
     try:
         connector = ConnectorFactory().build(
