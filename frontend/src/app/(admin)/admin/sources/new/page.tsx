@@ -12,6 +12,7 @@ import {
   Loader2Icon,
   PlusIcon,
   RefreshCwIcon,
+  SparklesIcon,
   XIcon,
 } from 'lucide-react'
 import Link from 'next/link'
@@ -24,6 +25,7 @@ import { z } from 'zod'
 import { EmbedderPicker } from '@/components/admin/EmbedderPicker'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Checkbox } from '@/components/ui/checkbox'
 import {
   Form,
   FormControl,
@@ -213,8 +215,12 @@ const schema = z
   .object({
     // TODO: re-add when backend connectors ship — see docs/architecture-review-2026-04.md
     source_type: z.enum(['database', 'file_upload', 'web_url']),
-    name: z.string().min(1, 'Name is required').max(200, 'Max 200 characters'),
+    // F9: Name is conditionally required — see superRefine below. It is
+    // optional at the schema level so the form remains valid when the user
+    // opts into AI-naming and submits an empty string.
+    name: z.string().max(200, 'Max 200 characters'),
     description: z.string().max(500, 'Max 500 characters').optional(),
+    auto_name_and_description: z.boolean(),
     db_type: z.enum(DB_TYPES).optional(),
     host: z.string().optional(),
     port: z.union([z.string(), z.number()]).optional(),
@@ -232,6 +238,14 @@ const schema = z
     citations_enabled: z.boolean(),
   })
   .superRefine((values, ctx) => {
+    // F9: Name is required only when the user has NOT opted into AI-naming.
+    if (!values.auto_name_and_description && values.name.trim().length === 0) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['name'],
+        message: 'Name is required',
+      })
+    }
     if (values.source_type === 'database') {
       const dbResult = databaseConnectionSchema.safeParse({
         db_type: values.db_type,
@@ -307,6 +321,7 @@ export default function NewSourcePage() {
       source_type: 'file_upload',
       name: '',
       description: '',
+      auto_name_and_description: false,
       db_type: 'postgresql',
       host: '',
       port: DB_DEFAULT_PORTS.postgresql,
@@ -328,6 +343,7 @@ export default function NewSourcePage() {
   const sourceType = form.watch('source_type')
   const syncMode = form.watch('sync_mode')
   const dbType = form.watch('db_type') ?? 'postgresql'
+  const autoNaming = form.watch('auto_name_and_description')
   const isFileType = FILE_SOURCE_TYPES.has(sourceType)
   const isDatabaseType = sourceType === 'database'
   const isMongo = isDatabaseType && dbType === 'mongodb'
@@ -518,16 +534,20 @@ export default function NewSourcePage() {
         }))
     }
 
+    // F9: when auto-naming is on, send empty strings for name + description
+    // and let the backend stamp the placeholder. Otherwise pass the user's
+    // values through unchanged.
     const payload: CreateSourcePayload = {
-      name: values.name,
+      name: values.auto_name_and_description ? '' : values.name,
       source_type: values.source_type,
-      description: values.description ?? '',
+      description: values.auto_name_and_description ? '' : (values.description ?? ''),
       connection,
       files,
       retrieval_mode: values.retrieval_mode,
       sync_mode: values.sync_mode,
       sync_schedule: values.sync_mode === 'scheduled' ? (values.sync_schedule ?? null) : null,
       citations_enabled: values.citations_enabled,
+      auto_name_and_description: values.auto_name_and_description,
     }
 
     createSource.mutate(payload, {
@@ -613,39 +633,6 @@ export default function NewSourcePage() {
                           )
                         })}
                       </div>
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-
-              <FormField
-                control={form.control}
-                name="name"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Name</FormLabel>
-                    <FormControl>
-                      <Input placeholder="My Knowledge Base" maxLength={200} {...field} />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-
-              <FormField
-                control={form.control}
-                name="description"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Description (optional)</FormLabel>
-                    <FormControl>
-                      <Textarea
-                        placeholder="What documents does this source contain?"
-                        maxLength={500}
-                        rows={2}
-                        {...field}
-                      />
                     </FormControl>
                     <FormMessage />
                   </FormItem>
@@ -818,6 +805,113 @@ export default function NewSourcePage() {
                         onCheckedChange={field.onChange}
                       />
                     </FormControl>
+                  </FormItem>
+                )}
+              />
+            </CardContent>
+          </Card>
+
+          {/* F9: AI-naming opt-in card. Lives last in the form so the user
+              has already supplied connection / files context before deciding
+              whether to let the assistant pick a name + description. */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Naming</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <FormField
+                control={form.control}
+                name="auto_name_and_description"
+                render={({ field }) => (
+                  <FormItem className="space-y-2">
+                    <div className="flex items-start gap-3">
+                      <FormControl>
+                        <Checkbox
+                          id="auto-naming-checkbox"
+                          checked={field.value}
+                          onCheckedChange={(next) => {
+                            field.onChange(next)
+                            if (next) {
+                              // Clear the user's drafts so unchecking later
+                              // gives them a fresh slate to type into.
+                              form.setValue('name', '', {
+                                shouldDirty: false,
+                                shouldValidate: false,
+                              })
+                              form.setValue('description', '', {
+                                shouldDirty: false,
+                                shouldValidate: false,
+                              })
+                            }
+                          }}
+                          className="mt-0.5"
+                        />
+                      </FormControl>
+                      <div className="space-y-1">
+                        <FormLabel
+                          htmlFor="auto-naming-checkbox"
+                          className="flex items-center gap-1.5 text-sm font-medium"
+                        >
+                          <SparklesIcon
+                            className="h-3.5 w-3.5 text-muted-foreground"
+                            aria-hidden
+                          />
+                          Let AI name and describe this source for me
+                        </FormLabel>
+                        <FormDescription className="text-xs">
+                          Skip this and the assistant will read your source after ingestion and
+                          write a clear name + retrieval-friendly description. You can edit either
+                          later.
+                        </FormDescription>
+                      </div>
+                    </div>
+                  </FormItem>
+                )}
+              />
+
+              <FormField
+                control={form.control}
+                name="name"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Name</FormLabel>
+                    <FormControl>
+                      <Input
+                        placeholder={
+                          autoNaming
+                            ? 'AI will pick a name after ingestion'
+                            : 'My Knowledge Base'
+                        }
+                        maxLength={200}
+                        disabled={autoNaming}
+                        {...field}
+                      />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
+              <FormField
+                control={form.control}
+                name="description"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Description (optional)</FormLabel>
+                    <FormControl>
+                      <Textarea
+                        placeholder={
+                          autoNaming
+                            ? 'AI will write a description after ingestion'
+                            : 'What documents does this source contain?'
+                        }
+                        maxLength={500}
+                        rows={2}
+                        disabled={autoNaming}
+                        {...field}
+                      />
+                    </FormControl>
+                    <FormMessage />
                   </FormItem>
                 )}
               />

@@ -3,6 +3,7 @@
 import { ActionCell } from '@/app/(admin)/admin/sources/_components/ActionCell'
 import { DatabaseStudyStrip } from '@/app/(admin)/admin/sources/_components/DatabaseStudyStrip'
 import { IngestionStrip } from '@/app/(admin)/admin/sources/_components/IngestionStrip'
+import { PendingNamePill } from '@/app/(admin)/admin/sources/_components/PendingNamePill'
 import { SourceActionCell } from '@/app/(admin)/admin/sources/_components/SourceActionCell'
 import { Button } from '@/components/ui/button'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
@@ -47,14 +48,26 @@ export function SourceRowCard({ source, onDelete }: SourceRowCardProps) {
           <Icon className="h-4 w-4" />
         </span>
         <div className="min-w-0 flex-1">
-          <Link
-            href={`/admin/sources/${source.id}`}
-            className="block truncate font-medium text-foreground hover:underline"
-          >
-            {source.name}
-          </Link>
+          {source.name_status === 'pending_ai' ? (
+            <Link
+              href={`/admin/sources/${source.id}`}
+              className="block hover:underline"
+              aria-label={`Naming in progress for source ${source.id}`}
+            >
+              <PendingNamePill />
+            </Link>
+          ) : (
+            <Link
+              href={`/admin/sources/${source.id}`}
+              className="block truncate font-medium text-foreground hover:underline"
+            >
+              {source.name}
+            </Link>
+          )}
           <p className="truncate text-xs text-muted-foreground">
-            {source.description ?? meta.label}
+            {source.description_status === 'pending_ai'
+              ? '—'
+              : (source.description ?? meta.label)}
           </p>
         </div>
         <Popover open={menuOpen} onOpenChange={setMenuOpen}>

@@ -3,6 +3,7 @@
 import { ActionCell } from '@/app/(admin)/admin/sources/_components/ActionCell'
 import { DatabaseStudyStrip } from '@/app/(admin)/admin/sources/_components/DatabaseStudyStrip'
 import { IngestionStrip } from '@/app/(admin)/admin/sources/_components/IngestionStrip'
+import { PendingNamePill } from '@/app/(admin)/admin/sources/_components/PendingNamePill'
 import { SourceActionCell } from '@/app/(admin)/admin/sources/_components/SourceActionCell'
 import { SourceRowCard } from '@/app/(admin)/admin/sources/_components/SourceRowCard'
 import {
@@ -395,14 +396,28 @@ export function SourcesTable({ demoSources }: SourcesTableProps = {}) {
                             <meta.icon className="h-3.5 w-3.5" />
                           </span>
                           <div className="min-w-0">
-                            <Link
-                              href={`/admin/sources/${source.id}`}
-                              className="block truncate font-medium hover:underline"
-                            >
-                              {source.name}
-                            </Link>
+                            {source.name_status === 'pending_ai' ? (
+                              <Link
+                                href={`/admin/sources/${source.id}`}
+                                className="block hover:underline"
+                                aria-label={`Naming in progress for source ${source.id}`}
+                              >
+                                <PendingNamePill />
+                              </Link>
+                            ) : (
+                              <Link
+                                href={`/admin/sources/${source.id}`}
+                                className="block truncate font-medium hover:underline"
+                              >
+                                {source.name}
+                              </Link>
+                            )}
                             <p className="truncate text-xs text-muted-foreground">
-                              {source.description?.trim() ? source.description : meta.label}
+                              {source.description_status === 'pending_ai'
+                                ? '—'
+                                : source.description?.trim()
+                                  ? source.description
+                                  : meta.label}
                             </p>
                           </div>
                         </div>

@@ -35,6 +35,7 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import {
   useDeleteSource,
+  useAutoNameSource,
   useRefreshDescription,
   useSource,
   useSourceDocuments,
@@ -69,9 +70,17 @@ export default function SourceDetailPage() {
   const deleteMutation = useDeleteSource()
   const updateMutation = useUpdateSource(id)
   const refreshDesc = useRefreshDescription(id)
+  const autoName = useAutoNameSource(id)
 
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [proposedDesc, setProposedDesc] = useState<string | null>(null)
+  // Holds the AI's proposed { name, description } pair from the Regenerate
+  // button. Distinct from `proposedDesc` (which is a single string from the
+  // legacy refresh-description flow) because Regenerate proposes BOTH and
+  // the admin gets to confirm both at once.
+  const [proposedAutoName, setProposedAutoName] = useState<
+    { name: string; description: string } | null
+  >(null)
 
   if (isLoading) {
     return (
@@ -210,21 +219,40 @@ export default function SourceDetailPage() {
           </div>
 
           <Card>
-            <CardHeader className="flex flex-row items-center justify-between pb-2">
+            <CardHeader className="flex flex-row items-center justify-between gap-2 pb-2">
               <CardTitle className="text-sm font-medium">AI Description</CardTitle>
-              <Button
-                variant="outline"
-                size="sm"
-                disabled={refreshDesc.isPending}
-                onClick={() =>
-                  refreshDesc.mutate(undefined, {
-                    onSuccess: (data) => setProposedDesc(data.proposed_description),
-                    onError: (err) => toast.error(getErrorMessage(err)),
-                  })
-                }
-              >
-                {refreshDesc.isPending ? 'Generating…' : 'Refresh'}
-              </Button>
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={refreshDesc.isPending || autoName.isPending}
+                  onClick={() =>
+                    refreshDesc.mutate(undefined, {
+                      onSuccess: (data) => setProposedDesc(data.proposed_description),
+                      onError: (err) => toast.error(getErrorMessage(err)),
+                    })
+                  }
+                >
+                  {refreshDesc.isPending ? 'Generating…' : 'Refresh description'}
+                </Button>
+                <Button
+                  variant="default"
+                  size="sm"
+                  disabled={autoName.isPending || refreshDesc.isPending}
+                  onClick={() =>
+                    autoName.mutate(undefined, {
+                      onSuccess: (data) =>
+                        setProposedAutoName({
+                          name: data.proposed_name,
+                          description: data.proposed_description,
+                        }),
+                      onError: (err) => toast.error(getErrorMessage(err)),
+                    })
+                  }
+                >
+                  {autoName.isPending ? 'Regenerating…' : 'Regenerate name + description'}
+                </Button>
+              </div>
             </CardHeader>
             <CardContent>
               <p className="text-sm text-muted-foreground">
@@ -441,6 +469,67 @@ export default function SourceDetailPage() {
           </div>
         </TabsContent>
       </Tabs>
+
+      {/* Proposed name+description dialog (Regenerate flow). Confirms BOTH at
+          once, distinguishing the AI-name update from a description-only
+          refresh. Persists via the same updateMutation. */}
+      <Dialog
+        open={!!proposedAutoName}
+        onOpenChange={(o) => !o && setProposedAutoName(null)}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Proposed name + description</DialogTitle>
+            <DialogDescription>
+              The assistant read this source and drafted a clear name and
+              retrieval-friendly description. Review both, then save to replace
+              the current values.
+            </DialogDescription>
+          </DialogHeader>
+          {proposedAutoName ? (
+            <div className="space-y-3 text-sm">
+              <div>
+                <p className="text-xs uppercase tracking-wide text-muted-foreground">
+                  Name
+                </p>
+                <p className="font-medium">{proposedAutoName.name}</p>
+              </div>
+              <div>
+                <p className="text-xs uppercase tracking-wide text-muted-foreground">
+                  Description
+                </p>
+                <p>{proposedAutoName.description}</p>
+              </div>
+            </div>
+          ) : null}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setProposedAutoName(null)}>
+              Discard
+            </Button>
+            <Button
+              disabled={updateMutation.isPending || !proposedAutoName}
+              onClick={() => {
+                if (!proposedAutoName) return
+                updateMutation.mutate(
+                  {
+                    name: proposedAutoName.name,
+                    description: proposedAutoName.description,
+                  },
+                  {
+                    onSuccess: () => {
+                      toast.success('Name + description updated')
+                      setProposedAutoName(null)
+                    },
+                    onError: (err) => toast.error(getErrorMessage(err)),
+                  }
+                )
+              }}
+            >
+              {updateMutation.isPending ? 'Saving…' : 'Save both'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Proposed description dialog */}
       <Dialog open={!!proposedDesc} onOpenChange={(o) => !o && setProposedDesc(null)}>

@@ -2,6 +2,7 @@
 
 import {
   type UpdateSourceRequest,
+  autoNameApi,
   deleteSourceApi,
   getSourceApi,
   getSourceStatsApi,
@@ -148,5 +149,11 @@ export function useTriggerSync() {
 export function useRefreshDescription(sourceId: string) {
   return useMutation({
     mutationFn: () => refreshDescriptionApi(sourceId),
+  })
+}
+
+export function useAutoNameSource(sourceId: string) {
+  return useMutation({
+    mutationFn: () => autoNameApi(sourceId),
   })
 }

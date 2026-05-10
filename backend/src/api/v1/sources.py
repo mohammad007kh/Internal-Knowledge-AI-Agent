@@ -730,24 +730,78 @@ async def get_source_stats(
     return SourceStatsResponse(**stats)
 
 
-@router.post(
-    "/{source_id}/refresh-description",
-    summary="Regenerate the AI description for a source (does not persist)",
-)
-async def refresh_description(
+async def _propose_naming(
     source_id: uuid.UUID,
-    _admin: User = Depends(require_admin),
-    service: SourceService = Depends(_get_source_service),
+    *,
+    service: SourceService,
+    db: AsyncSession,
 ) -> dict[str, str]:
-    """Regenerate (but don't save) a description for an existing source.
+    """Profile the source and ask :class:`SourceNamingService` for a proposal.
 
-    Admin-only.  The caller is expected to PATCH the source with the
-    ``proposed_description`` if they want to persist it.
+    Shared by ``/auto-name`` (returns both fields) and the deprecated
+    ``/refresh-description`` alias (returns the description only). Does
+    NOT persist — F8 / F10 own the accept-and-save flow.
     """
     source = await service.get_source(source_id)
 
     from src.core.container import Container  # noqa: PLC0415
 
-    inspection_service = Container.source_inspection_service()
-    proposed = await inspection_service.generate_description(source)
-    return {"proposed_description": proposed}
+    factory = Container.source_profiler_factory()
+    naming_service = Container.source_naming_service()
+
+    profiler = factory.for_source(source)
+    profile = await profiler.profile(source, db)
+    naming = await naming_service.name_from_profile(profile)
+    logger.info(
+        "Generated AI naming proposal",
+        extra={
+            "source_id": str(source_id),
+            "proposed_name_length": len(naming.name),
+            "proposed_description_length": len(naming.description),
+        },
+    )
+    return {
+        "proposed_name": naming.name,
+        "proposed_description": naming.description,
+    }
+
+
+@router.post(
+    "/{source_id}/auto-name",
+    summary="Generate an AI name + description proposal for a source (does not persist)",
+)
+async def auto_name(
+    source_id: uuid.UUID,
+    _admin: User = Depends(require_admin),
+    service: SourceService = Depends(_get_source_service),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, str]:
+    """Profile the source and propose a new ``name`` + ``description``.
+
+    Admin-only. Returns ``{"proposed_name": ..., "proposed_description": ...}``.
+    The caller is expected to PATCH the source if they want to persist —
+    the audit trail (``source_description_history``) is appended on the
+    accept side, NOT here.
+    """
+    return await _propose_naming(source_id, service=service, db=db)
+
+
+@router.post(
+    "/{source_id}/refresh-description",
+    summary="Deprecated alias for /auto-name — returns description only",
+    deprecated=True,
+)
+async def refresh_description(
+    source_id: uuid.UUID,
+    _admin: User = Depends(require_admin),
+    service: SourceService = Depends(_get_source_service),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, str]:
+    """Deprecated wrapper around ``/auto-name``.
+
+    Kept for one release so existing UI callers (F10's regenerate button
+    is mid-migration) don't break. Drops the ``proposed_name`` field so
+    the response shape matches the legacy contract exactly.
+    """
+    proposal = await _propose_naming(source_id, service=service, db=db)
+    return {"proposed_description": proposal["proposed_description"]}

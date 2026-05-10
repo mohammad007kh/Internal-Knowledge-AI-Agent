@@ -36,7 +36,11 @@ from src.services.guardrail_service import GuardrailService
 from src.services.langfuse_tracing_service import LangfuseTracingService, NullLangfuse
 from src.services.password_service import PasswordService
 from src.services.source_inspection_service import SourceInspectionService
+from src.services.source_naming_service import SourceNamingService
 from src.services.source_permission_service import SourcePermissionService
+from src.services.source_profiling import SourceProfilerFactory
+from src.services.source_profiling.database_profiler import DatabaseSourceProfiler
+from src.services.source_profiling.file_profiler import FileSourceProfiler
 from src.services.source_service import SourceService
 from src.services.storage_service import StorageService
 from src.services.sync_job_service import SyncJobService
@@ -46,6 +50,22 @@ from src.services.user_service import UserService
 import logging
 
 _logger = logging.getLogger(__name__)
+
+
+def _build_source_profiler_factory(
+    file_profiler: FileSourceProfiler,
+    database_profiler: DatabaseSourceProfiler,
+) -> SourceProfilerFactory:
+    """Return a ready-to-use :class:`SourceProfilerFactory`.
+
+    Centralised here so the same factory instance is reused across the
+    auto-naming pipeline (admin endpoint + Celery task) without each
+    caller having to remember which concrete profilers to register.
+    """
+    factory = SourceProfilerFactory()
+    factory.register_profiler(file_profiler)
+    factory.register_profiler(database_profiler)
+    return factory
 
 
 def _build_langfuse_client(app_settings: Any) -> Any:
@@ -209,6 +229,30 @@ class Container(containers.DeclarativeContainer):
     )
     langfuse: providers.Singleton[Any] = providers.Singleton(
         lambda: _build_langfuse_client(settings)
+    )
+    # ── Source-auto-naming pipeline (F5/F6/F7) ───────────────────────────
+    # FileSourceProfiler covers FILE_UPLOAD + WEB_URL + Confluence +
+    # SharePoint (all four feed the same Documents/Chunks tables);
+    # DatabaseSourceProfiler reads the studying agent's SchemaStudy.
+    file_source_profiler: providers.Singleton[FileSourceProfiler] = providers.Singleton(
+        FileSourceProfiler,
+        ai_model_resolver=ai_model_resolver,
+        langfuse=langfuse,
+    )
+    database_source_profiler: providers.Singleton[DatabaseSourceProfiler] = (
+        providers.Singleton(DatabaseSourceProfiler)
+    )
+    source_profiler_factory: providers.Singleton[SourceProfilerFactory] = (
+        providers.Singleton(
+            _build_source_profiler_factory,
+            file_source_profiler,
+            database_source_profiler,
+        )
+    )
+    source_naming_service: providers.Singleton[SourceNamingService] = providers.Singleton(
+        SourceNamingService,
+        ai_model_resolver=ai_model_resolver,
+        langfuse=langfuse,
     )
     langfuse_tracing_service: providers.Singleton[LangfuseTracingService] = providers.Singleton(
         LangfuseTracingService,

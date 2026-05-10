@@ -55,6 +55,13 @@ export interface CreateSourcePayload {
    * to the active embedder — the UI surfaces this as read-only.
    */
   embedder_id?: string | null
+  /**
+   * When true, the backend stamps a placeholder name + description on the
+   * row and schedules an AI-naming pass to rewrite both after first
+   * ingestion. The form submits an empty `name` / `description` alongside
+   * this flag — the server is the source of truth for the placeholder.
+   */
+  auto_name_and_description?: boolean
 }
 
 export interface CreatedSource {

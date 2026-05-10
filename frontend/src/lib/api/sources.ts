@@ -28,6 +28,27 @@ export type SourceMode = 'snapshot' | 'live'
 export type RetrievalMode = 'vector_only' | 'text_to_query' | 'hybrid'
 
 // ---------------------------------------------------------------------------
+// AI-naming bookkeeping (F9)
+//
+// `name_status` / `description_status` track whether each field was set by the
+// user up front, is awaiting an AI-generated value, or has been written by the
+// AI post-ingestion. Components branch on these to render the "Naming…"
+// shimmer placeholder while the assistant is still reading the source.
+// ---------------------------------------------------------------------------
+
+/**
+ * Provenance of a source's name or description field.
+ *
+ * - `user_set` — the admin typed it themselves at creation (or edited it later).
+ * - `pending_ai` — the admin opted into auto-naming and the assistant has not
+ *   yet produced a value; UI should render a shimmer pill.
+ * - `ai_set` — the assistant wrote the value. Renders identically to
+ *   `user_set` so admins don't have to know AI authored it (the bookkeeping
+ *   exists so the future "Regenerate" affordance can target it).
+ */
+export type NameStatus = 'user_set' | 'pending_ai' | 'ai_set'
+
+// ---------------------------------------------------------------------------
 // DB-source studying agent (Wave 1A schema columns)
 //
 // These fields ship in the database in Wave 1A and are exposed on the
@@ -100,6 +121,12 @@ export interface SourceListItem {
   tables_partial?: number | null
   last_error_phase?: string | null
   last_error_message?: string | null
+  // AI-naming bookkeeping (F9). Optional for backwards compatibility — older
+  // backends may omit these entirely; the UI defaults to treating absent
+  // values as `user_set`.
+  name_status?: NameStatus
+  description_status?: NameStatus
+  auto_name_and_description?: boolean
 }
 
 export interface SourceDetail extends SourceListItem {
@@ -139,6 +166,12 @@ export interface CreateSourceRequest {
   name: string
   source_type: SourceType
   config: Record<string, unknown>
+  /**
+   * When true, the backend assigns a placeholder name + description and
+   * schedules an AI-naming pass to fill them in after first ingestion.
+   * Defaults to `false` server-side when omitted.
+   */
+  auto_name_and_description?: boolean
 }
 
 export interface UpdateSourceRequest {
@@ -154,6 +187,11 @@ export interface TestConnectionResponse {
 }
 
 export interface RefreshDescriptionResponse {
+  proposed_description: string
+}
+
+export interface AutoNameResponse {
+  proposed_name: string
   proposed_description: string
 }
 
@@ -220,6 +258,13 @@ export async function triggerSyncApi(sourceId: string): Promise<SyncJob> {
 export async function refreshDescriptionApi(sourceId: string): Promise<RefreshDescriptionResponse> {
   const { data } = await apiClient.post<RefreshDescriptionResponse>(
     `/api/v1/sources/${sourceId}/refresh-description`
+  )
+  return data
+}
+
+export async function autoNameApi(sourceId: string): Promise<AutoNameResponse> {
+  const { data } = await apiClient.post<AutoNameResponse>(
+    `/api/v1/sources/${sourceId}/auto-name`
   )
   return data
 }
