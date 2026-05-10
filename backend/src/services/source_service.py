@@ -117,11 +117,24 @@ class SourceService:
         Raises:
             ConflictError: if a source with the same name exists for this owner.
         """
-        existing = await self._repo.find_by_name_and_owner(payload.name, owner_id)
-        if existing is not None:
-            raise ConflictError(
-                f"A source named {payload.name!r} already exists for this user."
+        # When the admin opted into AI auto-naming, the wire payload may carry
+        # an empty ``name``. Stamp a placeholder server-side so DB constraints
+        # (NOT NULL) hold and the row is addressable in the UI ("Naming…")
+        # until the auto-naming worker writes the real value. Skip the
+        # uniqueness check in this path because "Untitled source" can legitimately
+        # appear multiple times — the placeholder is replaced before the row is
+        # surfaced to non-admin users.
+        if payload.auto_name_and_description and not payload.name.strip():
+            effective_name = "Untitled source"
+        else:
+            effective_name = payload.name
+            existing = await self._repo.find_by_name_and_owner(
+                effective_name, owner_id
             )
+            if existing is not None:
+                raise ConflictError(
+                    f"A source named {effective_name!r} already exists for this user."
+                )
 
         is_file = payload.source_type in FILE_SOURCE_TYPES
         is_database = payload.source_type == "database"
@@ -166,12 +179,25 @@ class SourceService:
             self._encrypt_config(config_for_encryption) if config_for_encryption else None
         )
 
+        # AI auto-naming bookkeeping. When the user opted in, the description
+        # is also handled by the AI even if they typed nothing — keep these
+        # two signals in lock-step so the UI's "Naming…" indicator stays
+        # consistent.
+        if payload.auto_name_and_description:
+            name_status = "pending_ai"
+            description_status = "pending_ai"
+            description_for_persist: str | None = None
+        else:
+            name_status = "user_set"
+            description_status = "user_set"
+            description_for_persist = payload.description or None
+
         return await self._repo.create(
-            name=payload.name,
+            name=effective_name,
             source_type=persisted_source_type,
             source_mode=source_mode,
             retrieval_mode=payload.retrieval_mode,
-            description=payload.description or None,
+            description=description_for_persist,
             sync_mode=payload.sync_mode,
             sync_schedule=payload.sync_schedule,
             citations_enabled=payload.citations_enabled,
@@ -179,6 +205,9 @@ class SourceService:
             file_storage_path=first_object_key,
             owner_id=owner_id,
             status="pending",
+            name_status=name_status,
+            description_status=description_status,
+            auto_name_and_description=payload.auto_name_and_description,
         )
 
     @staticmethod

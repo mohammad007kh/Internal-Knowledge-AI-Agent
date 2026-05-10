@@ -83,6 +83,35 @@ class Source(Base, UUIDMixin, TimestampMixin):
         index=True,
     )
 
+    # -- AI auto-naming fields ----------------------------------------------
+    # Tracks whether the user typed the value, the system is waiting for AI,
+    # or the AI has written it. Used by the auto-naming pipeline to avoid
+    # silently overwriting human-typed values, and by the frontend to render
+    # a "Naming…" shimmer placeholder while pending.
+    name_status: Mapped[str] = mapped_column(
+        String(16),
+        nullable=False,
+        default="user_set",
+        server_default="user_set",
+        doc="One of user_set | pending_ai | ai_set.",
+    )
+    description_status: Mapped[str] = mapped_column(
+        String(16),
+        nullable=False,
+        default="user_set",
+        server_default="user_set",
+        doc="One of user_set | pending_ai | ai_set.",
+    )
+    # The user's intent at creation time. Persisted so a future explicit
+    # 'Regenerate' knows whether the original creation requested AI naming.
+    auto_name_and_description: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+        server_default="false",
+        doc="Set when the admin checked 'Let AI name and describe this source for me'.",
+    )
+
     # -- DB-source studying-agent fields (Phase 1) --------------------------
     # ``schema_status`` mirrors the agent lifecycle for the *latest* study
     # and is the column the UI/list endpoints filter on.  Per-run history

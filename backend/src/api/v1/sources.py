@@ -305,6 +305,9 @@ async def create_source(
         deleted_at=source.deleted_at,
         created_at=source.created_at.isoformat(),
         updated_at=source.updated_at.isoformat(),
+        name_status=source.name_status,
+        description_status=source.description_status,
+        auto_name_and_description=source.auto_name_and_description,
     )
 
 

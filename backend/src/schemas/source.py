@@ -167,7 +167,11 @@ class SourceCreateRequest(BaseModel):
 
     model_config = ConfigDict(str_strip_whitespace=True)
 
-    name: str = Field(..., min_length=1, max_length=255)
+    # When ``auto_name_and_description`` is true the admin asked the AI to
+    # write the name+description after ingestion; ``name`` may be empty on the
+    # wire (we store ``"Untitled source"`` as a placeholder server-side). When
+    # false, the user typed a name and the legacy validation applies.
+    name: str = Field(default="", max_length=255)
     source_type: str
     connection: dict[str, Any] | None = None
     # Legacy single-file shape — kept for back-compat.
@@ -179,6 +183,7 @@ class SourceCreateRequest(BaseModel):
     sync_schedule: str | None = None
     retrieval_mode: str = "vector_only"
     citations_enabled: bool = True
+    auto_name_and_description: bool = False
 
     @field_validator("name")
     @classmethod
@@ -186,6 +191,21 @@ class SourceCreateRequest(BaseModel):
         if "/" in v:
             raise ValueError("Source name must not contain '/'.")
         return v
+
+    @model_validator(mode="after")
+    def _require_name_unless_auto(self) -> SourceCreateRequest:
+        """``name`` is required UNLESS the admin opted into AI auto-naming.
+
+        Splitting this out of the field-level validator lets us cross-reference
+        ``auto_name_and_description`` — Pydantic doesn't expose sibling fields
+        inside ``@field_validator``.
+        """
+        if not self.auto_name_and_description and not self.name.strip():
+            raise ValueError(
+                "name is required (or set auto_name_and_description=true to "
+                "have the assistant generate one after ingestion)."
+            )
+        return self
 
     @field_validator("source_type")
     @classmethod
@@ -242,6 +262,12 @@ class SourcePublicResponse(BaseModel):
     citations_enabled: bool
     is_active: bool = False
     deleted_at: datetime | None = None
+    # AI auto-naming bookkeeping — surfaces "Naming…" placeholder in the UI
+    # while pending and lets the admin distinguish AI-written from user-typed
+    # values.
+    name_status: str = "user_set"
+    description_status: str = "user_set"
+    auto_name_and_description: bool = False
     created_at: str
     updated_at: str
 
