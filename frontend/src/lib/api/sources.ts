@@ -347,6 +347,55 @@ export async function testConnectionApi(sourceId: string): Promise<TestConnectio
   return data
 }
 
+// ---------------------------------------------------------------------------
+// Edit DB credentials (U8 + FX4)
+//
+// `PATCH /api/v1/sources/{id}/credentials` accepts a partial credential
+// payload plus a `confirm_password` re-auth field. The backend tests the new
+// connection BEFORE persisting — a connector-level failure surfaces as 422
+// and the source row is left untouched, so the dialog can stay open with the
+// connector error.
+//
+// SECURITY: every field on this body is sensitive. The backend's audit log
+// records only the list of CHANGED FIELD NAMES — never the values. UI must
+// never log this payload either (no console.log, no analytics emit).
+// ---------------------------------------------------------------------------
+
+export interface UpdateSourceCredentialsRequest {
+  /**
+   * Calling user's own password (FX4 re-auth gate). Backend returns 401 when
+   * this does not match the bcrypt hash on the User row.
+   */
+  confirm_password: string
+  /** Optional escape-hatch: full connection URI overrides structured fields. */
+  connection_uri?: string
+  db_type?: 'postgresql' | 'mysql' | 'mssql' | 'mongodb'
+  host?: string
+  port?: number
+  database?: string
+  username?: string
+  password?: string
+  query?: string
+  /**
+   * libpq sslmode value — must match the set the backend allows.
+   * The backend (`SourceCredentialsUpdateRequest.ssl_mode`) constrains
+   * this to a Literal, so widening here keeps the two contracts aligned.
+   */
+  ssl_mode?: 'disable' | 'require' | 'verify-ca' | 'verify-full'
+  collection?: string
+}
+
+export async function updateSourceCredentialsApi(
+  sourceId: string,
+  body: UpdateSourceCredentialsRequest
+): Promise<SourceDetail> {
+  const { data } = await apiClient.patch<SourceDetail>(
+    `/api/v1/sources/${sourceId}/credentials`,
+    body
+  )
+  return data
+}
+
 /**
  * Pre-persistence connection test. Used by the source wizard before any
  * Source row exists — caller passes the typed connection dict directly

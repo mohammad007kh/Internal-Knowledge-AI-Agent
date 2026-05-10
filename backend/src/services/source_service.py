@@ -419,6 +419,144 @@ class SourceService:
         return self._decrypt_config(source.config_encrypted)
 
     # ------------------------------------------------------------------ #
+    # Credentials rotation (U8 / FX4)
+    # ------------------------------------------------------------------ #
+
+    async def update_database_credentials(
+        self,
+        *,
+        source_id: uuid.UUID,
+        submitted: dict[str, Any],
+        connection_uri: str | None,
+    ) -> tuple[Source, list[str]]:
+        """Encrypt + persist a credential rotation, after a live probe.
+
+        Builds a candidate connector config by overlaying *submitted* on the
+        existing decrypted config (or wholly replacing the connection-string
+        slot when *connection_uri* is provided), runs the connector's
+        ``test_connection`` against it, then on success re-encrypts the
+        candidate, stamps connection-health columns to "unknown", and
+        returns the updated row plus the sorted list of changed field names.
+
+        Raises:
+            NotFoundError: if *source_id* does not match an active Source.
+            ValueError: if the merged candidate fails
+                :class:`DatabaseConnectionConfig` validation.
+            ConnectorTestFailedError: if the live probe fails — the source
+                row is NOT mutated, so the caller (route handler) maps this
+                straight to a 422 with the modal-stays-open contract.
+        """
+        from datetime import UTC, datetime as _datetime  # noqa: PLC0415
+
+        from src.core.exceptions import ConnectorTestFailedError  # noqa: PLC0415
+
+        existing_config = await self.get_source_config(source_id)
+        candidate_config: dict[str, Any] = dict(existing_config)
+        changed_fields: list[str] = sorted(
+            k for k in submitted.keys() if k != "confirm_password"
+        )
+
+        # ``connection_uri`` is the escape-hatch: it slots straight into
+        # whichever connection-string key the underlying connector reads.
+        if connection_uri is not None:
+            existing_db_type = candidate_config.get("db_type") or submitted.get(
+                "db_type"
+            )
+            if existing_db_type == "mongodb":
+                candidate_config["uri"] = connection_uri
+            else:
+                candidate_config["connection_string"] = connection_uri
+
+        # Pass-through structured fields the connector reads directly.
+        for key in ("db_type", "query", "ssl_mode", "collection", "database"):
+            value = submitted.get(key)
+            if value is not None:
+                candidate_config[key] = value
+
+        # If host/port/username/password is present we re-assemble the
+        # connection_string via ``_build_database_config`` over a typed
+        # payload that merges existing + submitted.
+        rebuild_keys = {"host", "port", "username", "password"}
+        if rebuild_keys & submitted.keys():
+            merged: dict[str, Any] = {
+                "db_type": candidate_config.get("db_type")
+                or submitted.get("db_type"),
+                "host": submitted.get("host", existing_config.get("host", "")),
+                "port": submitted.get("port", existing_config.get("port", 0)),
+                "database": submitted.get(
+                    "database", existing_config.get("database", "")
+                ),
+                "username": submitted.get(
+                    "username", existing_config.get("username", "")
+                ),
+                "password": submitted.get(
+                    "password", existing_config.get("password", "")
+                ),
+                "query": candidate_config.get("query"),
+                "ssl_mode": candidate_config.get("ssl_mode"),
+                "collection": candidate_config.get("collection"),
+            }
+            try:
+                typed = DatabaseConnectionConfig.model_validate(merged)
+            except ValidationError as exc:
+                # ValueError lets the route handler map to 422 with the
+                # standard sanitised-error envelope.  We don't echo the
+                # candidate config — only the field path strings.
+                paths = ", ".join(
+                    ".".join(str(loc) for loc in err.get("loc", ()))
+                    for err in exc.errors()
+                )
+                raise ValueError(
+                    f"Invalid credential payload (fields: {paths or 'unknown'})."
+                ) from exc
+            candidate_config = self._build_database_config(typed)
+            # Persist the structured fields too so a future /credentials
+            # call has host/port/db/username on hand for partial rotation.
+            candidate_config["host"] = typed.host
+            candidate_config["port"] = typed.port
+            candidate_config["database"] = typed.database
+            candidate_config["username"] = typed.username
+            candidate_config["password"] = typed.password
+
+        # Live probe — failure must not mutate the source row.
+        source = await self.get_source(source_id)
+        try:
+            connector = self._connector_factory.build(
+                source_type=source.source_type,
+                source_id=str(source_id),
+                decrypted_config=candidate_config,
+            )
+            ok = bool(await connector.test_connection())
+        except Exception as exc:  # noqa: BLE001
+            ok = False
+            # Log only the exception TYPE — the message can include host /
+            # credentials embedded by the underlying driver.
+            logger.warning(
+                "Credential update test_connection raised: source_id=%s err_type=%s",
+                source_id,
+                type(exc).__name__,
+            )
+
+        if not ok:
+            raise ConnectorTestFailedError(
+                "Connection test failed with the supplied credentials. "
+                "Credentials were NOT updated.",
+            )
+
+        # Persist (re-encrypt + reset connection health).
+        new_encrypted = self._encrypt_config(candidate_config)
+        updated = await self._repo.update(
+            source_id,
+            config_encrypted=new_encrypted,
+            connection_status="unknown",
+            connection_last_checked_at=_datetime.now(UTC),
+            connection_last_error=None,
+        )
+        if updated is None:
+            raise NotFoundError(f"Source {source_id} not found.")
+        return updated, changed_fields
+
+    # ------------------------------------------------------------------ #
     # List helpers
     # ------------------------------------------------------------------ #
 

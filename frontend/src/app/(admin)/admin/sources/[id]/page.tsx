@@ -44,6 +44,7 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { PermissionsManager } from '@/app/(admin)/admin/sources/[id]/permissions/_components/PermissionsManager'
 import { AINamingCard } from '@/app/(admin)/admin/sources/[id]/_components/AINamingCard'
+import { EditCredentialsDialog } from '@/app/(admin)/admin/sources/[id]/_components/EditCredentialsDialog'
 import { SchemaViewer } from '@/app/(admin)/admin/sources/[id]/_components/SchemaViewer'
 import {
   CoverageCard,
@@ -626,6 +627,7 @@ export default function SourceDetailPage() {
 
         {/* SETTINGS */}
         <TabsContent value="settings" className="mt-4 space-y-4">
+          {isDbSource && <ConnectionCard source={source} />}
           <EditableSettingsForm source={source} />
 
           <Card>
@@ -1601,5 +1603,92 @@ function DataTabBody({ source, documents, documentsTotal }: DataTabBodyProps) {
         </div>
       )}
     </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Settings tab — Connection card (U8)
+//
+// DB-only Settings card that surfaces connection health at a glance and
+// hosts the "Edit credentials" affordance. The dialog itself
+// (`EditCredentialsDialog`) handles the form, the FX4 re-auth gate, and
+// the test-then-persist flow on the backend.
+//
+// We deliberately avoid rendering the connection_uri / host here — the
+// detail endpoint never returns them (FR-020 forbids exposing the
+// decrypted config), so we render a status-summary instead and trust the
+// admin to know what they typed.
+// ---------------------------------------------------------------------------
+
+interface ConnectionCardProps {
+  source: SourceDetail
+}
+
+function ConnectionCard({ source }: ConnectionCardProps) {
+  const [editOpen, setEditOpen] = useState(false)
+
+  const checkedAt = source.connection_last_checked_at
+  const succeeded = !source.connection_last_error
+  const checkedLine = checkedAt
+    ? `Last checked ${formatTimestamp(checkedAt)} — ${
+        succeeded ? 'succeeded' : `failed: ${source.connection_last_error}`
+      }`
+    : 'No connection check has been recorded yet.'
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-sm font-medium">Connection</CardTitle>
+        <p className="mt-1 text-xs text-muted-foreground">
+          Database connection details are encrypted at rest and never
+          displayed back. Use Edit credentials to rotate them.
+        </p>
+      </CardHeader>
+      <CardContent className="space-y-3 text-sm">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-muted-foreground">Status</span>
+          <Badge
+            variant={
+              source.connection_status === 'healthy'
+                ? 'default'
+                : source.connection_status === 'failed'
+                  ? 'destructive'
+                  : 'secondary'
+            }
+            data-testid="connection-card-status"
+          >
+            {source.connection_status ?? 'unknown'}
+          </Badge>
+        </div>
+        <p
+          className={cn(
+            'text-xs',
+            checkedAt && !succeeded
+              ? 'text-destructive'
+              : 'text-muted-foreground'
+          )}
+          data-testid="connection-card-last-checked"
+        >
+          {checkedLine}
+        </p>
+        <div>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => setEditOpen(true)}
+            data-testid="connection-card-edit"
+          >
+            Edit credentials
+          </Button>
+        </div>
+      </CardContent>
+
+      <EditCredentialsDialog
+        source={source}
+        open={editOpen}
+        onOpenChange={setEditOpen}
+      />
+    </Card>
   )
 }

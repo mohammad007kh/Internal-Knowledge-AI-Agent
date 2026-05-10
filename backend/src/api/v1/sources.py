@@ -15,7 +15,7 @@ from __future__ import annotations
 import logging
 import uuid
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Literal
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
@@ -106,6 +106,18 @@ class UploadUrlResponse(BaseModel):
 # ---------------------------------------------------------------------------
 # Dependency
 # ---------------------------------------------------------------------------
+
+
+def _get_account_lockout():  # type: ignore[no-untyped-def]
+    """Return the request-scoped :class:`AccountLockout` service.
+
+    Sourced from the DI container so the credentials endpoint shares the
+    same Redis-backed lockout state as ``AuthService.login``. Tests
+    override this symbol via ``app.dependency_overrides`` to inject a mock.
+    """
+    from src.core.container import Container  # noqa: PLC0415
+
+    return Container.account_lockout()
 
 
 def _get_source_service(
@@ -608,6 +620,222 @@ async def update_source(
         AdminAuditLogRepository(db),
         admin_user_id=current_user.id,
         action="source.update",
+        resource_type="source",
+        resource_id=updated.id,
+        request=request,
+        metadata={"changed_fields": changed_fields},
+    )
+    await db.commit()
+    return SourceResponse.model_validate(updated)
+
+
+# ---------------------------------------------------------------------------
+# Update DB credentials (U8 / FX4)
+#
+# A dedicated PATCH that:
+#   * is admin/owner gated like every other source mutation,
+#   * re-authenticates the caller via a "confirm_password" field (FX4),
+#   * tests the *new* connection BEFORE persisting — a failure leaves the
+#     source untouched so the modal can stay open with the connector error,
+#   * on success: re-encrypts the merged config, resets connection_status to
+#     "unknown" (the sync-status pill goes neutral until the next probe),
+#     stamps connection_last_checked_at, clears connection_last_error, and
+#     emits an audit row that NEVER includes the password.
+# ---------------------------------------------------------------------------
+
+
+class SourceCredentialsUpdateRequest(BaseModel):
+    """Request body for ``PATCH /sources/{id}/credentials``.
+
+    Mirrors the structured shape used at creation time
+    (:class:`DatabaseConnectionConfig`) so the connector layer can be reused
+    verbatim. All connection fields are optional — the route merges only
+    the non-None values into the existing decrypted config so admins can
+    rotate just the password without re-typing the host/port/db.
+
+    ``confirm_password`` is the calling user's *own* password, used for
+    re-authentication (FX4). The audit row records ``changed_fields`` but
+    never the password value itself.
+
+    ``connection_uri`` is an escape hatch for admins who prefer to paste a
+    full URI (e.g. when the deployment fronts the DB behind a proxy with a
+    non-standard URL shape). When provided, it overrides the structured
+    fields and is persisted as-is into ``connection_string`` / ``uri``.
+    """
+
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    # Re-auth gate (required).
+    confirm_password: str = Field(..., min_length=1, max_length=128)
+
+    # Free-form override — when present, structured fields below are ignored
+    # for connection-string assembly. Still passes through the connector
+    # test before persistence. ``min_length=1`` rejects "" so an empty
+    # string can't slot into the candidate config unvalidated.
+    connection_uri: str | None = Field(default=None, min_length=1, max_length=4096)
+
+    # Structured fields (optional; merged into the existing config). Every
+    # string field carries ``min_length=1`` so an empty string ("") is
+    # rejected at the schema layer rather than landing in the candidate
+    # config and producing a malformed connection URL downstream.
+    db_type: str | None = Field(default=None, min_length=1, max_length=32)
+    host: str | None = Field(default=None, min_length=1, max_length=255)
+    port: int | None = Field(default=None, ge=1, le=65535)
+    database: str | None = Field(default=None, min_length=1, max_length=255)
+    username: str | None = Field(default=None, min_length=1, max_length=255)
+    password: str | None = Field(default=None, min_length=1, max_length=4096)
+    # SQL-only
+    query: str | None = Field(default=None, min_length=1, max_length=8000)
+    # ``ssl_mode`` is constrained to the set Postgres actually accepts.
+    # ``DatabaseConnectionConfig`` only validates ssl_mode on the rebuild
+    # branch (host/port/etc supplied), so without this Literal a stray
+    # value sent on its own would slot into the candidate config
+    # unvalidated. Match what postgres accepts for libpq's sslmode.
+    ssl_mode: Literal["disable", "require", "verify-ca", "verify-full"] | None = (
+        Field(default=None)
+    )
+    # MongoDB-only
+    collection: str | None = Field(default=None, min_length=1, max_length=255)
+
+
+@router.patch(
+    "/{source_id}/credentials",
+    response_model=SourceResponse,
+    summary="Update DB connection credentials (re-auth + connector test required)",
+)
+async def update_source_credentials(  # noqa: PLR0913 — FastAPI deps
+    source_id: uuid.UUID,
+    payload: SourceCredentialsUpdateRequest,
+    request: Request,
+    current_user: User = Depends(get_current_user),
+    service: SourceService = Depends(_get_source_service),
+    account_lockout=Depends(_get_account_lockout),
+    db: AsyncSession = Depends(get_db),
+) -> SourceResponse:
+    """Rotate/replace a database source's connection credentials.
+
+    Flow (FX4 re-auth gate + lockout + Test-then-persist):
+
+    1. Lockout check on the caller's email (matches AuthService.login). If
+       the account is currently locked → 423; if Redis is required but
+       down → 503. This MUST run before bcrypt so a leaked endpoint can't
+       be turned into a CPU-burn or distributed-credential-stuffing vector.
+    2. Verify the caller's confirm_password matches their hashed_password.
+       Wrong password → record_failure on the lockout counter, then 401.
+       Correct password → reset the lockout counter.
+    3. Reject for non-database sources (only DB sources expose this verb).
+    4. Delegate to :meth:`SourceService.update_database_credentials` which:
+       * decrypts existing config + overlays submitted fields,
+       * runs ``connector.test_connection`` against the candidate,
+       * on success: re-encrypts + persists + resets connection health.
+       Failure raises :class:`ConnectorTestFailedError` which the global
+       error handler maps to 422 — modal stays open, NO persist.
+    5. Emit ``source.credentials_change`` audit row with the list of
+       changed field names — NEVER the password value (the audit_service's
+       redactor strips ``password``-keyed entries defensively too).
+    """
+    # Step 1: lockout check (BEFORE bcrypt). Mirrors AuthService.login so
+    # the per-email lockout state is shared across both gates.
+    await account_lockout.check(current_user.email)
+
+    # Step 2: re-auth. Wrong password → record_failure + 401.
+    from src.services.password_service import PasswordService  # noqa: PLC0415
+
+    if not PasswordService.verify_password(
+        payload.confirm_password, current_user.hashed_password
+    ):
+        await account_lockout.record_failure(current_user.email)
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail={
+                "type": "https://httpstatuses.com/401",
+                "title": "Unauthorized",
+                "status": 401,
+                "detail": "Confirm-password does not match.",
+            },
+        )
+
+    # Successful re-auth — clear any prior failure counter for this email.
+    await account_lockout.reset(current_user.email)
+
+    # Step 3: ownership/admin gate + DB-only check.
+    source = await service.get_source(source_id)
+    _assert_ownership_or_admin(source.owner_id, current_user)
+    source_type_value = (
+        source.source_type.value
+        if hasattr(source.source_type, "value")
+        else str(source.source_type)
+    )
+    if source_type_value != "database":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "type": "https://httpstatuses.com/400",
+                "title": "Bad Request",
+                "status": 400,
+                "detail": "Credential editing is only available for database sources.",
+            },
+        )
+
+    # Verify there's at least one credential field on the request — pure
+    # confirm_password with no rotation fields is a no-op we reject so the
+    # audit trail can't be flooded with empty events.
+    submitted = payload.model_dump(exclude_unset=True)
+    submitted.pop("confirm_password", None)
+    if not submitted:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "type": "https://httpstatuses.com/400",
+                "title": "Bad Request",
+                "status": 400,
+                "detail": "No credential fields provided.",
+            },
+        )
+
+    # Step 4: delegate to the service. Connector failure raises
+    # ConnectorTestFailedError; we re-raise as HTTPException so the wire
+    # body matches the rest of this router (FastAPI's 422 with our
+    # problem-detail dict shape, modal-stays-open contract).
+    from src.core.exceptions import ConnectorTestFailedError  # noqa: PLC0415
+
+    try:
+        updated, changed_fields = await service.update_database_credentials(
+            source_id=source_id,
+            submitted=submitted,
+            connection_uri=payload.connection_uri,
+        )
+    except ConnectorTestFailedError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={
+                "type": "https://httpstatuses.com/422",
+                "title": "Unprocessable Entity",
+                "status": 422,
+                "detail": exc.detail,
+            },
+        ) from exc
+    except ValueError as exc:
+        # Merged candidate failed DatabaseConnectionConfig validation.
+        # ``str(exc)`` is the sanitised "fields: foo, bar" message — never
+        # the candidate config itself.
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={
+                "type": "https://httpstatuses.com/422",
+                "title": "Unprocessable Entity",
+                "status": 422,
+                "detail": str(exc),
+            },
+        ) from exc
+
+    # Step 5: audit. The audit_service redacts any "password"-keyed entries
+    # defensively, but we also pass only the field-NAME list — never the
+    # value — so two layers of defence agree.
+    await emit_audit(
+        AdminAuditLogRepository(db),
+        admin_user_id=current_user.id,
+        action="source.credentials_change",
         resource_type="source",
         resource_id=updated.id,
         request=request,
