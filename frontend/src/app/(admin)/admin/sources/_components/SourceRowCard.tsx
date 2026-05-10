@@ -24,8 +24,10 @@ interface SourceRowCardProps {
   source: SourceListItem
   /** Retained for prop compatibility; mobile action now lives in `ActionCell`. */
   isSyncing?: boolean
-  /** Retained for prop compatibility; mobile action now lives in `ActionCell`. */
   onSync?: (id: string) => void
+  onApprove?: (id: string) => void
+  onStudy?: (id: string) => void
+  onRetry?: (id: string) => void
   onDelete: (id: string) => void
 }
 
@@ -33,7 +35,14 @@ interface SourceRowCardProps {
  * Compact card representation of a source row, used on small viewports where
  * the table would otherwise force horizontal scroll.
  */
-export function SourceRowCard({ source, onDelete }: SourceRowCardProps) {
+export function SourceRowCard({
+  source,
+  onDelete,
+  onApprove,
+  onSync,
+  onStudy,
+  onRetry,
+}: SourceRowCardProps) {
   const [menuOpen, setMenuOpen] = useState(false)
   const meta = getSourceTypeMeta(source.source_type)
   const Icon = meta.icon
@@ -130,7 +139,14 @@ export function SourceRowCard({ source, onDelete }: SourceRowCardProps) {
       </div>
 
       <div className="mt-3">
-        <SourceActionCell source={source} layout="block" />
+        <SourceActionCell
+          source={source}
+          layout="block"
+          onApprove={onApprove}
+          onSync={onSync}
+          onStudy={onStudy}
+          onRetry={onRetry}
+        />
       </div>
     </div>
   )

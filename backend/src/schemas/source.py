@@ -409,8 +409,30 @@ class SourceResponse(BaseModel):
     sync_mode: str = "manual"
     sync_schedule: str | None = None
     last_synced_at: datetime | None = None
+    next_sync_due_at: datetime | None = None
     status: str = "pending"
     citations_enabled: bool = True
+    # Embedder pinned at creation (immutable once chunks exist).
+    embedder_id: uuid.UUID | None = None
+    # AI auto-naming bookkeeping — drives the "Naming…" shimmer + Regenerate
+    # affordance in the admin UI.
+    name_status: str = "user_set"
+    description_status: str = "user_set"
+    auto_name_and_description: bool = False
+    # DB-source studying-agent (Phase 1 Wave 1) — null for non-DB sources.
+    schema_status: str | None = None
+    drift_signal_count: int = 0
+    last_studied_at: datetime | None = None
+    # SchemaStudy-derived fields (DB sources). Populated by the detail
+    # endpoint by joining the latest SchemaStudy. Stay null for non-DB
+    # sources or sources whose studying agent has not yet run. The list
+    # endpoint omits these to avoid an N+1 fetch — the admin sources table
+    # falls back to ``schema_status`` for the high-level pip strip.
+    study_state: str | None = None
+    tables_documented: int | None = None
+    tables_partial: int | None = None
+    last_error_phase: str | None = None
+    last_error_message: str | None = None
 
 
 class SourceListItem(BaseModel):
@@ -450,6 +472,30 @@ class SourceListItem(BaseModel):
     document_count: int = 0
     chunk_count: int = 0
     has_upload: bool = False
+    # AI auto-naming bookkeeping — drives the "Naming…" shimmer in the admin
+    # sources table. Defaults preserve backwards-compatible behaviour for
+    # rows created before the columns existed.
+    name_status: str = "user_set"
+    description_status: str = "user_set"
+    auto_name_and_description: bool = False
+    # DB-source studying-agent (Phase 1 Wave 1) — null for non-DB sources.
+    schema_status: str | None = None
+    drift_signal_count: int = 0
+    last_studied_at: datetime | None = None
+    # Owner — admins triage by who created the source. Email is rendered;
+    # the UUID is included for stable cross-reference.
+    owner_id: uuid.UUID | None = None
+    # Embedder pinned at creation; surfaced so the detail page can show
+    # which embedder powers retrieval.
+    embedder_id: uuid.UUID | None = None
+    # SchemaStudy-derived fields (DB sources). Populated by joining the
+    # latest SchemaStudy at list / detail time. None for non-DB sources or
+    # sources that haven't yet been studied.
+    study_state: str | None = None
+    tables_documented: int | None = None
+    tables_partial: int | None = None
+    last_error_phase: str | None = None
+    last_error_message: str | None = None
 
 
 class PaginatedSources(BaseModel):

@@ -313,6 +313,60 @@ async def change_user_role(
     return UserResponse.model_validate(updated)
 
 
+@router.post(
+    "/{user_id}/reset-password",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Admin-trigger password reset for a user",
+)
+async def admin_reset_password(
+    user_id: UUID,
+    request: Request,
+    admin: User = Depends(AdminOnly),
+    db: AsyncSession = Depends(get_db),
+) -> Response:
+    """Generate a password-reset token for *user_id* and send the user the
+    standard reset email.
+
+    Reuses :meth:`AuthService.request_password_reset` so the resulting flow
+    (token format, expiry, single-use semantics) is identical to a user-
+    initiated forgot-password request. The raw token is never returned in
+    the response — emailing it to the user is the contract.
+
+    The frontend admin user-detail page (``/admin/users/[id]``) calls this.
+    Returns 204 on success, 404 if the user doesn't exist.
+    """
+    from src.core.container import Container  # noqa: PLC0415
+
+    target = await UserRepository(db).get_by_id(user_id)
+    if target is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={
+                "type": "https://httpstatuses.com/404",
+                "title": "Not Found",
+                "status": 404,
+                "detail": "User not found.",
+            },
+        )
+
+    auth_svc = Container.auth_service()
+    # Reset is best-effort against the user's email address. The service
+    # silently skips inactive users — that's intentional (no enumeration).
+    await auth_svc.request_password_reset(target.email)
+
+    await emit_audit(
+        AdminAuditLogRepository(db),
+        admin_user_id=admin.id,
+        action="user.password_reset",
+        resource_type="user",
+        resource_id=target.id,
+        request=request,
+        metadata={"email": target.email},
+    )
+    await db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
 @router.delete("/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def deactivate_user(
     user_id: UUID,

@@ -50,6 +50,14 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { PermissionsManager } from '@/app/(admin)/admin/sources/[id]/permissions/_components/PermissionsManager'
+import {
+  CoverageCard,
+  FreshnessCard,
+  OverviewCallouts,
+  SourceTypeOverview,
+  StatusCard,
+} from '@/app/(admin)/admin/sources/[id]/_components/OverviewCards'
 import { Textarea } from '@/components/ui/textarea'
 import {
   useDeleteSource,
@@ -80,10 +88,16 @@ import type {
 import { getErrorMessage } from '@/lib/errors'
 import { zodResolver } from '@hookform/resolvers/zod'
 import {
+  AlertTriangleIcon,
   CheckCircle2Icon,
   ChevronLeftIcon,
   ChevronRightIcon,
+  CircleAlertIcon,
+  DatabaseIcon,
+  FileTextIcon,
+  GlobeIcon,
   Loader2Icon,
+  LockIcon,
   PlugIcon,
   RefreshCwIcon,
   Trash2Icon,
@@ -309,6 +323,16 @@ export default function SourceDetailPage() {
   const syncJobsTotal = syncJobsData?.total ?? 0
   const documents = documentsData?.items ?? []
 
+  // For text-to-query / live-DB sources, "Sync now" is a category error —
+  // there are no documents to ingest. Re-running the pipeline triggers the
+  // studying-agent to refresh the schema document. Re-label the action and
+  // the Sync History heading accordingly.
+  const DB_TYPES = new Set(['postgresql', 'mysql', 'mssql', 'mongodb'])
+  const isDbSource = DB_TYPES.has(source.source_type)
+  const isDbLiveSource =
+    isDbSource &&
+    (source.source_mode === 'live' || source.retrieval_mode === 'text_to_query')
+
   return (
     <div className="space-y-4 p-4 md:space-y-6 md:p-6">
       {/* Breadcrumb */}
@@ -355,10 +379,14 @@ export default function SourceDetailPage() {
               })
             }
             disabled={syncMutation.isPending}
-            aria-label={`Sync source ${source.name}`}
+            aria-label={
+              isDbLiveSource
+                ? `Re-study schema for ${source.name}`
+                : `Sync source ${source.name}`
+            }
           >
             <RefreshCwIcon className="mr-1.5 h-4 w-4" />
-            Sync now
+            {isDbLiveSource ? 'Re-study schema' : 'Sync now'}
           </Button>
         </div>
       </div>
@@ -381,36 +409,33 @@ export default function SourceDetailPage() {
 
         {/* OVERVIEW */}
         <TabsContent value="overview" className="mt-4 space-y-4">
+          {/* FAILURE CALLOUTS — surface degenerate states above the fold so
+              admins entering the page see "what's wrong" before "what's here". */}
+          <OverviewCallouts
+            source={source}
+            isDbSource={isDbSource}
+            onRetrySync={() =>
+              syncMutation.mutate(id, {
+                onSuccess: () => toast.success('Retry started'),
+                onError: (err) => toast.error(getErrorMessage(err)),
+              })
+            }
+          />
+
+          {/* HEALTH ROW — three source-type-aware status cards replace the
+              old generic Documents/Chunks/Last-synced trio. Each card
+              exposes ONE thing the admin walks in to check. */}
           <div className="grid gap-4 sm:grid-cols-3">
-            <Card>
-              <CardHeader className="pb-2">
-                <CardTitle className="text-sm font-medium text-muted-foreground">
-                  Documents
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <p className="text-2xl font-bold tabular-nums">{stats?.document_count ?? '—'}</p>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardHeader className="pb-2">
-                <CardTitle className="text-sm font-medium text-muted-foreground">Chunks</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <p className="text-2xl font-bold tabular-nums">{stats?.chunk_count ?? '—'}</p>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardHeader className="pb-2">
-                <CardTitle className="text-sm font-medium text-muted-foreground">
-                  Last synced
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <p className="text-sm">{formatTimestamp(source.last_synced_at)}</p>
-              </CardContent>
-            </Card>
+            <StatusCard source={source} isDbLiveSource={isDbLiveSource} />
+            <CoverageCard source={source} isDbSource={isDbSource} stats={stats} />
+            <FreshnessCard source={source} isDbSource={isDbSource} />
           </div>
+
+          {/* TYPE-SPECIFIC OVERVIEW BLOCK — the big "what is this source"
+              card adapts to the source type so a Postgres connection
+              shows host/db/schema-coverage and a 12-PDF source shows
+              file count + size breakdown. */}
+          <SourceTypeOverview source={source} stats={stats} documents={documents} />
 
           <Card>
             <CardHeader className="flex flex-row items-center justify-between gap-2 pb-2">
@@ -507,6 +532,7 @@ export default function SourceDetailPage() {
           <SyncActions
             sourceType={source.source_type}
             sourceName={source.name}
+            isDbLiveSource={isDbLiveSource}
             isSyncing={syncMutation.isPending}
             onSyncNow={() =>
               syncMutation.mutate(id, {
@@ -559,26 +585,23 @@ export default function SourceDetailPage() {
             page={syncJobsPage}
             pageSize={SYNC_JOBS_PAGE_SIZE}
             onPageChange={setSyncJobsPage}
+            isDbLiveSource={isDbLiveSource}
           />
         </TabsContent>
 
         {/* ACCESS */}
-        <TabsContent value="access" className="mt-4">
+        <TabsContent value="access" className="mt-4 space-y-3">
           <Card>
             <CardHeader>
               <CardTitle className="text-sm font-medium">Access control</CardTitle>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Manage which users can query this source. A source with{' '}
+                <span className="font-medium">no granted users</span> is
+                queryable by no one — even when "Available to users" is on.
+              </p>
             </CardHeader>
             <CardContent>
-              <p className="text-sm text-muted-foreground">
-                Manage which users can query this source in{' '}
-                <Link
-                  href={`/admin/sources/${id}/permissions`}
-                  className="underline hover:text-foreground"
-                >
-                  Permissions settings
-                </Link>
-                .
-              </p>
+              <PermissionsManager sourceId={id} />
             </CardContent>
           </Card>
         </TabsContent>
@@ -596,34 +619,79 @@ export default function SourceDetailPage() {
                 <span className="text-muted-foreground">Type</span>
                 <Badge variant="secondary">{source.source_type}</Badge>
               </div>
-              <div className="flex items-center justify-between">
-                <div className="min-w-0 flex-1 space-y-0.5">
-                  <span className="block text-muted-foreground">Available to users</span>
-                  <span className="block text-xs text-muted-foreground/80">
-                    When off, the source is hidden from the chat session source picker. New sources
-                    start off until approved by an admin.
-                  </span>
-                </div>
-                <Switch
-                  checked={source.is_active}
-                  disabled={updateMutation.isPending}
-                  onCheckedChange={(checked) =>
-                    updateMutation.mutate(
-                      { is_active: checked },
-                      {
-                        onSuccess: () =>
-                          toast.success(
-                            checked
-                              ? 'Source approved — now available to users'
-                              : 'Source hidden from users'
-                          ),
-                        onError: (err) => toast.error(getErrorMessage(err)),
-                      }
-                    )
-                  }
-                  aria-label="Toggle source availability to users"
-                />
-              </div>
+              {(() => {
+                // PRD §11: "approved" means the admin has reviewed the source's
+                // name + description. Without this gate an admin can flip
+                // is_active=true on a source whose AI naming hasn't completed,
+                // surfacing "Untitled source" to chat users. Block the toggle
+                // until both prerequisites are met.
+                const namePending = source.name_status === 'pending_ai'
+                const descPending = source.description_status === 'pending_ai'
+                const descMissing =
+                  !source.description || source.description.trim().length === 0
+                const blockers: string[] = []
+                if (namePending) {
+                  blockers.push(
+                    'AI naming has not finished — wait for "Naming…" to clear, or type a name in Settings.'
+                  )
+                }
+                if (descPending) {
+                  blockers.push('AI description has not finished — wait for it to clear.')
+                }
+                if (descMissing && !descPending) {
+                  blockers.push(
+                    'Description is empty — write one or use "Regenerate name + description".'
+                  )
+                }
+                const gateBlocked = !source.is_active && blockers.length > 0
+                return (
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <div className="min-w-0 flex-1 space-y-0.5">
+                        <span className="block text-muted-foreground">Available to users</span>
+                        <span className="block text-xs text-muted-foreground/80">
+                          When off, the source is hidden from the chat session source picker. New
+                          sources start off until approved by an admin.
+                        </span>
+                      </div>
+                      <Switch
+                        checked={source.is_active}
+                        disabled={updateMutation.isPending || gateBlocked}
+                        onCheckedChange={(checked) =>
+                          updateMutation.mutate(
+                            { is_active: checked },
+                            {
+                              onSuccess: () =>
+                                toast.success(
+                                  checked
+                                    ? 'Source approved — now available to users'
+                                    : 'Source hidden from users'
+                                ),
+                              onError: (err) => toast.error(getErrorMessage(err)),
+                            }
+                          )
+                        }
+                        aria-label="Toggle source availability to users"
+                        aria-describedby={gateBlocked ? 'approval-blockers' : undefined}
+                      />
+                    </div>
+                    {gateBlocked && (
+                      <div
+                        id="approval-blockers"
+                        role="status"
+                        className="rounded-md border border-amber-500/40 bg-amber-500/5 p-3 text-xs text-amber-900 dark:text-amber-200"
+                      >
+                        <p className="font-medium">Cannot approve yet:</p>
+                        <ul className="mt-1 list-disc space-y-1 pl-5">
+                          {blockers.map((b) => (
+                            <li key={b}>{b}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+                  </div>
+                )
+              })()}
               <div className="flex items-center justify-between">
                 <span className="text-muted-foreground">Citations enabled</span>
                 <Switch
@@ -804,6 +872,9 @@ interface SyncActionsProps {
   isTestingConnection: boolean
   onTestConnection: () => void
   testConnectionResult: { ok: boolean; message: string } | null
+  /** When true, the source uses live retrieval (text_to_query) — relabel
+   *  "Sync now" to "Re-study schema" because there are no documents to sync. */
+  isDbLiveSource?: boolean
 }
 
 function SyncActions({
@@ -814,8 +885,11 @@ function SyncActions({
   isTestingConnection,
   onTestConnection,
   testConnectionResult,
+  isDbLiveSource,
 }: SyncActionsProps) {
   const showTestConnection = isConnectionTestable(sourceType)
+  const primaryLabel = isDbLiveSource ? 'Re-study schema' : 'Sync now'
+  const primaryActiveLabel = isDbLiveSource ? 'Studying…' : 'Starting…'
 
   return (
     <Card>
@@ -829,17 +903,21 @@ function SyncActions({
             size="sm"
             onClick={onSyncNow}
             disabled={isSyncing}
-            aria-label={`Sync source ${sourceName} now`}
+            aria-label={
+              isDbLiveSource
+                ? `Re-study schema for ${sourceName}`
+                : `Sync source ${sourceName} now`
+            }
           >
             {isSyncing ? (
               <>
                 <Loader2Icon className="mr-1.5 h-4 w-4 animate-spin" aria-hidden />
-                Starting…
+                {primaryActiveLabel}
               </>
             ) : (
               <>
                 <RefreshCwIcon className="mr-1.5 h-4 w-4" aria-hidden />
-                Sync now
+                {primaryLabel}
               </>
             )}
           </Button>
@@ -909,21 +987,35 @@ interface SyncHistorySectionProps {
   page: number
   pageSize: number
   onPageChange: (next: number) => void
+  /** When true, relabel "Sync history" → "Study runs". DB live sources
+   *  don't ingest documents; what the worker records is a study run. */
+  isDbLiveSource?: boolean
 }
 
-function SyncHistorySection({ jobs, total, page, pageSize, onPageChange }: SyncHistorySectionProps) {
+function SyncHistorySection({
+  jobs,
+  total,
+  page,
+  pageSize,
+  onPageChange,
+  isDbLiveSource,
+}: SyncHistorySectionProps) {
   const offset = page * pageSize
   const start = total === 0 ? 0 : offset + 1
   const end = Math.min(offset + jobs.length, total)
   const isFirstPage = page === 0
   const isLastPage = (page + 1) * pageSize >= total
   const showFooter = total > 0 && total > pageSize
+  const sectionTitle = isDbLiveSource ? 'Study runs' : 'Sync history'
+  const emptyCopy = isDbLiveSource
+    ? 'No study runs yet. Click Re-study schema to start one.'
+    : 'No sync runs yet.'
 
   return (
     <div>
-      <h3 className="mb-3 text-sm font-medium">Sync history</h3>
+      <h3 className="mb-3 text-sm font-medium">{sectionTitle}</h3>
       {total === 0 ? (
-        <p className="py-4 text-sm text-muted-foreground">No sync runs yet.</p>
+        <p className="py-4 text-sm text-muted-foreground">{emptyCopy}</p>
       ) : (
         <div className="rounded-md border">
           <div className="divide-y">

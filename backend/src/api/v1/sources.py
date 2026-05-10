@@ -165,16 +165,25 @@ def _make_list_item(
     *,
     document_count: int = 0,
     chunk_count: int = 0,
+    latest_study: object | None = None,
 ) -> SourceListItem:
     """Build a slim :class:`SourceListItem` for the admin sources table.
 
-    Attaches the latest sync job (if any) and the per-source aggregate
-    counts that drive the four-stage ingestion-clarity strip
-    (Uploaded / Parsed / Chunked / Approved).
+    Attaches the latest sync job (if any), the per-source aggregate counts
+    that drive the four-stage ingestion-clarity strip
+    (Uploaded / Parsed / Chunked / Approved), and the latest SchemaStudy's
+    user-facing fields (``study_state``, partial-coverage counts, last error)
+    so the DB-source verb column + DatabaseStudyStrip can render without
+    a per-row round-trip.
 
     ``has_upload`` is derived server-side from
     ``Source.file_storage_path IS NOT NULL`` — the path itself is never
     leaked into the API response.
+
+    ``latest_study`` is an optional :class:`SchemaStudy` ORM row (the most
+    recent one for this source). When None the SchemaStudy-derived fields
+    on the response stay null — non-DB sources, or DB sources whose
+    studying agent has not yet run.
     """
     latest_raw = max(
         getattr(source, "sync_jobs", []),
@@ -187,6 +196,26 @@ def _make_list_item(
     item.document_count = document_count
     item.chunk_count = chunk_count
     item.has_upload = getattr(source, "file_storage_path", None) is not None
+
+    if latest_study is not None:
+        # Project the join — the studying agent's pipeline state, partial
+        # flag, and most recent failure get surfaced inline so the admin
+        # table can render the verb column without an N+1 fetch.
+        # ``tables_documented`` is derived from the persisted SchemaDocument
+        # JSON (the studying agent stores the full document there). Stays
+        # None when the study hasn't completed yet — the UI tolerates that.
+        item.study_state = getattr(latest_study, "state", None)
+        item.last_error_phase = getattr(latest_study, "last_error_phase", None)
+        item.last_error_message = getattr(latest_study, "last_error_message", None)
+        doc_json = getattr(latest_study, "schema_document_json", None)
+        if isinstance(doc_json, dict):
+            tables = doc_json.get("tables")
+            if isinstance(tables, list):
+                item.tables_documented = len(tables)
+        # tables_partial is the count of tables whose AI description failed
+        # — not currently tracked at the document level. Leave None until
+        # the studying agent stamps it explicitly.
+
     return item
 
 
@@ -488,14 +517,64 @@ async def get_source(
     source_id: uuid.UUID,
     current_user: User = Depends(get_current_user),
     service: SourceService = Depends(_get_source_service),
+    db: AsyncSession = Depends(get_db),
 ) -> SourceResponse:
     """Return the source if the caller is its owner or an admin.
+
+    For DB sources the response also surfaces the latest SchemaStudy's
+    pipeline state, partial-coverage counts, and most recent failure so
+    the detail page's DatabaseStudyStrip + Verb-Column variants render
+    without a second round-trip. The list endpoint deliberately omits
+    these to avoid an N+1 fetch (it falls back to ``schema_status``).
 
     Raises 404 if the source does not exist, 403 if unauthorised.
     """
     source = await service.get_source(source_id)
     _assert_ownership_or_admin(source.owner_id, current_user)
-    return SourceResponse.model_validate(source)
+
+    response = SourceResponse.model_validate(source)
+
+    # Project the latest SchemaStudy for DB sources.
+    if str(source.source_type) == "database" or getattr(
+        source.source_type, "value", None
+    ) == "database":
+        latest_study = await _load_latest_schema_study(db, source_id)
+        if latest_study is not None:
+            response.study_state = getattr(latest_study, "state", None)
+            response.last_error_phase = getattr(latest_study, "last_error_phase", None)
+            response.last_error_message = getattr(
+                latest_study, "last_error_message", None
+            )
+            doc_json = getattr(latest_study, "schema_document_json", None)
+            if isinstance(doc_json, dict):
+                tables = doc_json.get("tables")
+                if isinstance(tables, list):
+                    response.tables_documented = len(tables)
+
+    return response
+
+
+async def _load_latest_schema_study(
+    db: AsyncSession, source_id: uuid.UUID
+) -> object | None:
+    """Return the most-recent :class:`SchemaStudy` row for *source_id*,
+    or None when none exists.
+
+    Used by :func:`get_source` to enrich the detail-page response. Lives
+    here (rather than on a repository) because it's a single targeted
+    read, not a CRUD-shaped operation.
+    """
+    from sqlalchemy import select  # noqa: PLC0415
+
+    from src.models.schema_study import SchemaStudy  # noqa: PLC0415
+
+    stmt = (
+        select(SchemaStudy)
+        .where(SchemaStudy.source_id == source_id)
+        .order_by(SchemaStudy.started_at.desc())
+        .limit(1)
+    )
+    return (await db.execute(stmt)).scalar_one_or_none()
 
 
 # ---------------------------------------------------------------------------

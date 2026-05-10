@@ -127,6 +127,14 @@ export interface SourceListItem {
   name_status?: NameStatus
   description_status?: NameStatus
   auto_name_and_description?: boolean
+  // R1 — additional Source fields the backend now serializes for the admin
+  // UI: drift counter (DB sources), last study/sync-due timestamps, embedder
+  // pin, owner. All optional for backwards compatibility.
+  drift_signal_count?: number
+  last_studied_at?: string | null
+  next_sync_due_at?: string | null
+  embedder_id?: string | null
+  owner_id?: string | null
 }
 
 export interface SourceDetail extends SourceListItem {

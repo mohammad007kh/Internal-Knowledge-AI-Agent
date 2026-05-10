@@ -84,6 +84,11 @@ class ChatMessageResponse(BaseModel):
     role: MessageRoleSchema
     content: str
     created_at: datetime
+    # User feedback on assistant messages — null when no thumbs given.
+    # Surfaces the FeedbackButtons' initialRating so re-loading the chat
+    # restores the user's prior up/down + comment.
+    feedback_rating: int | None = None
+    feedback_comment: str | None = None
     # NOTE: do NOT add a `metadata` field here.  The ChatMessage ORM has no
     # `metadata` column, and pydantic's from_attributes lookup would fall back
     # to SQLAlchemy's class-level `Base.metadata` (a MetaData() instance,

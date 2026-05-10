@@ -452,3 +452,106 @@ async def send_message(
             "X-Accel-Buffering": "no",
         },
     )
+
+
+# ---------------------------------------------------------------------------
+# Per-message feedback (thumbs up / thumbs down)
+# ---------------------------------------------------------------------------
+
+
+from pydantic import BaseModel, ConfigDict, Field  # noqa: E402,PLC0415
+
+
+class _FeedbackRequest(BaseModel):
+    """Body for ``POST /sessions/{session_id}/messages/{message_id}/feedback``."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    rating: int = Field(..., description="+1 thumbs up, -1 thumbs down.")
+    comment: str | None = Field(default=None, max_length=500)
+
+
+class _FeedbackResponse(BaseModel):
+    id: str
+    rating: int
+    comment: str | None
+
+
+@router.post(
+    "/sessions/{session_id}/messages/{message_id}/feedback",
+    response_model=_FeedbackResponse,
+    summary="Persist user feedback (thumbs up/down + optional comment) on a message",
+)
+async def submit_message_feedback(
+    session_id: uuid.UUID,
+    message_id: uuid.UUID,
+    body: _FeedbackRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> _FeedbackResponse:
+    """Update the feedback rating + comment on a single chat message.
+
+    The frontend's :file:`FeedbackButtons.tsx` renders the up/down buttons on
+    every assistant bubble; before this endpoint existed the mutation
+    silently 404'd in production. The endpoint is idempotent — reposting
+    overrides the previous feedback.
+
+    Authorization: the caller must own the chat session that the message
+    belongs to. Admins can update feedback on any message.
+    """
+    if body.rating not in (-1, 1):
+        return problem(
+            status=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            title="Invalid rating",
+            detail="rating must be either +1 (thumbs up) or -1 (thumbs down).",
+        )
+
+    from sqlalchemy import select  # noqa: PLC0415
+
+    from src.models.chat import ChatMessage, ChatSession  # noqa: PLC0415
+
+    msg = await db.scalar(
+        select(ChatMessage).where(
+            ChatMessage.id == message_id,
+            ChatMessage.session_id == session_id,
+        )
+    )
+    if msg is None:
+        return problem(
+            status=status.HTTP_404_NOT_FOUND,
+            title="Message not found",
+            detail="No message found for that session_id / message_id pair.",
+        )
+
+    # Ownership: load the parent session and confirm the caller owns it
+    # (or is an admin).
+    session = await db.scalar(
+        select(ChatSession).where(ChatSession.id == session_id)
+    )
+    if session is None:
+        return problem(
+            status=status.HTTP_404_NOT_FOUND,
+            title="Session not found",
+            detail="No session found for that session_id.",
+        )
+    from src.models.user import UserRole  # noqa: PLC0415
+
+    if (
+        current_user.role != UserRole.admin
+        and str(session.user_id) != str(current_user.id)
+    ):
+        return problem(
+            status=status.HTTP_403_FORBIDDEN,
+            title="Forbidden",
+            detail="You may only submit feedback on messages from your own sessions.",
+        )
+
+    msg.feedback_rating = body.rating
+    msg.feedback_comment = (body.comment or "").strip() or None
+    await db.commit()
+
+    return _FeedbackResponse(
+        id=str(msg.id),
+        rating=msg.feedback_rating,
+        comment=msg.feedback_comment,
+    )

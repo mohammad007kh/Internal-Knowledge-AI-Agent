@@ -35,12 +35,15 @@ import {
 } from '@/components/ui/table'
 import { formatRelative } from '@/features/sources/format'
 import {
+  sourcesKeys,
   useDeleteSource,
   useListSources,
   useTriggerSync,
 } from '@/features/sources/hooks/useSources'
 import { SourceModeBadge, getSourceTypeMeta } from '@/features/sources/source-ui'
+import { updateSourceApi } from '@/lib/api/sources'
 import type { SourceListItem, SourceType } from '@/lib/api/sources'
+import { useQueryClient } from '@tanstack/react-query'
 import { getErrorMessage } from '@/lib/errors'
 import { cn } from '@/lib/utils'
 import {
@@ -253,6 +256,7 @@ export function SourcesTable({ demoSources }: SourcesTableProps = {}) {
   // phase. Then re-subscribe with `pollWhileRunning` so the verb column
   // transitions out of "Working on it…" promptly. Both calls share a single
   // React Query cache entry (same query key), so this is one network request.
+  const queryClient = useQueryClient()
   const { data: pollingProbe } = useListSources()
   const probeSources = useMemo(() => pollingProbe?.items ?? [], [pollingProbe?.items])
   const hasRunningRow = useMemo(
@@ -305,6 +309,47 @@ export function SourcesTable({ demoSources }: SourcesTableProps = {}) {
     syncMutation.mutate(id, {
       onSuccess: () => toast.success('Sync started'),
       onError: (err) => toast.error(getErrorMessage(err) || 'Sync failed'),
+    })
+  }
+
+  // Approve = flip is_active=true. The verb cell's "Approve & ingest"
+  // button calls this; the row's IngestionStrip immediately reflects the
+  // new state via the React Query invalidation below.
+  // useUpdateSource is keyed by sourceId so we can't share one instance
+  // across rows — call updateSourceApi directly and invalidate the list
+  // ourselves.
+  async function handleApprove(id: string) {
+    try {
+      await updateSourceApi(id, { is_active: true })
+      await queryClient.invalidateQueries({ queryKey: sourcesKeys.list() })
+      await queryClient.invalidateQueries({ queryKey: sourcesKeys.detail(id) })
+      toast.success('Source approved — now available to users')
+    } catch (err) {
+      toast.error(getErrorMessage(err) || 'Approval failed')
+    }
+  }
+
+  // DB-source "Re-study" / "Schema drift detected · Re-study" branch.
+  // The studying-agent endpoint isn't wired yet; for now route to the same
+  // sync trigger which the worker treats as a re-study request for DB
+  // sources. When the dedicated POST /sources/{id}/study endpoint lands
+  // this handler swaps to it without changing the verb-cell contract.
+  function handleStudy(id: string) {
+    syncMutation.mutate(id, {
+      onSuccess: () => toast.success('Schema study queued'),
+      onError: (err) =>
+        toast.error(getErrorMessage(err) || 'Failed to queue schema study'),
+    })
+  }
+
+  // "Retry" on the failure branches of the verb cell. Identical to a
+  // Sync trigger today — the worker re-runs the pipeline and clears the
+  // failure on success. View-error opens the popover the verb cell
+  // already manages locally; we don't need a handler for it at this level.
+  function handleRetry(id: string) {
+    syncMutation.mutate(id, {
+      onSuccess: () => toast.success('Retry started'),
+      onError: (err) => toast.error(getErrorMessage(err) || 'Retry failed'),
     })
   }
 
@@ -361,7 +406,15 @@ export function SourcesTable({ demoSources }: SourcesTableProps = {}) {
           {/* Mobile card list */}
           <div className="space-y-3 sm:hidden">
             {filtered.map((source) => (
-              <SourceRowCard key={source.id} source={source} onDelete={setDeletingId} />
+              <SourceRowCard
+                key={source.id}
+                source={source}
+                onDelete={setDeletingId}
+                onApprove={handleApprove}
+                onSync={handleSyncOne}
+                onStudy={handleStudy}
+                onRetry={handleRetry}
+              />
             ))}
           </div>
 
@@ -429,7 +482,13 @@ export function SourcesTable({ demoSources }: SourcesTableProps = {}) {
                         <SourceModeBadge mode={source.source_mode} />
                       </TableCell>
                       <TableCell>
-                        <SourceActionCell source={source} />
+                        <SourceActionCell
+                          source={source}
+                          onApprove={handleApprove}
+                          onSync={handleSyncOne}
+                          onStudy={handleStudy}
+                          onRetry={handleRetry}
+                        />
                       </TableCell>
                       <TableCell>
                         {getTypeGroup(source.source_type) === 'database' ? (

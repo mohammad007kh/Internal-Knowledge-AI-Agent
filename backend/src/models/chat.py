@@ -5,7 +5,7 @@ import uuid
 from datetime import datetime
 from enum import StrEnum
 
-from sqlalchemy import Boolean, DateTime, Enum, ForeignKey, String, Text
+from sqlalchemy import Boolean, DateTime, Enum, ForeignKey, Integer, String, Text
 from sqlalchemy.dialects.postgresql import JSONB as _JSONB
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -114,6 +114,11 @@ class ChatMessage(Base):
     is_partial: Mapped[bool] = mapped_column(
         Boolean, nullable=False, server_default=expression.false()
     )
+    # User feedback on assistant messages — +1 thumbs up, -1 thumbs down.
+    # NULL means no feedback given. Used by the admin analytics surface to
+    # compute per-source average-feedback signals.
+    feedback_rating: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    feedback_comment: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     session: Mapped[ChatSession] = relationship(
         "ChatSession",
