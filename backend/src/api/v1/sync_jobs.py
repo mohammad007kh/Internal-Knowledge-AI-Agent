@@ -129,11 +129,16 @@ async def list_sync_jobs(
     # Guard — raises NotFoundError (→ 404 via AppError middleware) if absent
     await source_svc.get_source(source_id)
 
+    # Two queries: the page of rows + the total count for the response
+    # envelope. Without the explicit count the frontend pagination footer's
+    # ``total > pageSize`` guard never trips for sources with > pageSize
+    # runs (it sees `total === pageSize` and silently hides Previous/Next).
     jobs = await sync_job_svc.list_for_source(source_id, limit=limit, offset=offset)
+    total = await sync_job_svc.count_for_source(source_id)
 
     return SyncJobListResponse(
         items=jobs,
-        total=len(jobs),
+        total=total,
         limit=limit,
         offset=offset,
     )

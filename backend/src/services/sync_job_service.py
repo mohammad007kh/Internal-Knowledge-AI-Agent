@@ -113,6 +113,19 @@ class SyncJobService:
             )
             return [SyncJobResponse.model_validate(j) for j in jobs]
 
+    async def count_for_source(self, source_id: uuid.UUID) -> int:
+        """Total sync-job count for *source_id*, ignoring pagination.
+
+        Used by the list endpoint to populate the response's ``total`` so
+        the admin sources detail page can render the correct
+        "Showing X-Y of N" + Previous/Next pagination footer. Without this,
+        the previous code passed ``len(jobs)`` (= page size at most),
+        the footer's ``total > pageSize`` guard never tripped, and
+        Previous/Next disappeared on sources with hundreds of runs.
+        """
+        async with self._session() as session:
+            return await self._repo.count_by_source(session, source_id)
+
     async def get_latest_for_source(
         self, source_id: uuid.UUID
     ) -> SyncJobResponse | None:
