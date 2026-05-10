@@ -58,6 +58,21 @@ import {
   SourceTypeOverview,
   StatusCard,
 } from '@/app/(admin)/admin/sources/[id]/_components/OverviewCards'
+import { TestTab } from '@/app/(admin)/admin/sources/[id]/_components/TestTab'
+import {
+  type FormFieldConfig,
+  dataNounFor,
+  dataTabLabelFor,
+  emptyDataCopyFor,
+  getEditableFieldsFor,
+  sourceKindOf,
+} from '@/app/(admin)/admin/sources/[id]/_components/sourceTypeMatrix'
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from '@/components/ui/tooltip'
 import { Textarea } from '@/components/ui/textarea'
 import {
   useDeleteSource,
@@ -86,6 +101,7 @@ import type {
   UpdateSourceRequest,
 } from '@/lib/api/sources'
 import { getErrorMessage } from '@/lib/errors'
+import { cn } from '@/lib/utils'
 import { zodResolver } from '@hookform/resolvers/zod'
 import {
   AlertTriangleIcon,
@@ -116,8 +132,15 @@ import { z } from 'zod'
 
 const SYNC_JOBS_PAGE_SIZE = 20
 
-const RETRIEVAL_MODES: readonly RetrievalMode[] = ['vector_only', 'text_to_query', 'hybrid']
-const SYNC_MODES: readonly SyncMode[] = ['manual', 'scheduled', 'delta']
+/**
+ * Retrieval modes shown in the editable Settings form.
+ *
+ * `hybrid` is intentionally excluded — it's deprecated from the form even
+ * though it's still in the wire enum (forward compat). Sources persisted
+ * with `retrieval_mode: 'hybrid'` will still load — the Select renders
+ * the saved value as a chip — but no admin can pick it from the dropdown.
+ */
+const RETRIEVAL_MODES_EDITABLE: readonly RetrievalMode[] = ['vector_only', 'text_to_query']
 const SOURCE_MODES: readonly SourceMode[] = ['snapshot', 'live']
 
 const RETRIEVAL_MODE_LABELS: Record<RetrievalMode, string> = {
@@ -367,40 +390,80 @@ export default function SourceDetailPage() {
             <p className="text-sm text-muted-foreground">{source.description}</p>
           )}
         </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <StatusBadge status={source.status} />
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() =>
-              syncMutation.mutate(id, {
-                onSuccess: () => toast.success('Sync started'),
-                onError: (err) => toast.error(getErrorMessage(err)),
-              })
-            }
-            disabled={syncMutation.isPending}
-            aria-label={
-              isDbLiveSource
-                ? `Re-study schema for ${source.name}`
-                : `Sync source ${source.name}`
-            }
-          >
-            <RefreshCwIcon className="mr-1.5 h-4 w-4" />
-            {isDbLiveSource ? 'Re-study schema' : 'Sync now'}
-          </Button>
+        <div className="flex flex-col items-end gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <StatusBadge status={source.status} />
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() =>
+                syncMutation.mutate(id, {
+                  onSuccess: () => toast.success('Sync started'),
+                  onError: (err) => toast.error(getErrorMessage(err)),
+                })
+              }
+              disabled={syncMutation.isPending}
+              aria-label={
+                isDbLiveSource
+                  ? `Re-study schema for ${source.name}`
+                  : `Sync source ${source.name}`
+              }
+            >
+              <RefreshCwIcon className="mr-1.5 h-4 w-4" />
+              {isDbLiveSource ? 'Re-study schema' : 'Sync now'}
+            </Button>
+            {isConnectionTestable(source.source_type) && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() =>
+                  testConnectionMutation.mutate(id, {
+                    onSuccess: (data) => {
+                      if (data.success) toast.success(data.message || 'Connection succeeded')
+                      else toast.error(data.message || 'Connection failed')
+                    },
+                  })
+                }
+                disabled={testConnectionMutation.isPending}
+                aria-label={`Test connection for ${source.name}`}
+                data-testid="header-test-connection"
+              >
+                {testConnectionMutation.isPending ? (
+                  <>
+                    <Loader2Icon className="mr-1.5 h-4 w-4 animate-spin" aria-hidden />
+                    Testing…
+                  </>
+                ) : (
+                  <>
+                    <PlugIcon className="mr-1.5 h-4 w-4" aria-hidden />
+                    Test connection
+                  </>
+                )}
+              </Button>
+            )}
+          </div>
+          <ConnectionLastTestedLine source={source} />
         </div>
       </div>
 
       <Tabs defaultValue="overview">
         <TabsList className="w-full justify-start overflow-x-auto">
           <TabsTrigger value="overview">Overview</TabsTrigger>
+          <TabsTrigger value="test">Test</TabsTrigger>
           <TabsTrigger value="documents">
-            Documents
-            {documentsData && (
+            {dataTabLabelFor(source.source_type)}
+            {documentsData && sourceKindOf(source.source_type) !== 'database' && (
               <span className="ml-1.5 rounded-full bg-muted px-1.5 py-0.5 text-xs tabular-nums">
                 {documentsData.total}
               </span>
             )}
+            {sourceKindOf(source.source_type) === 'database' &&
+              source.tables_documented !== null &&
+              source.tables_documented !== undefined && (
+                <span className="ml-1.5 rounded-full bg-muted px-1.5 py-0.5 text-xs tabular-nums">
+                  {source.tables_documented}
+                </span>
+              )}
           </TabsTrigger>
           <TabsTrigger value="sync">Sync</TabsTrigger>
           <TabsTrigger value="access">Access</TabsTrigger>
@@ -481,50 +544,18 @@ export default function SourceDetailPage() {
           </Card>
         </TabsContent>
 
-        {/* DOCUMENTS */}
+        {/* TEST — admin-only sandbox chat scoped to this source */}
+        <TabsContent value="test" className="mt-4">
+          <TestTab source={source} />
+        </TabsContent>
+
+        {/* DATA — relabeled per source type (Files / Pages / Schema) */}
         <TabsContent value="documents" className="mt-4">
-          {documents.length === 0 ? (
-            <p className="py-8 text-center text-sm text-muted-foreground">
-              No documents indexed yet. Run a sync to populate this source.
-            </p>
-          ) : (
-            <div className="overflow-x-auto rounded-md border">
-              <Table className="min-w-[560px]">
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Document ID</TableHead>
-                    <TableHead>Status</TableHead>
-                    <TableHead>Indexed at</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {documents.map((doc) => (
-                    <TableRow key={doc.id}>
-                      <TableCell
-                        className="max-w-[180px] truncate font-mono text-xs text-muted-foreground"
-                        title={doc.id}
-                      >
-                        {doc.id}
-                      </TableCell>
-                      <TableCell>
-                        <Badge variant={doc.is_active ? 'default' : 'secondary'}>
-                          {doc.is_active ? 'active' : 'inactive'}
-                        </Badge>
-                      </TableCell>
-                      <TableCell className="text-xs text-muted-foreground">
-                        {formatTimestamp(doc.created_at)}
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-              {documentsData && documentsData.total > documents.length && (
-                <div className="border-t px-4 py-2 text-xs text-muted-foreground">
-                  Showing {documents.length} of {documentsData.total} documents
-                </div>
-              )}
-            </div>
-          )}
+          <DataTabBody
+            source={source}
+            documents={documents}
+            documentsTotal={documentsData?.total ?? documents.length}
+          />
         </TabsContent>
 
         {/* SYNC */}
@@ -861,6 +892,45 @@ export default function SourceDetailPage() {
 }
 
 // ---------------------------------------------------------------------------
+// Page header — "Last tested …" persistent line
+// ---------------------------------------------------------------------------
+
+interface ConnectionLastTestedLineProps {
+  source: SourceDetail
+}
+
+/**
+ * Persistent "last tested" indicator below the page header.
+ *
+ * Reads `connection_last_checked_at` and `connection_last_error` (Slice A).
+ * Renders nothing for source types that don't expose a connection probe
+ * (e.g. file_upload — there's nothing remote to test).
+ *
+ * Both `connection_last_checked_at` and `connection_last_error` are
+ * optional on the wire — when absent we hide the line entirely rather
+ * than print "Last tested never" which adds noise without information.
+ */
+function ConnectionLastTestedLine({ source }: ConnectionLastTestedLineProps) {
+  if (!isConnectionTestable(source.source_type)) return null
+  const checkedAt = source.connection_last_checked_at
+  if (!checkedAt) return null
+  const succeeded = !source.connection_last_error
+  const tone = succeeded
+    ? 'text-emerald-700 dark:text-emerald-400'
+    : 'text-destructive'
+  return (
+    <p
+      className={cn('text-xs', tone)}
+      data-testid="header-connection-last-tested"
+      role="status"
+    >
+      Last tested {formatTimestamp(checkedAt)} —{' '}
+      {succeeded ? 'succeeded' : `failed: ${source.connection_last_error}`}
+    </p>
+  )
+}
+
+// ---------------------------------------------------------------------------
 // Sync tab — action buttons (Sync now + Test connection)
 // ---------------------------------------------------------------------------
 
@@ -1106,8 +1176,17 @@ function EditableSettingsForm({ source }: EditableSettingsFormProps) {
   }, [defaultValues, form])
 
   const isDirty = form.formState.isDirty
+  const dirtyFieldCount = Object.keys(form.formState.dirtyFields).length
   const syncMode = form.watch('sync_mode')
+  const currentSourceMode = form.watch('source_mode')
   const isPendingName = source.name_status === 'pending_ai'
+
+  // Per-source-type form gating. Recomputed on `source_mode` change because
+  // a DB source flips its sync_mode visibility when toggled snapshot⇄live.
+  const fieldConfig: FormFieldConfig = useMemo(
+    () => getEditableFieldsFor({ sourceType: source.source_type, sourceMode: currentSourceMode }),
+    [source.source_type, currentSourceMode]
+  )
 
   const onSubmit = form.handleSubmit((values) => {
     const patch = diffSourceUpdate(source, values)
@@ -1186,13 +1265,90 @@ function EditableSettingsForm({ source }: EditableSettingsFormProps) {
               )}
             />
 
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            {/* Retrieval mode + Source mode — gated by source type. DB sources
+                show read-only chips with a tooltip explaining why; files /
+                web / connectors hide the field entirely (vector_only is the
+                only sensible value, set at creation). */}
+            {(fieldConfig.retrievalMode !== 'hidden' ||
+              fieldConfig.sourceMode !== 'hidden') && (
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                {fieldConfig.retrievalMode === 'edit' ? (
+                  <FormField
+                    control={form.control}
+                    name="retrieval_mode"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Retrieval mode</FormLabel>
+                        <Select onValueChange={field.onChange} value={field.value}>
+                          <FormControl>
+                            <SelectTrigger>
+                              <SelectValue />
+                            </SelectTrigger>
+                          </FormControl>
+                          <SelectContent>
+                            {RETRIEVAL_MODES_EDITABLE.map((mode) => (
+                              <SelectItem key={mode} value={mode}>
+                                {RETRIEVAL_MODE_LABELS[mode]}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                ) : fieldConfig.retrievalMode === 'readonly-chip' ? (
+                  <ReadonlyFieldChip
+                    label="Retrieval mode"
+                    value={RETRIEVAL_MODE_LABELS[source.retrieval_mode]}
+                    tooltip="Database sources answer queries by translating natural language to SQL — vector retrieval doesn't apply."
+                    testId="retrieval-mode-chip"
+                  />
+                ) : null}
+
+                {fieldConfig.sourceMode === 'edit' ? (
+                  <FormField
+                    control={form.control}
+                    name="source_mode"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Source mode</FormLabel>
+                        <Select onValueChange={field.onChange} value={field.value}>
+                          <FormControl>
+                            <SelectTrigger>
+                              <SelectValue />
+                            </SelectTrigger>
+                          </FormControl>
+                          <SelectContent>
+                            {SOURCE_MODES.map((mode) => (
+                              <SelectItem key={mode} value={mode}>
+                                {SOURCE_MODE_LABELS[mode]}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                ) : fieldConfig.sourceMode === 'readonly-chip' ? (
+                  <ReadonlyFieldChip
+                    label="Source mode"
+                    value={SOURCE_MODE_LABELS[source.source_mode]}
+                    tooltip="Database sources query the live database at retrieval time — they don't snapshot rows into the index."
+                    testId="source-mode-chip"
+                  />
+                ) : null}
+              </div>
+            )}
+
+            {fieldConfig.syncModeOptions.length > 0 ? (
               <FormField
                 control={form.control}
-                name="retrieval_mode"
+                name="sync_mode"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Retrieval mode</FormLabel>
+                    <FormLabel>Sync mode</FormLabel>
                     <Select onValueChange={field.onChange} value={field.value}>
                       <FormControl>
                         <SelectTrigger>
@@ -1200,9 +1356,9 @@ function EditableSettingsForm({ source }: EditableSettingsFormProps) {
                         </SelectTrigger>
                       </FormControl>
                       <SelectContent>
-                        {RETRIEVAL_MODES.map((mode) => (
+                        {fieldConfig.syncModeOptions.map((mode) => (
                           <SelectItem key={mode} value={mode}>
-                            {RETRIEVAL_MODE_LABELS[mode]}
+                            {SYNC_MODE_LABELS[mode]}
                           </SelectItem>
                         ))}
                       </SelectContent>
@@ -1211,59 +1367,9 @@ function EditableSettingsForm({ source }: EditableSettingsFormProps) {
                   </FormItem>
                 )}
               />
+            ) : null}
 
-              <FormField
-                control={form.control}
-                name="source_mode"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Source mode</FormLabel>
-                    <Select onValueChange={field.onChange} value={field.value}>
-                      <FormControl>
-                        <SelectTrigger>
-                          <SelectValue />
-                        </SelectTrigger>
-                      </FormControl>
-                      <SelectContent>
-                        {SOURCE_MODES.map((mode) => (
-                          <SelectItem key={mode} value={mode}>
-                            {SOURCE_MODE_LABELS[mode]}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-            </div>
-
-            <FormField
-              control={form.control}
-              name="sync_mode"
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Sync mode</FormLabel>
-                  <Select onValueChange={field.onChange} value={field.value}>
-                    <FormControl>
-                      <SelectTrigger>
-                        <SelectValue />
-                      </SelectTrigger>
-                    </FormControl>
-                    <SelectContent>
-                      {SYNC_MODES.map((mode) => (
-                        <SelectItem key={mode} value={mode}>
-                          {SYNC_MODE_LABELS[mode]}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
-
-            {syncMode === 'scheduled' && (
+            {syncMode === 'scheduled' && fieldConfig.syncModeOptions.includes('scheduled') && (
               <FormField
                 control={form.control}
                 name="sync_schedule"
@@ -1282,29 +1388,217 @@ function EditableSettingsForm({ source }: EditableSettingsFormProps) {
               />
             )}
 
-            {isDirty && (
-              <div className="flex items-center gap-3 border-t pt-4">
-                <Button
-                  type="submit"
-                  size="sm"
-                  disabled={updateMutation.isPending}
-                  data-testid="settings-save"
-                >
-                  {updateMutation.isPending ? 'Saving…' : 'Save changes'}
-                </Button>
-                <button
-                  type="button"
-                  onClick={onDiscard}
-                  className="text-sm text-muted-foreground underline-offset-4 hover:underline"
-                  data-testid="settings-discard"
-                >
-                  Discard
-                </button>
-              </div>
-            )}
+            <SettingsSaveBar
+              isDirty={isDirty}
+              dirtyFieldCount={dirtyFieldCount}
+              isSaving={updateMutation.isPending}
+              onDiscard={onDiscard}
+            />
           </form>
         </Form>
       </CardContent>
     </Card>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Sticky always-visible save bar
+// ---------------------------------------------------------------------------
+
+interface SettingsSaveBarProps {
+  isDirty: boolean
+  dirtyFieldCount: number
+  isSaving: boolean
+  onDiscard: () => void
+}
+
+/**
+ * Always-rendered footer at the bottom of the Settings card. The previous
+ * implementation revealed itself only when the form was dirty — that read as
+ * "where did the Save button go?" to admins on first load. Always rendering
+ * (with Save disabled until dirty) keeps the affordance discoverable while
+ * still preventing no-op submits.
+ */
+function SettingsSaveBar({
+  isDirty,
+  dirtyFieldCount,
+  isSaving,
+  onDiscard,
+}: SettingsSaveBarProps) {
+  const dotClass = isDirty ? 'bg-primary' : 'bg-muted-foreground/40'
+  const summary = isDirty
+    ? `${dirtyFieldCount} unsaved change${dirtyFieldCount === 1 ? '' : 's'}`
+    : 'No unsaved changes'
+  return (
+    <div
+      className="sticky bottom-0 -mx-6 -mb-6 mt-4 flex items-center justify-between gap-3 border-t bg-card/95 px-6 py-3 backdrop-blur"
+      data-testid="settings-save-bar"
+      data-dirty={isDirty}
+    >
+      <div className="flex items-center gap-2 text-sm">
+        <span
+          className={cn('inline-block h-2 w-2 rounded-full', dotClass)}
+          aria-hidden
+          data-testid="settings-save-bar-dot"
+        />
+        <span className="text-muted-foreground" data-testid="settings-save-bar-summary">
+          {summary}
+        </span>
+      </div>
+      <div className="flex items-center gap-2">
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          onClick={onDiscard}
+          disabled={!isDirty || isSaving}
+          data-testid="settings-discard"
+        >
+          Discard
+        </Button>
+        <Button
+          type="submit"
+          size="sm"
+          disabled={!isDirty || isSaving}
+          data-testid="settings-save"
+        >
+          {isSaving ? 'Saving…' : 'Save changes'}
+        </Button>
+      </div>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Read-only chip for locked-by-source-type fields
+// ---------------------------------------------------------------------------
+
+interface ReadonlyFieldChipProps {
+  label: string
+  value: string
+  tooltip: string
+  testId?: string
+}
+
+/**
+ * Renders a label + Badge pair that visually parallels a Select field but
+ * is non-interactive. Used to show DB sources their locked
+ * `retrieval_mode` / `source_mode` values without putting an editable
+ * Select on screen that would mis-suggest the values are user-mutable.
+ */
+function ReadonlyFieldChip({ label, value, tooltip, testId }: ReadonlyFieldChipProps) {
+  return (
+    <div className="space-y-2" data-testid={testId}>
+      <p className="text-sm font-medium">{label}</p>
+      <TooltipProvider delayDuration={250}>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <span>
+              <Badge variant="secondary" className="cursor-help">
+                <LockIcon className="mr-1.5 h-3 w-3" aria-hidden />
+                {value}
+              </Badge>
+            </span>
+          </TooltipTrigger>
+          <TooltipContent side="top" className="max-w-[260px]">
+            {tooltip}
+          </TooltipContent>
+        </Tooltip>
+      </TooltipProvider>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Data tab body — per-type relabeled list
+// ---------------------------------------------------------------------------
+
+interface DataTabBodyProps {
+  source: SourceDetail
+  documents: ReadonlyArray<{ id: string; created_at: string; is_active: boolean }>
+  documentsTotal: number
+}
+
+/**
+ * Renders the second-tab body. The label-and-noun decisions live in
+ * `sourceTypeMatrix.ts`; this component just wires them in. Database
+ * sources show a placeholder until per-table data lands on the wire — the
+ * studying agent's `tables_documented` count is the only DB-specific field
+ * we have today.
+ */
+function DataTabBody({ source, documents, documentsTotal }: DataTabBodyProps) {
+  const kind = sourceKindOf(source.source_type)
+  const idLabel =
+    kind === 'database' ? 'Table' : kind === 'file' ? 'File ID' : 'Page ID'
+
+  if (kind === 'database') {
+    return (
+      <div className="space-y-3 rounded-md border bg-muted/20 p-6 text-sm" data-testid="data-tab-db">
+        <p className="font-medium">Schema details</p>
+        <p className="text-xs text-muted-foreground">
+          Schema details require the studying agent to complete. Click <strong>Re-study schema</strong>{' '}
+          in the Sync tab to refresh.
+        </p>
+        {source.tables_documented !== null && source.tables_documented !== undefined ? (
+          <p className="text-xs text-muted-foreground">
+            <strong className="tabular-nums">{source.tables_documented}</strong>{' '}
+            {source.tables_documented === 1 ? 'table' : 'tables'} documented
+            {source.tables_partial ? ` · ${source.tables_partial} partial` : null}
+          </p>
+        ) : (
+          <p className="text-xs text-muted-foreground">{emptyDataCopyFor(source.source_type)}</p>
+        )}
+      </div>
+    )
+  }
+
+  if (documents.length === 0) {
+    return (
+      <p
+        className="py-8 text-center text-sm text-muted-foreground"
+        data-testid="data-tab-empty"
+      >
+        {emptyDataCopyFor(source.source_type)}
+      </p>
+    )
+  }
+
+  return (
+    <div className="overflow-x-auto rounded-md border" data-testid="data-tab-list">
+      <Table className="min-w-[560px]">
+        <TableHeader>
+          <TableRow>
+            <TableHead>{idLabel}</TableHead>
+            <TableHead>Status</TableHead>
+            <TableHead>Indexed at</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {documents.map((doc) => (
+            <TableRow key={doc.id}>
+              <TableCell
+                className="max-w-[180px] truncate font-mono text-xs text-muted-foreground"
+                title={doc.id}
+              >
+                {doc.id}
+              </TableCell>
+              <TableCell>
+                <Badge variant={doc.is_active ? 'default' : 'secondary'}>
+                  {doc.is_active ? 'active' : 'inactive'}
+                </Badge>
+              </TableCell>
+              <TableCell className="text-xs text-muted-foreground">
+                {formatTimestamp(doc.created_at)}
+              </TableCell>
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
+      {documentsTotal > documents.length && (
+        <div className="border-t px-4 py-2 text-xs text-muted-foreground">
+          Showing {documents.length} of {documentsTotal} {dataNounFor(source.source_type)}
+        </div>
+      )}
+    </div>
   )
 }

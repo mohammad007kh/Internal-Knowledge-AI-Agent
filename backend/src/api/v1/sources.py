@@ -677,17 +677,32 @@ async def delete_source(
 )
 async def test_connection(
     source_id: uuid.UUID,
+    request: Request,
     current_user: User = Depends(get_current_user),
     service: SourceService = Depends(_get_source_service),
+    db: AsyncSession = Depends(get_db),
 ) -> TestConnectionResponse:
     """Attempt a live connection using the stored (decrypted) config.
 
     Always returns ``{"success": bool}`` — never raises 5xx for connectivity
-    failures.
+    failures. Slice A: the probe result is also persisted on the Source row
+    (``connection_status`` etc) and a single ``admin_audit_log`` row is
+    emitted with ``action="source.connection_test"`` so admins can audit
+    who tested what and when.
     """
     source = await service.get_source(source_id)
     _assert_ownership_or_admin(source.owner_id, current_user)
     ok = await service.test_connection(source_id)
+    await emit_audit(
+        AdminAuditLogRepository(db),
+        admin_user_id=current_user.id,
+        action="source.connection_test",
+        resource_type="source",
+        resource_id=source_id,
+        request=request,
+        metadata={"success": ok},
+    )
+    await db.commit()
     return TestConnectionResponse(
         success=ok,
         message="" if ok else "Connection attempt failed — check credentials and network.",

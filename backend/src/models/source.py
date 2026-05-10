@@ -153,6 +153,42 @@ class Source(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
         doc="Mirrors the most recent SchemaStudy.finished_at for fast UI sort.",
     )
 
+    # -- Connection health (Slice A) ----------------------------------------
+    # ``connection_status`` is orthogonal to ``is_active`` (admin approval).
+    # ``is_active`` says "the admin approved this source"; ``connection_status``
+    # says "the system can currently reach it". The chat picker hides
+    # connection_status='failed' rows even when is_active=True so unreachable
+    # sources don't silently return empty answers, while admins still see
+    # them in /admin/sources to debug.
+    connection_status: Mapped[str] = mapped_column(
+        String(16),
+        nullable=False,
+        default="unknown",
+        server_default="unknown",
+        index=True,
+        doc=(
+            "One of healthy | degraded | failed | unknown. "
+            "TODO(slice-A): wire DB-source studying-agent finalisation "
+            "(schema_status -> FAILED) to flip this to 'failed' directly. "
+            "Currently the indirect path through mark_failed (sync runs that "
+            "fail because the studying agent flagged the source) covers the "
+            "common case."
+        ),
+    )
+    connection_last_checked_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        doc="UTC timestamp of the most recent connection probe (sync or manual test).",
+    )
+    connection_last_error: Mapped[str | None] = mapped_column(
+        String(500),
+        nullable=True,
+        doc=(
+            "Most recent failure message, truncated to 500 chars. NEVER include "
+            "connection strings or credentials — callers MUST sanitize."
+        ),
+    )
+
     # -- relationships -------------------------------------------------------
     owner: Mapped[User] = relationship(
         "User",

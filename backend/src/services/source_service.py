@@ -514,7 +514,16 @@ class SourceService:
 
         The connector registry import is deferred so this method is safe to
         call before the connector subsystem is fully wired up.
+
+        Side effect (Slice A): the result is persisted onto the Source row
+        (``connection_status`` / ``connection_last_checked_at`` /
+        ``connection_last_error``) so the UI can render
+        "Last tested 4 min ago — succeeded/failed" without keeping client
+        state. Persistence failures are logged but never alter the bool
+        returned to the caller — the probe outcome is the source of truth.
         """
+        ok = False
+        last_error: str | None = None
         try:
             source = await self.get_source(source_id)
             config = await self.get_source_config(source_id)
@@ -523,6 +532,50 @@ class SourceService:
                 source_id=str(source_id),
                 decrypted_config=config,
             )
-            return bool(await connector.test_connection())
+            ok = bool(await connector.test_connection())
+            if not ok:
+                last_error = "connector reported failure"
+        except Exception as exc:  # noqa: BLE001
+            ok = False
+            last_error = str(exc)
+
+        await self._persist_connection_probe(
+            source_id, success=ok, error=last_error
+        )
+        return ok
+
+    async def _persist_connection_probe(
+        self,
+        source_id: uuid.UUID,
+        *,
+        success: bool,
+        error: str | None,
+    ) -> None:
+        """Stamp the connection-health columns on the Source row.
+
+        Truncates ``error`` to 500 chars (the column limit) and never
+        embeds connection strings — the caller is responsible for stripping
+        any credentials before passing the message in.
+
+        On success: ``connection_status='healthy'``, ``connection_last_error=None``.
+        On failure: ``connection_status='failed'``, error message persisted.
+
+        The repository is a stateless wrapper over the request-scoped
+        :class:`AsyncSession`; commit responsibility belongs to the FastAPI
+        handler that owns the session, so we only flush here.
+        """
+        from datetime import UTC, datetime  # noqa: PLC0415
+
+        truncated = error[:500] if error else None
+        try:
+            await self._repo.update_connection_health(
+                source_id,
+                status="healthy" if success else "failed",
+                error=None if success else truncated,
+                checked_at=datetime.now(UTC),
+            )
         except Exception:  # noqa: BLE001
-            return False
+            logger.exception(
+                "Failed to persist connection probe result",
+                extra={"source_id": str(source_id), "success": success},
+            )

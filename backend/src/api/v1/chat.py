@@ -7,15 +7,16 @@ import uuid
 from collections.abc import AsyncGenerator
 from typing import Any
 
-from fastapi import APIRouter, Depends, Response, status
+from fastapi import APIRouter, Depends, Request, Response, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.database import get_db
-from src.core.deps import get_current_user
+from src.core.deps import get_current_user, require_admin
 from src.core.problem_details import problem
 from src.models.chat import MessageRole
 from src.models.user import User
+from src.repositories.admin_audit_log_repository import AdminAuditLogRepository
 from src.repositories.chat_repository import ChatMessageRepository, ChatSessionRepository
 from src.schemas.chat import (
     ChatMessageResponse,
@@ -25,6 +26,12 @@ from src.schemas.chat import (
     ChatSessionResponse,
     ChatSessionUpdate,
     ChatStreamEvent,
+)
+from src.services.audit_service import emit_audit
+from src.services.chat_stream_service import (
+    SANDBOX_SESSION_ID,
+    history_to_lc_messages,
+    run_pipeline_stream,
 )
 from src.services.langfuse_tracing_service import LangfuseTracingService
 
@@ -285,11 +292,6 @@ async def send_message(
     )
 
     async def event_generator() -> AsyncGenerator[str, None]:
-        try:
-            from langgraph.errors import GraphInterrupt  # noqa: PLC0415
-        except ImportError:
-            GraphInterrupt = None  # type: ignore[assignment,misc]
-
         config: dict[str, Any] = {"configurable": {"thread_id": str(session_id)}}
         initial_state: dict[str, Any] = {
             # load_history populates messages from DB (the just-persisted user row
@@ -311,138 +313,101 @@ async def send_message(
             "total_output_tokens": 0,
         }
 
-        final_answer = ""
-        message_id = ""
-        sources: list[Any] = []
-
         # Emit the auto-generated title BEFORE the first pipeline event so
         # the frontend can repaint the sidebar entry while the LLM warms up.
+        pre_yield: list[str] = []
         if generated_title:
-            yield ChatStreamEvent.title(generated_title).to_sse()
+            pre_yield.append(ChatStreamEvent.title(generated_title).to_sse())
 
-        try:
-            async for event in pipeline.astream_events(initial_state, config=config, version="v2"):
-                kind = event["event"]
+        # Track the running answer so we can persist a partial on
+        # GeneratorExit (client disconnect). The shared helper does its
+        # own bookkeeping but doesn't expose mid-stream state — we
+        # tee the deltas here so the partial-persist branch can recover.
+        partial_answer = ""
 
-                if kind == "on_chat_model_stream":
-                    token = event.get("data", {}).get("chunk", {})
-                    if hasattr(token, "content") and token.content:
-                        final_answer += token.content
-                        yield ChatStreamEvent.delta(token.content).to_sse()
+        async def _persist_assistant(final_answer: str) -> str:
+            """Persist the completed assistant turn and return its id.
 
-                elif kind == "on_chain_end" and event.get("name") == "LangGraph":
-                    output = event.get("data", {}).get("output", {})
-                    final_answer = output.get("final_answer", final_answer)
-                    sources = output.get("sources", sources)
-
-        except GeneratorExit:
-            # Client disconnected — persist partial message so the session has a record.
-            # If the stream produced no real tokens, skip the insert; the
-            # `is_partial=True` flag means "real tokens then aborted", not
-            # "empty placeholder", and `chat_messages.content` is NOT NULL.
-            if not final_answer:
-                logger.warning(
-                    "Chat stream aborted with empty final_answer for session=%s — "
-                    "skipping partial persist",
-                    session_id,
-                )
-                langfuse_tracing.end_trace(trace_id, output="[aborted]")
-                return
-            async with db_session_factory() as db:
-                try:
-                    await chat_message_repo.create(
-                        db,
-                        chat_session_id=session_id,
-                        role=MessageRole.ASSISTANT,
-                        content=final_answer,
-                        is_partial=True,
-                    )
-                    await db.commit()
-                except Exception:
-                    logger.exception(
-                        "Failed to persist partial message for session=%s", session_id
-                    )
-            langfuse_tracing.end_trace(trace_id, output="[aborted]")
-            return
-
-        except Exception as exc:  # noqa: BLE001
-            # Check for GraphInterrupt first (if import succeeded)
-            if GraphInterrupt is not None and isinstance(exc, GraphInterrupt):
-                question = str(exc) if str(exc) else "Could you clarify your question?"
-                yield ChatStreamEvent.clarification(question).to_sse()
-                langfuse_tracing.end_trace(trace_id, output="[clarification]")
-                return
-
-            logger.exception("Chat pipeline error: %s", exc)
-            yield ChatStreamEvent.error(message="An error occurred.", code="pipeline_error").to_sse()
-            langfuse_tracing.end_trace(trace_id, output="", error=str(exc)[:200])
-            return
-
-        # Guard: pipeline ended with empty final_answer (e.g. generate_response
-        # produced zero chunks, or guardrail_output early-returned). The DB
-        # column `chat_messages.content` is NOT NULL — inserting None/'' would
-        # raise IntegrityError, the bare except below would swallow it, and
-        # the SSE stream would close without a terminal frame, locking the
-        # frontend textarea. Emit an error event instead so the UI exits its
-        # pending state. Mirrors the precedent in agent/nodes/persist.py:67.
-        if not final_answer:
-            logger.warning(
-                "Chat pipeline ended with empty final_answer for session=%s — "
-                "skipping persist and emitting error frame",
-                session_id,
-            )
-            yield ChatStreamEvent.error(
-                message="The assistant produced no response. Please try again.",
-                code="empty_response",
-            ).to_sse()
-            try:
-                langfuse_tracing.end_trace(trace_id, output="[empty]")
-            except Exception:
-                logger.exception(
-                    "Failed to end langfuse trace for session=%s", session_id
-                )
-            return
-
-        # Save assistant message and emit done event
-        async with db_session_factory() as db:
-            try:
+            Runs inside the shared helper's success path. Errors propagate
+            up — :func:`run_pipeline_stream` converts them into a
+            ``persist_error`` SSE frame.
+            """
+            async with db_session_factory() as fresh_db:
                 assistant_msg = await chat_message_repo.create(
-                    db,
+                    fresh_db,
                     chat_session_id=session_id,
                     role=MessageRole.ASSISTANT,
                     content=final_answer,
                     is_partial=False,
                 )
-                message_id = str(assistant_msg.id)
-                await db.commit()
-            except Exception:
-                # Don't silently swallow — log full stack and emit an error
-                # frame so the frontend exits its pending state instead of
-                # waiting forever for a terminal SSE event.
-                logger.exception(
-                    "Failed to persist assistant message for session=%s", session_id
+                await fresh_db.commit()
+                return str(assistant_msg.id)
+
+        try:
+            async for frame in run_pipeline_stream(
+                pipeline=pipeline,
+                initial_state=initial_state,
+                config=config,
+                trace_id=trace_id,
+                session_id=str(session_id),
+                langfuse_tracing=langfuse_tracing,
+                persist_assistant=True,
+                on_done=_persist_assistant,
+                pre_yield=pre_yield,
+            ):
+                # Tee delta tokens so we can recover the partial on disconnect.
+                # The frame format is ``event: delta\ndata: {"token": "…"}\n\n``;
+                # we only need the bookkeeping side, not parsing — the helper
+                # already accumulated final_answer for its own success path.
+                # Keeping a local mirror is the cheapest way to stay correct
+                # under GeneratorExit (we lose the helper's locals at that
+                # point).
+                if "event: delta" in frame:
+                    # Best-effort partial reconstruction; payload is JSON
+                    # following the ``data: `` prefix on the second line.
+                    try:
+                        import json  # noqa: PLC0415
+
+                        data_line = frame.split("\ndata: ", 1)[1].rstrip("\n")
+                        partial_answer += json.loads(data_line).get("token", "")
+                    except Exception:  # noqa: BLE001
+                        # Tee is best-effort — never break the user-facing stream.
+                        pass
+                yield frame
+        except GeneratorExit:
+            # Client disconnected mid-stream. Persist whatever tokens we
+            # already shipped to the wire so the session has a record;
+            # skip when nothing real was emitted (``content`` is NOT NULL).
+            if not partial_answer:
+                logger.warning(
+                    "Chat stream aborted with empty final_answer for session=%s — "
+                    "skipping partial persist",
+                    session_id,
                 )
-                yield ChatStreamEvent.error(
-                    message="Failed to save the assistant response.",
-                    code="persist_error",
-                ).to_sse()
                 try:
-                    langfuse_tracing.end_trace(
-                        trace_id, output=final_answer, error="persist_failed"
+                    langfuse_tracing.end_trace(trace_id, output="[aborted]")
+                except Exception:  # noqa: BLE001
+                    logger.debug("end_trace failed after disconnect", exc_info=True)
+                return
+            async with db_session_factory() as fresh_db:
+                try:
+                    await chat_message_repo.create(
+                        fresh_db,
+                        chat_session_id=session_id,
+                        role=MessageRole.ASSISTANT,
+                        content=partial_answer,
+                        is_partial=True,
                     )
+                    await fresh_db.commit()
                 except Exception:
                     logger.exception(
-                        "Failed to end langfuse trace for session=%s", session_id
+                        "Failed to persist partial message for session=%s", session_id
                     )
-                return
-
-        yield ChatStreamEvent.done(
-            session_id=str(session_id),
-            message_id=message_id,
-            trace_id=trace_id,
-            sources=sources,
-        ).to_sse()
-        langfuse_tracing.end_trace(trace_id, output=final_answer)
+            try:
+                langfuse_tracing.end_trace(trace_id, output="[aborted]")
+            except Exception:  # noqa: BLE001
+                logger.debug("end_trace failed after disconnect", exc_info=True)
+            return
 
     return StreamingResponse(
         event_generator(),
@@ -455,11 +420,187 @@ async def send_message(
 
 
 # ---------------------------------------------------------------------------
-# Per-message feedback (thumbs up / thumbs down)
+# Sandbox streaming (admin-only) — Slice A
 # ---------------------------------------------------------------------------
-
+#
+# The sandbox endpoint runs the full agent pipeline against ONE source so
+# admins can debug retrieval failures (a broken DB connection, a stale
+# embedder, a malformed schema document) without polluting chat_sessions /
+# chat_messages with throwaway runs. It deliberately bypasses both
+# ``is_active`` (admins specifically test broken sources) AND the
+# permission-list filter (admin auth gates the endpoint already).
+#
+# The SSE event grammar is byte-identical to the session-chat endpoint so
+# the frontend's :file:`use-chat-stream.ts` hook is reusable. The sandbox
+# emits ``session_id="__sandbox__"`` and ``message_id=""`` in the ``done``
+# event so client code can branch on the sentinel without parsing the URL.
+#
+# Rate limiting: the endpoint inherits the global rate-limit middleware —
+# we deliberately do NOT bypass it. TODO(slice-A+1): if admins start
+# triggering the global bucket while debugging, add a per-admin sandbox
+# bucket with a tighter ceiling (e.g. 30 calls/min) so a runaway script
+# can't starve real chat traffic.
 
 from pydantic import BaseModel, ConfigDict, Field  # noqa: E402,PLC0415
+
+
+class _SandboxHistoryTurn(BaseModel):
+    """One turn of the sandbox conversation (OpenAI-style)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    role: str = Field(..., pattern="^(user|assistant)$")
+    content: str = Field(..., min_length=1, max_length=4096)
+
+
+class _SandboxRequest(BaseModel):
+    """Body for ``POST /chat/sandbox/stream``."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    source_id: uuid.UUID
+    query: str = Field(..., min_length=1, max_length=4096)
+    # Capped at 20 turns server-side. Clients SHOULD cap on their side too,
+    # but defence-in-depth: the validator below truncates rather than
+    # rejecting so a 21st turn doesn't eat a 422 in front of the user.
+    history: list[_SandboxHistoryTurn] | None = None
+
+    @classmethod
+    def _max_history_turns(cls) -> int:
+        return 20
+
+
+@router.post(
+    "/sandbox/stream",
+    summary="Admin-only streaming chat against a single source (no persistence)",
+    dependencies=[Depends(require_admin)],
+)
+async def sandbox_stream(
+    body: _SandboxRequest,
+    request: Request,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+    pipeline: Any = Depends(_get_pipeline),
+    langfuse_tracing: LangfuseTracingService = Depends(_get_tracing),
+) -> StreamingResponse:
+    """Run the agent pipeline against ONE source and stream SSE.
+
+    Persists nothing to chat_sessions / chat_messages / message_feedback.
+    Emits exactly one ``admin_audit_log`` row per call. The Langfuse trace
+    IS recorded — the whole purpose of the endpoint is debugging — but is
+    tagged with ``sandbox=True`` and the ``source_id`` so analytics can
+    exclude these from production funnel metrics.
+
+    Bypasses ``Source.is_active`` (admins specifically test rejected /
+    pending sources) and the permission-list filter on chat picker
+    (admin role-check at the endpoint level is the gate).
+    """
+    # 404 the source if it doesn't exist or is soft-deleted. Admins still
+    # see is_active=False sources by design — that's the whole point of
+    # the sandbox.
+    from sqlalchemy import select  # noqa: PLC0415
+
+    from src.models.source import Source  # noqa: PLC0415
+
+    src = await db.scalar(
+        select(Source).where(
+            Source.id == body.source_id,
+            Source.deleted_at.is_(None),
+        )
+    )
+    if src is None:
+        raise problem(
+            status=404,
+            title="Source not found",
+            detail=f"No source found for id {body.source_id}.",
+        )
+
+    # Hard-cap history at 20 turns server-side (defence-in-depth — the
+    # frontend should already cap, but a misconfigured client must not be
+    # able to OOM the agent's context window).
+    raw_history = body.history or []
+    capped = raw_history[-_SandboxRequest._max_history_turns() :]
+    lc_history = history_to_lc_messages(
+        [{"role": h.role, "content": h.content} for h in capped]
+    )
+
+    # Start a Langfuse trace tagged for sandbox use. Re-using start_trace
+    # keeps the wiring identical to production but the metadata makes
+    # downstream filtering trivial.
+    trace_id: str = langfuse_tracing.start_trace(
+        session_id=SANDBOX_SESSION_ID,
+        user_id=str(current_user.id),
+        query=body.query,
+    )
+
+    # Single audit row per sandbox call. Capture only what helps an SRE
+    # later: query length (NEVER the query text — sandbox prompts can
+    # contain pasted PII while admins are debugging) and the trace id so
+    # they can jump to the trace from the audit search UI.
+    await emit_audit(
+        AdminAuditLogRepository(db),
+        admin_user_id=current_user.id,
+        action="source.sandbox_query",
+        resource_type="source",
+        resource_id=body.source_id,
+        request=request,
+        metadata={"query_len": len(body.query), "trace_id": trace_id},
+    )
+    await db.commit()
+
+    config: dict[str, Any] = {
+        "configurable": {"thread_id": SANDBOX_SESSION_ID},
+        # Langfuse v4 reads tags off the runtime config; production traces
+        # don't carry these so dashboards can filter sandbox out.
+        "metadata": {"sandbox": True, "source_id": str(body.source_id)},
+        "tags": ["sandbox"],
+    }
+    initial_state: dict[str, Any] = {
+        "messages": lc_history,
+        "retrieved_chunks": [],
+        "requires_clarification": False,
+        "clarification_question": None,
+        "session_id": SANDBOX_SESSION_ID,
+        "user_id": str(current_user.id),
+        "trace_id": trace_id,
+        "query": body.query,
+        "final_answer": None,
+        "error": None,
+        # Single source — bypass the permission filter by passing the id
+        # straight in. The pipeline doesn't re-check permissions on this
+        # field; admin auth at the endpoint is the gate.
+        "source_ids": [str(body.source_id)],
+        "sources": [],
+        "total_input_tokens": 0,
+        "total_output_tokens": 0,
+    }
+
+    async def _sandbox_event_generator() -> AsyncGenerator[str, None]:
+        async for frame in run_pipeline_stream(
+            pipeline=pipeline,
+            initial_state=initial_state,
+            config=config,
+            trace_id=trace_id,
+            session_id=SANDBOX_SESSION_ID,
+            langfuse_tracing=langfuse_tracing,
+            persist_assistant=False,  # sandbox never writes to chat_messages
+            on_done=None,
+        ):
+            yield frame
+
+    return StreamingResponse(
+        _sandbox_event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+# ---------------------------------------------------------------------------
+# Per-message feedback (thumbs up / thumbs down)
+# ---------------------------------------------------------------------------
 
 
 class _FeedbackRequest(BaseModel):

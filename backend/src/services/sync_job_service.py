@@ -1,17 +1,26 @@
 """Service layer for SyncJob lifecycle operations."""
 from __future__ import annotations
 
+import logging
 import uuid
 from collections.abc import Callable
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 
+import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.exceptions import NotFoundError
 from src.models.enums import SyncStatus
 from src.repositories.sync_job_repository import SyncJobRepository
 from src.schemas.sync_job import SyncJobResponse
+
+logger = logging.getLogger(__name__)
+
+# Mirrors the column type on Source.connection_last_error.
+_CONNECTION_ERROR_TRUNC = 500
+# Sentinel: how many consecutive failed sync runs flip the source to 'failed'.
+_FAILED_RUN_THRESHOLD = 2
 
 
 class SyncJobService:
@@ -61,11 +70,12 @@ class SyncJobService:
         chunks_created: int,
     ) -> SyncJobResponse:
         async with self._session() as session:
+            now = datetime.now(UTC)
             job = await self._repo.update_status(
                 session,
                 job_id,
                 status=SyncStatus.SUCCESS,
-                finished_at=datetime.now(UTC),
+                finished_at=now,
                 documents_synced=documents_synced,
                 chunks_created=chunks_created,
             )
@@ -73,6 +83,18 @@ class SyncJobService:
                 raise NotFoundError(f"SyncJob {job_id} not found.")
             response = SyncJobResponse.model_validate(job)
             source_id_for_hook = job.source_id
+
+            # Connection-health hook: a successful sync is irrefutable
+            # proof we can reach the source — flip back to 'healthy' and
+            # clear the last-error tooltip in the same transaction so the
+            # admin UI doesn't render stale failure copy.
+            await _set_connection_health(
+                session,
+                source_id=source_id_for_hook,
+                status="healthy",
+                error=None,
+                checked_at=now,
+            )
 
         # Lifecycle hook: enqueue AFTER the session commits so we never
         # enqueue a Celery task pointing at a row whose transaction later
@@ -89,15 +111,51 @@ class SyncJobService:
         error_message: str,
     ) -> SyncJobResponse:
         async with self._session() as session:
+            now = datetime.now(UTC)
             job = await self._repo.update_status(
                 session,
                 job_id,
                 status=SyncStatus.FAILED,
-                finished_at=datetime.now(UTC),
+                finished_at=now,
                 error_message=error_message,
             )
             if job is None:
                 raise NotFoundError(f"SyncJob {job_id} not found.")
+
+            # Auto-demote on N consecutive failures. We look at the *prior*
+            # job status (LIMIT 2 ordered by created_at DESC: this row + the
+            # one before it). If both rows are 'failed', flip the source to
+            # 'failed'; otherwise mark 'degraded'. Only this source's runs
+            # are inspected (the WHERE clause scopes by source_id) so a
+            # different source's recent failure can't accidentally demote
+            # an unrelated row.
+            prior_failures = await _count_recent_failures(
+                session,
+                source_id=job.source_id,
+                limit=_FAILED_RUN_THRESHOLD,
+            )
+            if prior_failures >= _FAILED_RUN_THRESHOLD:
+                next_status = "failed"
+            else:
+                next_status = "degraded"
+            truncated = (error_message or "")[:_CONNECTION_ERROR_TRUNC]
+            await _set_connection_health(
+                session,
+                source_id=job.source_id,
+                status=next_status,
+                error=truncated,
+                checked_at=now,
+            )
+            if next_status == "failed":
+                logger.warning(
+                    "source.auto_demoted: %d consecutive failures",
+                    prior_failures,
+                    extra={
+                        "source_id": str(job.source_id),
+                        "failed_run_count": prior_failures,
+                    },
+                )
+
             return SyncJobResponse.model_validate(job)
 
     async def list_for_source(
@@ -132,6 +190,61 @@ class SyncJobService:
         async with self._session() as session:
             job = await self._repo.latest_for_source(session, source_id)
             return SyncJobResponse.model_validate(job) if job else None
+
+
+async def _set_connection_health(
+    session: AsyncSession,
+    *,
+    source_id: uuid.UUID,
+    status: str,
+    error: str | None,
+    checked_at: datetime,
+) -> None:
+    """Update the connection-health columns on a Source row.
+
+    Helper lives at module level so callers (sync hooks + the ``test_connection``
+    service path) share one implementation. Caller owns the transaction —
+    we only flush; commit is the surrounding ``async with self._session()``
+    block's responsibility.
+    """
+    from src.models.source import Source  # noqa: PLC0415
+
+    await session.execute(
+        sa.update(Source)
+        .where(Source.id == source_id)
+        .values(
+            connection_status=status,
+            connection_last_error=error,
+            connection_last_checked_at=checked_at,
+        )
+    )
+
+
+async def _count_recent_failures(
+    session: AsyncSession,
+    *,
+    source_id: uuid.UUID,
+    limit: int,
+) -> int:
+    """Count failed jobs among the *limit* most recent runs for *source_id*.
+
+    Used by ``mark_failed`` to decide between ``degraded`` (a one-off blip)
+    and ``failed`` (sustained inability to reach the source). The latest job
+    has already been written to ``failed`` by the surrounding ``update_status``
+    call, so a return value of ``limit`` means every one of the most recent
+    *limit* runs failed — the auto-demote threshold.
+    """
+    from src.models.sync_job import SyncJob  # noqa: PLC0415
+
+    stmt = (
+        sa.select(SyncJob.status)
+        .where(SyncJob.source_id == source_id)
+        .order_by(SyncJob.created_at.desc())
+        .limit(limit)
+    )
+    result = await session.execute(stmt)
+    statuses = [row[0] for row in result.all()]
+    return sum(1 for s in statuses if s == SyncStatus.FAILED)
 
 
 async def _maybe_enqueue_auto_name_for(source_id: uuid.UUID) -> None:

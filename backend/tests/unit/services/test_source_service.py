@@ -521,3 +521,113 @@ class TestUpdateSource:
 
         with pytest.raises(PydanticValidationError):
             SourceUpdate(name="bad/name")
+
+
+# ---------------------------------------------------------------------------
+# TestConnectionPersistence (Slice A — connection-status side effect)
+# ---------------------------------------------------------------------------
+#
+# The brief: ``test_connection`` already returns a bool; Slice A extends it
+# so the result is *persisted* on the Source row (connection_status,
+# connection_last_checked_at, connection_last_error) so the UI can render
+# "Last tested 4 min ago — succeeded/failed" without keeping client state.
+# These tests lock that contract.
+
+
+class TestTestConnectionPersistence:
+    """``test_connection`` persists the probe outcome onto the Source row."""
+
+    @staticmethod
+    def _build_service(
+        repo,
+        connector_factory,
+        *,
+        connector_returns: bool | Exception = True,
+    ):
+        """Build a SourceService with a connector mock controlling the probe outcome."""
+        connector = AsyncMock()
+        if isinstance(connector_returns, Exception):
+            connector.test_connection = AsyncMock(side_effect=connector_returns)
+        else:
+            connector.test_connection = AsyncMock(return_value=connector_returns)
+        connector_factory.build = MagicMock(return_value=connector)
+
+        settings = MagicMock()
+        settings.ENCRYPTION_KEY = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+        from src.services.source_service import SourceService
+
+        return SourceService(
+            source_repo=repo,
+            settings=settings,
+            connector_factory=connector_factory,
+        )
+
+    async def test_success_persists_healthy(self):
+        """A successful probe writes connection_status='healthy' and clears the error."""
+        repo = AsyncMock()
+        source = _make_source()
+        repo.get_by_id = AsyncMock(return_value=source)
+        repo.update_connection_health = AsyncMock()
+        connector_factory = MagicMock()
+
+        service = self._build_service(
+            repo, connector_factory, connector_returns=True
+        )
+
+        # ``get_source_config`` reads ``source.config_encrypted`` which the
+        # bare MagicMock above doesn't know how to decrypt. Stub the helper
+        # rather than feeding it real Fernet bytes.
+        service.get_source_config = AsyncMock(return_value={})
+
+        ok = await service.test_connection(source.id)
+        assert ok is True
+
+        repo.update_connection_health.assert_awaited_once()
+        kwargs = repo.update_connection_health.await_args.kwargs
+        assert kwargs["status"] == "healthy"
+        assert kwargs["error"] is None
+        assert kwargs["checked_at"] is not None
+
+    async def test_failure_persists_failed_with_error(self):
+        """A connector failure writes connection_status='failed' + error message."""
+        repo = AsyncMock()
+        source = _make_source()
+        repo.get_by_id = AsyncMock(return_value=source)
+        repo.update_connection_health = AsyncMock()
+        connector_factory = MagicMock()
+
+        boom = ConnectionError("could not connect to host")
+        service = self._build_service(
+            repo, connector_factory, connector_returns=boom
+        )
+        service.get_source_config = AsyncMock(return_value={})
+
+        ok = await service.test_connection(source.id)
+        assert ok is False
+
+        repo.update_connection_health.assert_awaited_once()
+        kwargs = repo.update_connection_health.await_args.kwargs
+        assert kwargs["status"] == "failed"
+        assert "could not connect" in (kwargs["error"] or "")
+
+    async def test_failure_truncates_error_to_500(self):
+        """Long error messages are clipped to 500 chars before persistence."""
+        repo = AsyncMock()
+        source = _make_source()
+        repo.get_by_id = AsyncMock(return_value=source)
+        repo.update_connection_health = AsyncMock()
+        connector_factory = MagicMock()
+
+        boom = ConnectionError("y" * 2000)
+        service = self._build_service(
+            repo, connector_factory, connector_returns=boom
+        )
+        service.get_source_config = AsyncMock(return_value={})
+
+        await service.test_connection(source.id)
+
+        kwargs = repo.update_connection_health.await_args.kwargs
+        assert kwargs["error"] is not None
+        # Exactly 500 'y's survive — never 501.
+        assert len(kwargs["error"]) == 500
+        assert kwargs["error"] == "y" * 500

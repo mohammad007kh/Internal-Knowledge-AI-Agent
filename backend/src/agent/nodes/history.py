@@ -39,6 +39,15 @@ async def load_history(
     session_id = state["session_id"]
     user_id = state["user_id"]
 
+    # Sandbox sentinel: the admin sandbox endpoint runs the pipeline against
+    # a single source without ever creating a chat_sessions row. Querying
+    # the DB with an unparseable UUID would crash the pipeline; returning
+    # the messages already seeded in state lets the caller drive history
+    # via the request body instead. See
+    # :mod:`src.services.chat_stream_service` for the contract.
+    if session_id == "__sandbox__":
+        return {"messages": state.get("messages", [])}
+
     chat_session = await chat_session_repository.get(db_session, UUID(session_id))
     # Cast both sides to str — chat_session.user_id is a UUID object on the
     # ORM (Mapped[uuid.UUID]) while state["user_id"] is a string injected by

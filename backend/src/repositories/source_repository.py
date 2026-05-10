@@ -194,7 +194,11 @@ class SourceRepository(BaseRepository[Source]):
             When provided, restrict to sources owned by that user (regular
             user view).  ``None`` = admin view (all non-deleted sources).
         ``available_only``
-            ``True`` adds ``is_active = TRUE`` (chat picker / approved-only).
+            ``True`` adds ``is_active = TRUE`` (chat picker / approved-only)
+            AND excludes ``connection_status='failed'``. ``degraded`` is
+            still surfaced — the contract is "lenient default": a one-off
+            blip should not silently disappear from the picker, but a
+            sustained outage (auto-demoted to ``failed``) should.
         """
         from sqlalchemy.orm import selectinload  # noqa: PLC0415
 
@@ -206,6 +210,7 @@ class SourceRepository(BaseRepository[Source]):
             base_filters.append(Source.owner_id == owner_id)
         if available_only:
             base_filters.append(Source.is_active.is_(True))
+            base_filters.append(Source.connection_status != "failed")
 
         stmt = (
             select(Source, doc_count, chunk_count)
@@ -287,6 +292,36 @@ class SourceRepository(BaseRepository[Source]):
     # ------------------------------------------------------------------ #
     # Writes
     # ------------------------------------------------------------------ #
+
+    async def update_connection_health(
+        self,
+        source_id: uuid.UUID,
+        *,
+        status: str,
+        error: str | None,
+        checked_at: Any,
+    ) -> None:
+        """Stamp the connection-health columns on a Source row (Slice A).
+
+        The caller owns the transaction — we only emit the UPDATE; the
+        surrounding session's commit is what makes it durable. Used by
+        :meth:`SourceService.test_connection` after every probe so the UI
+        can render "Last tested 4 min ago — succeeded/failed" without
+        keeping client state.
+
+        ``error`` MUST already be sanitized (no connection strings or
+        credentials) and truncated to fit the 500-char column.
+        """
+        stmt = (
+            update(Source)
+            .where(Source.id == source_id)
+            .values(
+                connection_status=status,
+                connection_last_error=error,
+                connection_last_checked_at=checked_at,
+            )
+        )
+        await self._session.execute(stmt)
 
     async def soft_delete(self, source_id: uuid.UUID) -> bool:
         """

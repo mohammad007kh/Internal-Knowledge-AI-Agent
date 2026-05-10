@@ -172,6 +172,11 @@ async def test_falls_through_on_unsafe_sql() -> None:
     with patch(
         "src.agent.nodes.text_to_query._decrypt_source_config",
         return_value={"connection_string": "postgresql+asyncpg://x"},
+    ), patch(
+        # _load_schema_sketch reads SchemaStudy via session.execute; stub it
+        # so this test stays focused on the SQL-safety branch.
+        "src.agent.nodes.text_to_query._load_schema_sketch",
+        new=AsyncMock(return_value=""),
     ):
         result = await text_to_query(
             _state([str(src.id)]),
@@ -201,6 +206,11 @@ async def test_appends_rows_as_chunks_on_safe_sql() -> None:
     ), patch(
         "src.agent.nodes.text_to_query._execute",
         new=AsyncMock(return_value=[fake_row]),
+    ), patch(
+        # _load_schema_sketch reads SchemaStudy via session.execute; stub it
+        # so this test stays focused on the SQL-safety branch.
+        "src.agent.nodes.text_to_query._load_schema_sketch",
+        new=AsyncMock(return_value=""),
     ):
         result = await text_to_query(
             _state([str(src.id)]),

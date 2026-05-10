@@ -135,6 +135,14 @@ export interface SourceListItem {
   next_sync_due_at?: string | null
   embedder_id?: string | null
   owner_id?: string | null
+  // Slice A (R6 / connection health) — surfaced by the backend's connection
+  // probe job. All optional so older payloads that don't include them simply
+  // render the "no probe yet" path. `connection_status` is independent of
+  // ingestion status: a source may be `ready` but `connection_status` may be
+  // `degraded` after recent intermittent failures.
+  connection_status?: 'healthy' | 'degraded' | 'failed' | 'unknown'
+  connection_last_checked_at?: string | null
+  connection_last_error?: string | null
 }
 
 export interface SourceDetail extends SourceListItem {

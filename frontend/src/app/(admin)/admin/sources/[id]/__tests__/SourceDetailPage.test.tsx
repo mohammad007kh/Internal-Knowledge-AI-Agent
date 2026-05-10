@@ -330,10 +330,18 @@ describe('SourceDetailPage — Test-connection button visibility', () => {
     await waitFor(() => expect(screen.getByRole('tab', { name: 'Sync' })).toBeInTheDocument())
     await user.click(screen.getByRole('tab', { name: 'Sync' }))
 
-    const button = await screen.findByRole('button', { name: /test connection/i })
-    expect(button).toBeInTheDocument()
+    // Slice B added a duplicate Test connection button to the page header
+    // for testable types — scope this assertion to the tab-scoped button so
+    // the lookup remains unambiguous.
+    const buttons = await screen.findAllByRole('button', { name: /test connection/i })
+    expect(buttons.length).toBeGreaterThanOrEqual(1)
+    // Tab-scoped button is the one inside the Sync-tab Actions card.
+    const tabButton = buttons.find(
+      (b) => !b.matches('[data-testid="header-test-connection"]')
+    )
+    expect(tabButton).toBeDefined()
 
-    await user.click(button)
+    await user.click(tabButton as HTMLElement)
 
     await waitFor(() => expect(testConnectionMock).toHaveBeenCalledTimes(1))
     expect(testConnectionMock).toHaveBeenCalledWith('src-1')
@@ -354,8 +362,12 @@ describe('SourceDetailPage — Test-connection button visibility', () => {
     await waitFor(() => expect(screen.getByRole('tab', { name: 'Sync' })).toBeInTheDocument())
     await user.click(screen.getByRole('tab', { name: 'Sync' }))
 
-    const button = await screen.findByRole('button', { name: /test connection/i })
-    await user.click(button)
+    const buttons = await screen.findAllByRole('button', { name: /test connection/i })
+    const tabButton = buttons.find(
+      (b) => !b.matches('[data-testid="header-test-connection"]')
+    )
+    expect(tabButton).toBeDefined()
+    await user.click(tabButton as HTMLElement)
 
     const result = await screen.findByTestId('test-connection-result')
     expect(result).toHaveTextContent(/authentication failed/i)
@@ -399,6 +411,11 @@ describe('SourceDetailPage — editable Settings form', () => {
   })
 
   it('blocks submit and shows error when sync_mode=scheduled but sync_schedule is empty', async () => {
+    // Use a web source — DB sources now show retrieval_mode + source_mode as
+    // read-only chips, so the sync_mode trigger isn't accessible by combobox
+    // index across all source types. A web source has only the sync_mode
+    // dropdown, which keeps this test stable.
+    getSourceMock.mockResolvedValue(makeSource({ source_type: 'web_url' }))
     renderPage()
     const user = await openSettings()
 
@@ -406,8 +423,7 @@ describe('SourceDetailPage — editable Settings form', () => {
 
     // Open the Sync mode select and pick "Scheduled". The radix Select uses
     // a combobox role for the trigger.
-    const syncModeTrigger = within(form).getAllByRole('combobox')[2]
-    // (Layout: 0 = retrieval_mode, 1 = source_mode, 2 = sync_mode in DOM order.)
+    const syncModeTrigger = within(form).getByRole('combobox')
     expect(syncModeTrigger).toBeInTheDocument()
     await user.click(syncModeTrigger)
     const scheduledOption = await screen.findByRole('option', { name: 'Scheduled' })
@@ -427,21 +443,25 @@ describe('SourceDetailPage — editable Settings form', () => {
     expect(updateSourceMock).not.toHaveBeenCalled()
   })
 
-  it('Save button is hidden when the form is pristine and appears once dirty', async () => {
+  it('Save button is always rendered, disabled when pristine and enabled once dirty', async () => {
     renderPage()
     const user = await openSettings()
 
-    expect(screen.queryByTestId('settings-save')).toBeNull()
+    // The save bar is always-rendered now (replaced the dirty-conditional
+    // reveal); Save is in the DOM but disabled until a field changes.
+    const saveBefore = await screen.findByTestId('settings-save')
+    expect(saveBefore).toBeDisabled()
+    expect(screen.getByTestId('settings-save-bar')).toHaveAttribute('data-dirty', 'false')
 
     const form = await screen.findByRole('form', { name: /edit source settings/i })
     const nameField = within(form).getByLabelText('Name')
     await user.type(nameField, ' (edited)')
 
-    expect(await screen.findByTestId('settings-save')).toBeInTheDocument()
-    expect(screen.getByTestId('settings-discard')).toBeInTheDocument()
+    await waitFor(() => expect(screen.getByTestId('settings-save')).not.toBeDisabled())
+    expect(screen.getByTestId('settings-save-bar')).toHaveAttribute('data-dirty', 'true')
   })
 
-  it('Discard restores the original values and hides the Save bar', async () => {
+  it('Discard restores the original values and the Save bar returns to pristine', async () => {
     renderPage()
     const user = await openSettings()
 
@@ -455,7 +475,9 @@ describe('SourceDetailPage — editable Settings form', () => {
     await user.click(await screen.findByTestId('settings-discard'))
 
     await waitFor(() => expect(nameField.value).toBe(originalName))
-    expect(screen.queryByTestId('settings-save')).toBeNull()
+    // Save bar is still rendered, just back to pristine.
+    expect(screen.getByTestId('settings-save')).toBeDisabled()
+    expect(screen.getByTestId('settings-save-bar')).toHaveAttribute('data-dirty', 'false')
   })
 
   it('renders the "Naming…" hint when name_status === "pending_ai" but keeps the field editable', async () => {

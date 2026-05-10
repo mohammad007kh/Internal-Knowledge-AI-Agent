@@ -433,6 +433,13 @@ class SourceResponse(BaseModel):
     tables_partial: int | None = None
     last_error_phase: str | None = None
     last_error_message: str | None = None
+    # Connection health (Slice A) — orthogonal to ``is_active``. Lets the
+    # admin UI render "Last tested 4 min ago — succeeded" without keeping
+    # client state, and lets the chat picker hide unreachable sources
+    # while admins still see them in /admin/sources.
+    connection_status: str = "unknown"
+    connection_last_checked_at: datetime | None = None
+    connection_last_error: str | None = None
 
 
 class SourceListItem(BaseModel):
@@ -496,6 +503,10 @@ class SourceListItem(BaseModel):
     tables_partial: int | None = None
     last_error_phase: str | None = None
     last_error_message: str | None = None
+    # Connection health (Slice A) — see :class:`SourceResponse` for context.
+    connection_status: str = "unknown"
+    connection_last_checked_at: datetime | None = None
+    connection_last_error: str | None = None
 
 
 class PaginatedSources(BaseModel):

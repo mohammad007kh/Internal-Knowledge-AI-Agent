@@ -220,7 +220,17 @@ export function CoverageCard({ source, isDbSource, stats }: CoverageCardProps) {
     }
   } else {
     primary = stats?.document_count ?? '—'
-    primaryLabel = primary === 1 ? 'Document indexed' : 'Documents indexed'
+    // Per-type label — "Pages crawled" for web, "Pages indexed" for SaaS
+    // connectors, "Documents indexed" for files. The previous copy lumped
+    // web + connector + file under "Documents indexed" which read wrong on
+    // a 200-page Confluence space.
+    if (source.source_type === 'web_url') {
+      primaryLabel = primary === 1 ? 'Page crawled' : 'Pages crawled'
+    } else if (CONNECTOR_TYPES.has(source.source_type)) {
+      primaryLabel = primary === 1 ? 'Page indexed' : 'Pages indexed'
+    } else {
+      primaryLabel = primary === 1 ? 'Document indexed' : 'Documents indexed'
+    }
     if (stats?.chunk_count) {
       secondary = `${stats.chunk_count.toLocaleString()} chunks`
     }
