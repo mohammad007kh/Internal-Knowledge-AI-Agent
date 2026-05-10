@@ -20,19 +20,24 @@ RUN apt-get update && \
 
 # Create the unprivileged runtime user before copying the application.
 # uid=1000 mirrors the frontend image's `nextjs` user pattern.
-RUN groupadd -r appuser && useradd -r -g appuser -u 1000 appuser
+# Pre-chown /app so subsequent COPY --chown layers land on an owned dir.
+RUN groupadd -r appuser && useradd -r -g appuser -u 1000 appuser \
+ && chown -R appuser:appuser /app
 
 # Install Python dependencies first (layer cache optimisation).
-COPY pyproject.toml .
-RUN pip install --no-cache-dir -e ".[dev]"
+# pip install must run as root so site-packages writes to system paths.
+# `pip install -e` creates `*.egg-info` directories under /app owned by
+# root; chown them back to appuser so importlib.metadata cache rebuilds
+# at runtime don't hit PermissionError under any pkg_resources path.
+COPY --chown=appuser:appuser pyproject.toml .
+RUN pip install --no-cache-dir -e ".[dev]" \
+ && chown -R appuser:appuser /app
 
-# Copy application source.
-COPY . .
+# Copy application source with ownership baked into the layer (no extra
+# chown layer — saves image size and build time vs `RUN chown -R`).
+COPY --chown=appuser:appuser . .
 
-# COPY runs as root by default — flip ownership to the runtime user so
-# alembic / uvicorn can read the source tree without root privileges.
-RUN chown -R appuser:appuser /app
-
+# Drop privileges before running alembic / uvicorn at container start.
 USER appuser
 
 EXPOSE 8000
