@@ -1,6 +1,7 @@
 'use client'
 
 import { zodResolver } from '@hookform/resolvers/zod'
+import { useMutation } from '@tanstack/react-query'
 import {
   AlertCircleIcon,
   CheckCircle2Icon,
@@ -47,7 +48,6 @@ import {
 } from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import {
   type CreateSourcePayload,
   type FileTypeKey,
@@ -55,6 +55,10 @@ import {
   useCreateSource,
 } from '@/hooks/use-create-source'
 import { useUploadFile } from '@/hooks/use-upload-url'
+import {
+  type InspectSourceResponse,
+  inspectSourceApi,
+} from '@/lib/api/sources'
 import { cn } from '@/lib/utils'
 
 // TODO: re-add 'confluence' and 'sharepoint' once backend connectors ship (see docs/architecture-review-2026-04.md)
@@ -1204,18 +1208,117 @@ function DatabaseConnectionFields({
         <code className="mt-1 block break-all font-mono text-xs">{preview}</code>
       </div>
 
-      <TooltipProvider>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <span className="inline-flex">
-              <Button type="button" variant="outline" size="sm" disabled>
-                Test connection
-              </Button>
-            </span>
-          </TooltipTrigger>
-          <TooltipContent>Coming soon</TooltipContent>
-        </Tooltip>
-      </TooltipProvider>
+      <TestConnectionButton form={form} />
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Test connection — calls POST /api/v1/sources/inspect with the form's typed
+// connection dict (no Source row yet). Result is diagnostic only and MUST
+// NOT auto-fill the form's name/description fields.
+// ---------------------------------------------------------------------------
+
+interface TestConnectionButtonProps {
+  form: UseFormReturn<FormValues>
+}
+
+function getTestConnectionErrorMessage(error: unknown): string {
+  if (error instanceof Error && error.message) {
+    return error.message
+  }
+  return 'Could not connect. Check the connection details and try again.'
+}
+
+function TestConnectionButton({ form }: TestConnectionButtonProps) {
+  const host = form.watch('host') ?? ''
+  const port = form.watch('port')
+  const databaseName = form.watch('database_name') ?? ''
+  const username = form.watch('username') ?? ''
+  const password = form.watch('password') ?? ''
+  const dbType = (form.watch('db_type') ?? 'postgresql') as DbType
+  const sslMode = form.watch('ssl_mode')
+
+  const portFilled = port !== undefined && port !== null && String(port).trim().length > 0
+  const requiredFilled =
+    host.trim().length > 0 &&
+    portFilled &&
+    databaseName.trim().length > 0 &&
+    username.trim().length > 0 &&
+    password.trim().length > 0
+
+  const mutation = useMutation<InspectSourceResponse, Error, void>({
+    mutationFn: async () => {
+      const portValue =
+        typeof port === 'number' ? port : Number(port ?? Number.NaN)
+      const connection: Record<string, unknown> = {
+        db_type: dbType,
+        host: host.trim(),
+        port: Number.isFinite(portValue) ? portValue : DB_DEFAULT_PORTS[dbType],
+        database: databaseName.trim(),
+        username: username.trim(),
+        password,
+      }
+      if (dbType !== 'mongodb' && sslMode) {
+        connection.ssl_mode = sslMode
+      }
+      return inspectSourceApi({ source_type: 'database', connection })
+    },
+  })
+
+  const isPending = mutation.isPending
+  const buttonDisabled = !requiredFilled || isPending
+
+  function handleClick() {
+    mutation.mutate()
+  }
+
+  return (
+    <div className="space-y-2">
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        onClick={handleClick}
+        disabled={buttonDisabled}
+        aria-label="Test connection"
+      >
+        {isPending ? (
+          <>
+            <Loader2Icon className="mr-1.5 h-3.5 w-3.5 animate-spin" aria-hidden />
+            Testing…
+          </>
+        ) : (
+          'Test connection'
+        )}
+      </Button>
+
+      {mutation.isSuccess && !isPending && (
+        <div
+          role="status"
+          aria-live="polite"
+          className="flex items-start gap-2 rounded-md border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-xs text-emerald-700 dark:text-emerald-300"
+        >
+          <CheckCircle2Icon className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
+          <span data-testid="test-connection-success">
+            {mutation.data.description.trim().length > 0
+              ? mutation.data.description
+              : 'Connection successful.'}
+          </span>
+        </div>
+      )}
+
+      {mutation.isError && !isPending && (
+        <div
+          role="alert"
+          className="flex items-start gap-2 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive"
+        >
+          <XIcon className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
+          <span data-testid="test-connection-error">
+            {getTestConnectionErrorMessage(mutation.error)}
+          </span>
+        </div>
+      )}
     </div>
   )
 }

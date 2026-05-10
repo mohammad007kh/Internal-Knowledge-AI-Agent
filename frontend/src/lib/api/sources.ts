@@ -186,6 +186,30 @@ export interface TestConnectionResponse {
   message: string
 }
 
+/**
+ * POST /api/v1/sources/inspect — pre-persistence connection test.
+ *
+ * Mirrors the backend `SourceInspectRequest` schema. The `source_type` value
+ * is the canonical backend `SourceType` enum value (e.g. `'database'`,
+ * `'web_url'`, `'file_upload'`) — NOT the granular DB dialect. The DB
+ * dialect (`postgresql` | `mysql` | `mssql` | `mongodb`) is carried inside
+ * the `connection` dict as `db_type`.
+ *
+ * Used by the new-source wizard's "Test connection" button to validate the
+ * typed connection before any Source row exists. The server never echoes the
+ * submitted `connection` back — only a diagnostic description plus a small
+ * schema summary.
+ */
+export interface InspectSourceRequest {
+  source_type: string
+  connection: Record<string, unknown>
+}
+
+export interface InspectSourceResponse {
+  description: string
+  schema_summary: Record<string, unknown>
+}
+
 export interface RefreshDescriptionResponse {
   proposed_description: string
 }
@@ -289,6 +313,21 @@ export async function deleteSourceApi(sourceId: string): Promise<void> {
 export async function testConnectionApi(sourceId: string): Promise<TestConnectionResponse> {
   const { data } = await apiClient.post<TestConnectionResponse>(
     `/api/v1/sources/${sourceId}/test-connection`
+  )
+  return data
+}
+
+/**
+ * Pre-persistence connection test. Used by the source wizard before any
+ * Source row exists — caller passes the typed connection dict directly
+ * rather than a stored source id.
+ */
+export async function inspectSourceApi(
+  body: InspectSourceRequest
+): Promise<InspectSourceResponse> {
+  const { data } = await apiClient.post<InspectSourceResponse>(
+    '/api/v1/sources/inspect',
+    body
   )
   return data
 }

@@ -222,8 +222,15 @@ async def text_to_query(
                 skipped.append(sid)
                 continue
 
-            # Schema sketch — pull from cached description for now.
-            schema_sketch = source.description or ""
+            # Schema sketch — prefer the studying agent's persisted
+            # SchemaDocument over the AI-authored description. The Phase 1
+            # Wave 1 studying agent persists a structured doc into
+            # ``schema_studies.schema_document_json``; that's a much
+            # higher-signal input for SQL generation than the freeform
+            # description (which targets retrieval routing, not query
+            # synthesis). Fall back to ``source.description`` only when
+            # no study has completed yet.
+            schema_sketch = await _load_schema_sketch(db_session, source)
 
             try:
                 raw_sql = await _generate_sql(
@@ -313,3 +320,110 @@ async def text_to_query(
         }
     finally:
         span.end()
+
+
+# ---------------------------------------------------------------------------
+# Schema-sketch loader
+# ---------------------------------------------------------------------------
+
+
+_MAX_TABLES_FOR_SKETCH = 30
+"""Cap how many tables we render into the SQL-generation prompt. Past this
+the LLM stops paying attention; truncation is documented in the prompt."""
+
+
+async def _load_schema_sketch(
+    db: "AsyncSession",  # noqa: F821 — forward ref under TYPE_CHECKING
+    source: Any,
+) -> str:
+    """Render the latest persisted SchemaDocument as a compact text block
+    suitable for the text-to-SQL prompt.
+
+    Falls back to ``source.description`` when no SchemaStudy exists yet
+    (e.g., source created before Wave 1 shipped, or studying agent hasn't
+    finished its first run).
+
+    The shape we emit is deliberately deterministic so prompt tokens stay
+    stable — one line per table with type/PK/columns and a trailing
+    relationships block.
+    """
+    from sqlalchemy import select  # noqa: PLC0415
+
+    from src.models.schema_study import SchemaStudy  # noqa: PLC0415
+    from src.services.db_introspection.schema_doc import SchemaDocument  # noqa: PLC0415
+
+    stmt = (
+        select(SchemaStudy)
+        .where(SchemaStudy.source_id == source.id)
+        .where(SchemaStudy.schema_document_json.is_not(None))
+        .order_by(SchemaStudy.finished_at.desc().nulls_last())
+        .limit(1)
+    )
+    study = (await db.execute(stmt)).scalar_one_or_none()
+    if study is None or study.schema_document_json is None:
+        return source.description or ""
+
+    try:
+        doc = SchemaDocument.model_validate(study.schema_document_json)
+    except Exception:  # noqa: BLE001 — bad JSON shape is recoverable
+        logger.warning(
+            "text_to_query: schema_document_json failed strict validation — "
+            "falling back to source.description",
+            extra={"source_id": str(source.id)},
+            exc_info=True,
+        )
+        return source.description or ""
+
+    return _render_schema_sketch(doc)
+
+
+def _render_schema_sketch(doc: "SchemaDocument") -> str:  # noqa: F821
+    """Format a :class:`SchemaDocument` into a compact text block the LLM
+    can read efficiently.
+
+    Format::
+
+        Dialect: postgresql
+        Tables:
+        - public.orders (table) PK=[id]
+            columns: id:int, customer_id:int, total:float, ...
+            description: Per-customer purchase orders.
+        - public.customers (table) PK=[id]
+            columns: id:int, email:text, ...
+        Relationships:
+        - public.orders.customer_id -> public.customers.id
+
+    Truncates beyond _MAX_TABLES_FOR_SKETCH and notes the truncation
+    inline so the LLM knows it doesn't have the full schema.
+    """
+    lines: list[str] = [f"Dialect: {doc.dialect}", "Tables:"]
+    considered = doc.tables[:_MAX_TABLES_FOR_SKETCH]
+    for table in considered:
+        pk_str = f" PK=[{', '.join(table.primary_key)}]" if table.primary_key else ""
+        lines.append(f"- {table.name} ({table.kind}){pk_str}")
+        if table.columns:
+            cols = ", ".join(
+                f"{c.name}:{c.type}" for c in table.columns[:20]
+            )
+            if len(table.columns) > 20:
+                cols += f", ... (+{len(table.columns) - 20} more)"
+            lines.append(f"    columns: {cols}")
+        if table.description.strip():
+            # Cap per-table description so a single chatty table can't
+            # blow the prompt budget.
+            lines.append(f"    description: {table.description.strip()[:200]}")
+    if len(doc.tables) > _MAX_TABLES_FOR_SKETCH:
+        extra = len(doc.tables) - _MAX_TABLES_FOR_SKETCH
+        lines.append(f"  (truncated — {extra} additional tables not shown)")
+
+    relationships: list[str] = []
+    for table in considered:
+        for rel in table.relationships:
+            from_cols = ".".join([table.name, ",".join(rel.from_columns)])
+            to_cols = ".".join([rel.to_table, ",".join(rel.to_columns)])
+            relationships.append(f"- {from_cols} -> {to_cols}")
+    if relationships:
+        lines.append("Relationships:")
+        lines.extend(relationships)
+
+    return "\n".join(lines)
