@@ -239,7 +239,7 @@ async def update_stage_config(
     await emit_audit(
         audit_repo,
         admin_user_id=admin.id,
-        action="update",
+        action="llm_setting.update",
         resource_type="llm_setting",
         resource_id=row.id,
         request=request,

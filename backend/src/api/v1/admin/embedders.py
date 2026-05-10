@@ -234,7 +234,7 @@ async def create_embedder(
     await emit_audit(
         audit_repo,
         admin_user_id=admin.id,
-        action="create",
+        action="embedder.create",
         resource_type="embedder",
         resource_id=row.id,
         request=request,
@@ -324,7 +324,7 @@ async def patch_embedder(
     await emit_audit(
         audit_repo,
         admin_user_id=admin.id,
-        action="update",
+        action="embedder.update",
         resource_type="embedder",
         resource_id=embedder_id,
         request=request,
@@ -368,7 +368,7 @@ async def delete_embedder(
     await emit_audit(
         audit_repo,
         admin_user_id=admin.id,
-        action="delete",
+        action="embedder.delete",
         resource_type="embedder",
         resource_id=embedder_id,
         request=request,
@@ -394,7 +394,7 @@ async def test_connection_plaintext(
     await emit_audit(
         audit_repo,
         admin_user_id=admin.id,
-        action="test",
+        action="embedder.test",
         resource_type="embedder",
         resource_id=None,
         request=None,
@@ -438,7 +438,7 @@ async def test_connection_record(
     await emit_audit(
         audit_repo,
         admin_user_id=admin.id,
-        action="test",
+        action="embedder.test",
         resource_type="embedder",
         resource_id=embedder_id,
         request=None,

@@ -4,6 +4,7 @@ import {
   Layers,
   LayoutDashboardIcon,
   MessageCircleIcon,
+  ScrollTextIcon,
   ShieldIcon,
   SlidersHorizontalIcon,
   SparklesIcon,
@@ -63,6 +64,7 @@ export const ADMIN_NAV: readonly NavItem[] = [
     ],
   },
   { href: '/admin/policy', label: 'Policy', icon: ShieldIcon },
+  { href: '/admin/audit-log', label: 'Audit log', icon: ScrollTextIcon },
 ] as const
 
 /**
