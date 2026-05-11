@@ -433,6 +433,18 @@ class SourceResponse(BaseModel):
     tables_partial: int | None = None
     last_error_phase: str | None = None
     last_error_message: str | None = None
+    # Owner email (U10) — joined on ``Source.owner_id`` by the detail
+    # endpoint so the Overview footer can render "Created … by alice@" with
+    # no second fetch. ``None`` when the owner row is missing (shouldn't
+    # happen for a live source, but the join is LEFT so we degrade gracefully).
+    owner_email: str | None = None
+    # Studying-agent schema summary (U10) — the one-line natural-language
+    # description the studying agent stores inside the persisted
+    # SchemaDocument JSON (``summary`` key) of the latest *completed*
+    # SchemaStudy. ``None`` when no study has completed or the JSON has no
+    # ``summary``. Surfaced here so the DB Overview hero can render it
+    # without hitting the schema-document endpoint.
+    schema_summary: str | None = None
     # Connection health (Slice A) — orthogonal to ``is_active``. Lets the
     # admin UI render "Last tested 4 min ago — succeeded" without keeping
     # client state, and lets the chat picker hide unreachable sources

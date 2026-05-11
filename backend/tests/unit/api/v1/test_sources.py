@@ -1167,3 +1167,210 @@ class TestCreateSourceEnqueuesStudySource:
 
         delay_spy = app.state.delay_spy
         delay_spy.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# GET /sources/{source_id} — detail enrichment (U10): owner_email + schema_summary
+# ---------------------------------------------------------------------------
+
+
+class TestGetSourceDetailEnrichment:
+    """Unit tests for ``GET /sources/{source_id}`` U10 fields.
+
+    Asserts the detail response surfaces ``owner_email`` (joined on
+    ``Source.owner_id``) and ``schema_summary`` (the latest *completed*
+    SchemaStudy's ``schema_document_json["summary"]``), and that
+    ``schema_summary`` is ``null`` when no completed study exists.
+    """
+
+    @pytest.fixture()
+    def admin_id(self) -> uuid.UUID:
+        return uuid.UUID("00000000-0000-0000-0000-0000000000aa")
+
+    @pytest.fixture()
+    def owner_id(self) -> uuid.UUID:
+        return uuid.UUID("00000000-0000-0000-0000-0000000000bb")
+
+    @pytest.fixture()
+    def source_id(self) -> uuid.UUID:
+        return uuid.UUID("00000000-0000-0000-0000-0000000000d1")
+
+    @pytest.fixture()
+    def owner_email(self) -> str:
+        return "owner@example.com"
+
+    @pytest.fixture()
+    def admin_user(self, admin_id: uuid.UUID):
+        from unittest.mock import MagicMock
+
+        from src.models.user import User, UserRole
+
+        u = MagicMock(spec=User)
+        u.id = admin_id
+        u.email = "admin@example.com"
+        u.role = UserRole.admin
+        u.is_active = True
+        return u
+
+    @pytest.fixture()
+    def source_row(self, source_id: uuid.UUID, owner_id: uuid.UUID):
+        """A Source-shaped namespace — SimpleNamespace raises AttributeError
+        for fields it doesn't define, so Pydantic's ``from_attributes`` falls
+        back to the schema defaults for those (e.g. ``study_state``)."""
+        from datetime import datetime, timezone
+        from types import SimpleNamespace
+
+        from src.models.enums import SourceType
+
+        now = datetime.now(tz=timezone.utc)
+        return SimpleNamespace(
+            id=source_id,
+            owner_id=owner_id,
+            name="Reporting DB",
+            source_type=SourceType.DATABASE,
+            is_active=True,
+            deleted_at=None,
+            created_at=now,
+            updated_at=now,
+            description="Sales reporting warehouse.",
+            source_mode="live",
+            retrieval_mode="text_to_query",
+            sync_mode="manual",
+            sync_schedule=None,
+            last_synced_at=None,
+            next_sync_due_at=None,
+            status="ready",
+            citations_enabled=True,
+            embedder_id=None,
+            name_status="ai_set",
+            description_status="ai_set",
+            auto_name_and_description=True,
+            schema_status="READY",
+            drift_signal_count=0,
+            last_studied_at=now,
+            connection_status="healthy",
+            connection_last_checked_at=now,
+            connection_last_error=None,
+        )
+
+    @pytest.fixture()
+    def db(self):
+        from unittest.mock import AsyncMock, MagicMock
+
+        m = MagicMock()
+        m.commit = AsyncMock()
+        m.execute = AsyncMock()
+        return m
+
+    @pytest.fixture()
+    def app(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        admin_user,
+        db,
+        source_row,
+        source_id,
+        owner_email,
+    ):
+        from unittest.mock import AsyncMock, MagicMock
+
+        from fastapi import FastAPI
+
+        from src.api.middleware.error_handler import register_exception_handlers
+        from src.api.v1.sources import _get_source_service, router
+        from src.core.database import get_db
+        from src.core.deps import get_current_user, require_admin
+        from src.repositories.source_repository import SourceRepository
+
+        service_stub = AsyncMock()
+        service_stub.get_source = AsyncMock(return_value=source_row)
+
+        async def _owner_email(self, _src_id):  # noqa: ANN001
+            return owner_email
+
+        # Default: a completed study with a summary in its persisted JSON.
+        study_obj = MagicMock()
+        study_obj.schema_document_json = {
+            "summary": "Star-schema sales warehouse with 12 fact/dim tables.",
+        }
+
+        async def _latest_completed(self, _src_id):  # noqa: ANN001
+            return study_obj
+
+        async def _latest_study(_db, _src_id):  # noqa: ANN001
+            # The detail endpoint's own _load_latest_schema_study — return
+            # None so the study_state projection branch is a no-op for this
+            # test (we exercise schema_summary via get_latest_completed_study).
+            return None
+
+        monkeypatch.setattr(
+            SourceRepository, "get_owner_email", _owner_email, raising=True
+        )
+        monkeypatch.setattr(
+            SourceRepository,
+            "get_latest_completed_study",
+            _latest_completed,
+            raising=True,
+        )
+        monkeypatch.setattr(
+            "src.api.v1.sources._load_latest_schema_study",
+            _latest_study,
+            raising=True,
+        )
+
+        app = FastAPI()
+        register_exception_handlers(app)
+        app.include_router(router, prefix="/sources")
+        app.dependency_overrides[get_current_user] = lambda: admin_user
+        app.dependency_overrides[require_admin] = lambda: admin_user
+        app.dependency_overrides[get_db] = lambda: db
+        app.dependency_overrides[_get_source_service] = lambda: service_stub
+        app.state.study_obj = study_obj
+        return app
+
+    @pytest.fixture()
+    def client(self, app):
+        from fastapi.testclient import TestClient
+
+        with TestClient(app, raise_server_exceptions=False) as tc:
+            yield tc
+
+    def test_detail_includes_owner_email(self, client, source_id, owner_email):
+        resp = client.get(f"/sources/{source_id}")
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["owner_email"] == owner_email
+
+    def test_detail_includes_schema_summary_from_completed_study(
+        self, client, source_id
+    ):
+        resp = client.get(f"/sources/{source_id}")
+        assert resp.status_code == 200, resp.text
+        assert (
+            resp.json()["schema_summary"]
+            == "Star-schema sales warehouse with 12 fact/dim tables."
+        )
+
+    def test_schema_summary_none_when_no_completed_study(
+        self, app, client, source_id, monkeypatch
+    ):
+        from src.repositories.source_repository import SourceRepository
+
+        async def _none(self, _src_id):  # noqa: ANN001
+            return None
+
+        monkeypatch.setattr(
+            SourceRepository, "get_latest_completed_study", _none, raising=True
+        )
+
+        resp = client.get(f"/sources/{source_id}")
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["schema_summary"] is None
+
+    def test_schema_summary_none_when_json_missing_summary_key(
+        self, app, client, source_id
+    ):
+        # The JSON exists but has no "summary" key → schema_summary stays null.
+        app.state.study_obj.schema_document_json = {"tables": []}
+        resp = client.get(f"/sources/{source_id}")
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["schema_summary"] is None

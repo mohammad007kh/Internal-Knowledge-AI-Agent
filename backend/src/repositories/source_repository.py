@@ -532,6 +532,26 @@ class SourceRepository(BaseRepository[Source]):
         result = await self._session.execute(stmt)
         return result.scalar_one_or_none()
 
+    async def get_owner_email(self, source_id: uuid.UUID) -> str | None:
+        """Return the email of the user who owns *source_id*, or None.
+
+        Single targeted LEFT JOIN ``users`` ON ``sources.owner_id`` — the
+        detail endpoint surfaces this so the Overview footer can render
+        "Created … by alice@" without an extra round-trip. ``None`` when no
+        Source row matches or its owner row is missing.
+        """
+        from src.models.user import User  # noqa: PLC0415
+
+        stmt = (
+            select(User.email)
+            .select_from(Source)
+            .join(User, User.id == Source.owner_id, isouter=True)
+            .where(Source.id == source_id)
+            .limit(1)
+        )
+        result = await self._session.execute(stmt)
+        return result.scalar_one_or_none()
+
     async def list_by_ids(self, source_ids: list[uuid.UUID]) -> list[Source]:
         """Bulk fetch by list of PKs; returns only non-deleted, approved sources.
 

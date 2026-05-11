@@ -584,6 +584,14 @@ async def get_source(
 
     response = SourceResponse.model_validate(source)
 
+    from src.repositories.source_repository import SourceRepository  # noqa: PLC0415
+
+    repo = SourceRepository(db)
+
+    # Owner email — joined on Source.owner_id so the Overview footer can
+    # render "Created … by alice@" without a second fetch (U10).
+    response.owner_email = await repo.get_owner_email(source_id)
+
     # Project the latest SchemaStudy for DB sources.
     if str(source.source_type) == "database" or getattr(
         source.source_type, "value", None
@@ -600,6 +608,18 @@ async def get_source(
                 tables = doc_json.get("tables")
                 if isinstance(tables, list):
                     response.tables_documented = len(tables)
+
+        # Studying-agent's one-line schema summary — pulled from the latest
+        # *completed* study's persisted SchemaDocument JSON (``summary``
+        # key). None when no study has completed, the JSON is None, or there
+        # is no ``summary`` key (U10).
+        completed_study = await repo.get_latest_completed_study(source_id)
+        if completed_study is not None:
+            completed_json = getattr(completed_study, "schema_document_json", None)
+            if isinstance(completed_json, dict):
+                summary = completed_json.get("summary")
+                if isinstance(summary, str) and summary.strip():
+                    response.schema_summary = summary
 
     return response
 

@@ -50,6 +50,8 @@ vi.mock('@/lib/api/sources', async (importOriginal) => {
     getSchemaDocumentApi: () =>
       Promise.reject(new actual.SchemaDocumentNotFoundError()),
     emitSamplesRevealedApi: vi.fn(),
+    // U10 — the enriched DB Overview calls useSourcePermissions → this API.
+    listSourcePermissionsApi: vi.fn(async () => [] as string[]),
   }
 })
 
@@ -89,6 +91,8 @@ function makeSource(overrides: Partial<SourceDetail> = {}): SourceDetail {
     status: 'ready',
     citations_enabled: true,
     updated_at: '2026-01-01T00:00:00Z',
+    owner_email: null,
+    schema_summary: null,
     ...overrides,
   } satisfies SourceDetail
 }

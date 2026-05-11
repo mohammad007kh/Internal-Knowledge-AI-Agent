@@ -111,6 +111,10 @@ def _make_db_source() -> MagicMock:
     src.tables_partial = None
     src.last_error_phase = None
     src.last_error_message = None
+    # U10 — detail-endpoint enrichment fields (must be concrete, not MagicMock,
+    # or SourceResponse.model_validate fails strict typing on the response).
+    src.owner_email = "admin@example.com"
+    src.schema_summary = None
     return src
 
 
@@ -171,6 +175,16 @@ def app(monkeypatch: pytest.MonkeyPatch, db_session):
     audit_insert = AsyncMock(return_value=None)
     monkeypatch.setattr(
         AdminAuditLogRepository, "insert", audit_insert, raising=True
+    )
+
+    # 3b) study_source.delay — the credentials endpoint re-studies the
+    #     schema after a rotation (slice E1). Stub the celery .delay so it
+    #     never reaches a broker; tests don't assert on it here (the enqueue
+    #     contract is covered in test_sources.py's TestCreateSourceEnqueues…).
+    from src.tasks import study_source as _study_module  # noqa: PLC0415
+
+    monkeypatch.setattr(
+        _study_module.study_source, "delay", MagicMock(), raising=True
     )
 
     # 4) SourceService stub. ``get_source`` returns the DB-source MagicMock;

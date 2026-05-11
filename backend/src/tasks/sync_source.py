@@ -170,18 +170,18 @@ async def _run_sync_pipeline(  # noqa: C901
 
     # ── 3. Fetch raw documents ───────────────────────────────────────────────
     # Database sources have no documents to ingest — the agent queries them
-    # at retrieval time via text_to_query. Phase 1 Wave 2 will wire a
-    # dedicated studying-agent task; until then "Sync now" / "Re-study
-    # schema" on a DB source is a no-op success so it doesn't crash with
-    # ``DatabaseConnector does not implement fetch_documents()`` and trip
-    # the auto-demote path. The Sync tab still records the run for the
-    # admin's history but with zero counts.
+    # at retrieval time via text_to_query. So "Sync now" / "Re-study schema"
+    # on a DB source doesn't fetch+chunk; instead it (a) records a zero-count
+    # SyncJob for the admin's history and (b) enqueues the studying-agent
+    # task (slice E1) so the schema document is (re)built. This is what
+    # makes the "Re-study schema" affordance on the Overview actually do
+    # something — the studying task is idempotent (SchemaStudyRepository
+    # .is_running) so a duplicate enqueue is harmless.
     if str(source.source_type) == "database" or getattr(
         source.source_type, "value", None
     ) == "database":
         logger.info(
-            "sync_source: skipping fetch for DB source %s — "
-            "documents are queried live at retrieval time",
+            "sync_source: DB source %s — skipping fetch, enqueueing studying agent",
             source_id,
         )
         await job_svc.mark_success(
@@ -189,11 +189,35 @@ async def _run_sync_pipeline(  # noqa: C901
             documents_synced=0,
             chunks_created=0,
         )
+        study_enqueued = False
+        try:
+            from src.tasks.study_source import (  # noqa: PLC0415
+                study_source as _study,
+            )
+
+            _study.delay(source_id)
+            study_enqueued = True
+        except ImportError:
+            # A module-level import failure is a broken deployment, not a
+            # transient broker outage — surface it.
+            logger.error(
+                "study_source module failed to import — deployment broken",
+                exc_info=True,
+            )
+            raise
+        except Exception:  # noqa: BLE001
+            logger.warning(
+                "study_source enqueue failed for source_id=%s (broker?) — "
+                "sync recorded, schema NOT re-studied",
+                source_id,
+                exc_info=True,
+            )
         result_db: dict[str, Any] = {
             "source_id": source_id,
             "documents_synced": 0,
             "chunks_created": 0,
             "skipped_reason": "db_source_uses_live_retrieval",
+            "study_enqueued": study_enqueued,
         }
         trace.update(output={"status": "success", **result_db})
         langfuse.flush()

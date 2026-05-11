@@ -18,9 +18,12 @@
  *      page count for connectors.
  */
 
+import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import type { SourceDetail } from '@/lib/api/sources'
+import { Skeleton } from '@/components/ui/skeleton'
+import { useSourcePermissions } from '@/features/source-permissions/hooks/useSourcePermissions'
+import type { SchemaStatus, SourceDetail } from '@/lib/api/sources'
 import { cn } from '@/lib/utils'
 import {
   AlertTriangleIcon,
@@ -28,9 +31,11 @@ import {
   DatabaseIcon,
   FileTextIcon,
   GlobeIcon,
+  ListTreeIcon,
   LockIcon,
   PlugIcon,
 } from 'lucide-react'
+import { formatRelative } from './SyncStatusPill'
 
 const DB_TYPES: ReadonlySet<string> = new Set([
   // 'database' is what the backend StrEnum actually emits; the dialect
@@ -297,7 +302,10 @@ interface SourceTypeOverviewProps {
 
 export function SourceTypeOverview({ source, stats, documents }: SourceTypeOverviewProps) {
   if (DB_TYPES.has(source.source_type)) {
-    return <DatabaseTypeOverview source={source} />
+    // The page renders <DatabaseOverview> directly for DB sources (with the
+    // tab-jump callbacks wired). This branch is the no-callbacks fallback so
+    // any legacy caller of <SourceTypeOverview> still gets a sane DB view.
+    return <DatabaseOverview source={source} />
   }
   if (FILE_TYPES.has(source.source_type)) {
     return <FileTypeOverview source={source} stats={stats} documents={documents} />
@@ -311,53 +319,441 @@ export function SourceTypeOverview({ source, stats, documents }: SourceTypeOverv
   return null
 }
 
-function DatabaseTypeOverview({ source }: { source: SourceDetail }) {
+// ---------------------------------------------------------------------------
+// Database source — enriched Overview (U10)
+//
+// Replaces the legacy "Connection & schema" card. Layout:
+//   1. <StatusCard> (the page already renders OverviewCallouts above it).
+//   2. Hero card — type icon + mode badges + AI description prose + schema
+//      summary line.
+//   3. Stat grid — Connection / Schema / Access (+ Retrieval) cells.
+//   4. "What the agent sees" teaser — read-only blurb + schema-status branch.
+//   5. Footer line — Created … by owner · Updated …
+//
+// All tab navigation flows through the optional `onViewSchema` /
+// `onManageAccess` callbacks; `onRestudySchema` re-uses the page's sync
+// mutation (re-running the pipeline for a DB source triggers the studying
+// agent). When a callback is absent the corresponding link/button is hidden
+// rather than rendered as a no-op.
+// ---------------------------------------------------------------------------
+
+export interface DatabaseOverviewProps {
+  source: SourceDetail
+  /** Passed straight through to the first stat-grid cell (<StatusCard>). */
+  isDbLiveSource?: boolean
+  onViewSchema?: () => void
+  onManageAccess?: () => void
+  onRestudySchema?: () => void
+}
+
+const SCHEMA_STATUS_LABELS: Record<SchemaStatus, string> = {
+  READY: 'Documented',
+  STUDYING: 'Studying…',
+  STALE: 'May be stale',
+  FAILED: 'Study failed',
+  QUEUED: 'Queued',
+}
+
+function schemaStatusLabel(status: SchemaStatus | null | undefined): string {
+  if (!status) return 'Not studied yet'
+  return SCHEMA_STATUS_LABELS[status] ?? 'Not studied yet'
+}
+
+export function DatabaseOverview({
+  source,
+  isDbLiveSource = false,
+  onViewSchema,
+  onManageAccess,
+  onRestudySchema,
+}: DatabaseOverviewProps) {
   return (
-    <Card>
+    <div className="space-y-4" data-testid="db-overview">
+      <DbHeroCard source={source} />
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        <StatusCard source={source} isDbLiveSource={isDbLiveSource} />
+        <ConnectionStatCard source={source} />
+        <SchemaStatCard source={source} onViewSchema={onViewSchema} />
+        <AccessStatCard sourceId={source.id} onManageAccess={onManageAccess} />
+        <RetrievalStatCard />
+      </div>
+      <AgentTeaserCard
+        source={source}
+        onViewSchema={onViewSchema}
+        onRestudySchema={onRestudySchema}
+      />
+      <MetaFooter source={source} />
+    </div>
+  )
+}
+
+// --- Hero card -------------------------------------------------------------
+
+function DbHeroCard({ source }: { source: SourceDetail }) {
+  const isLive = source.source_mode === 'live'
+  const isTextToQuery = source.retrieval_mode === 'text_to_query'
+  const description = source.description?.trim() ?? ''
+  const pendingDescription = source.description_status === 'pending_ai'
+
+  return (
+    <Card data-testid="overview-hero">
+      <CardHeader className="pb-2">
+        <CardTitle className="flex flex-wrap items-center gap-2 text-sm font-medium">
+          <DatabaseIcon className="h-4 w-4" aria-hidden />
+          <span>Database source</span>
+          <Badge variant="secondary" data-testid="overview-hero-source-mode">
+            {isLive ? 'Live' : 'Snapshot'}
+          </Badge>
+          {isTextToQuery ? (
+            <Badge variant="secondary" data-testid="overview-hero-retrieval-mode">
+              Answers via SQL
+            </Badge>
+          ) : null}
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-2 text-sm">
+        {pendingDescription ? (
+          <div
+            className="space-y-2"
+            data-testid="overview-description-pending"
+            aria-label="Generating description"
+          >
+            <p className="text-xs italic text-muted-foreground">Generating description…</p>
+            <Skeleton className="h-3 w-full animate-pulse" />
+            <Skeleton className="h-3 w-5/6 animate-pulse" />
+            <Skeleton className="h-3 w-2/3 animate-pulse" />
+          </div>
+        ) : description.length > 0 ? (
+          <div className="space-y-1" data-testid="overview-description">
+            <p className="whitespace-pre-line break-words text-sm text-foreground">{description}</p>
+            <DescriptionProvenanceSuffix source={source} />
+          </div>
+        ) : (
+          <p className="text-xs text-muted-foreground" data-testid="overview-description-empty">
+            No description yet — the AI writes one after the schema study completes, or write your
+            own in Settings →
+          </p>
+        )}
+        {source.schema_summary && source.schema_summary.trim().length > 0 ? (
+          <p
+            className="flex items-start gap-1.5 text-xs italic text-muted-foreground"
+            data-testid="overview-schema-summary"
+          >
+            <ListTreeIcon className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
+            <span>Schema: {source.schema_summary}</span>
+          </p>
+        ) : null}
+      </CardContent>
+    </Card>
+  )
+}
+
+function DescriptionProvenanceSuffix({ source }: { source: SourceDetail }) {
+  if (source.description_status === 'ai_set') {
+    return (
+      <p className="text-xs text-muted-foreground/80">
+        AI-written · {formatRelative(source.updated_at)} — view provenance in Settings →
+      </p>
+    )
+  }
+  // user_set (or undefined on older payloads) → "Edited by you".
+  return <p className="text-xs text-muted-foreground/80">Edited by you</p>
+}
+
+// --- Stat grid cells -------------------------------------------------------
+
+interface StatShellProps {
+  title: string
+  testId: string
+  children: React.ReactNode
+}
+
+function StatShell({ title, testId, children }: StatShellProps) {
+  return (
+    <Card data-testid={testId}>
+      <CardHeader className="pb-2">
+        <CardTitle className="text-sm font-medium text-muted-foreground">{title}</CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-1.5">{children}</CardContent>
+    </Card>
+  )
+}
+
+function ConnectionStatCard({ source }: { source: SourceDetail }) {
+  const status = source.connection_status ?? 'unknown'
+  const variant =
+    status === 'healthy' ? 'default' : status === 'failed' ? 'destructive' : 'secondary'
+  const checkedAt = source.connection_last_checked_at
+  const succeeded = !source.connection_last_error
+  let subline: string
+  if (!checkedAt) {
+    subline = 'no check recorded yet'
+  } else if (succeeded) {
+    subline = `checked ${formatRelative(checkedAt)} — succeeded`
+  } else {
+    subline = `checked ${formatRelative(checkedAt)} — failed: ${source.connection_last_error}`
+  }
+  return (
+    <StatShell title="Connection" testId="overview-connection-stat">
+      <Badge variant={variant}>{status}</Badge>
+      <p
+        className={cn(
+          'text-xs',
+          checkedAt && !succeeded ? 'text-destructive' : 'text-muted-foreground'
+        )}
+      >
+        {subline}
+      </p>
+    </StatShell>
+  )
+}
+
+function SchemaStatCard({
+  source,
+  onViewSchema,
+}: {
+  source: SourceDetail
+  onViewSchema?: () => void
+}) {
+  const status = source.schema_status
+  const label = schemaStatusLabel(status)
+  const studying = status === 'STUDYING'
+  const tablesLine =
+    source.tables_documented !== null && source.tables_documented !== undefined
+      ? `${source.tables_documented} table${source.tables_documented === 1 ? '' : 's'}${
+          source.tables_partial ? ` · ${source.tables_partial} partial` : ''
+        }`
+      : null
+  const studiedAgo = source.last_studied_at ? `studied ${formatRelative(source.last_studied_at)}` : null
+  return (
+    <StatShell title="Schema" testId="overview-schema-stat">
+      <div className="flex items-center gap-2">
+        {studying ? (
+          <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-blue-500" aria-hidden />
+        ) : null}
+        <p className="font-medium">{label}</p>
+      </div>
+      {tablesLine ? (
+        <p className="text-xs text-muted-foreground">{tablesLine}</p>
+      ) : studiedAgo ? (
+        <p className="text-xs text-muted-foreground">{studiedAgo}</p>
+      ) : (source.drift_signal_count ?? 0) > 0 ? (
+        <p className="text-xs text-muted-foreground">
+          {source.drift_signal_count} drift signal{source.drift_signal_count === 1 ? '' : 's'}
+        </p>
+      ) : null}
+      {onViewSchema ? (
+        <Button
+          type="button"
+          variant="link"
+          size="sm"
+          onClick={onViewSchema}
+          className="h-auto p-0 text-xs"
+          data-testid="overview-schema-view-link"
+        >
+          View schema →
+        </Button>
+      ) : null}
+    </StatShell>
+  )
+}
+
+function AccessStatCard({
+  sourceId,
+  onManageAccess,
+}: {
+  sourceId: string
+  onManageAccess?: () => void
+}) {
+  const { data: userIds, isLoading, isError } = useSourcePermissions(sourceId)
+  const count = userIds?.length ?? 0
+  return (
+    <StatShell title="Access" testId="overview-access-stat">
+      {isLoading ? (
+        <Skeleton className="h-5 w-24" />
+      ) : isError ? (
+        <p className="text-xs text-muted-foreground">Couldn&apos;t load access</p>
+      ) : count === 0 ? (
+        <p className="text-sm font-medium text-destructive">No users granted — queryable by no one</p>
+      ) : (
+        <p className="text-sm font-medium">
+          {count} user{count === 1 ? '' : 's'} granted
+        </p>
+      )}
+      {onManageAccess ? (
+        <Button
+          type="button"
+          variant="link"
+          size="sm"
+          onClick={onManageAccess}
+          className="h-auto p-0 text-xs"
+          data-testid="overview-access-manage-link"
+        >
+          Manage →
+        </Button>
+      ) : null}
+    </StatShell>
+  )
+}
+
+function RetrievalStatCard() {
+  return (
+    <StatShell title="Retrieval" testId="overview-retrieval-stat">
+      <p className="text-xs text-muted-foreground">
+        Live retrieval — rows queried at answer time, not indexed (no documents)
+      </p>
+    </StatShell>
+  )
+}
+
+// --- "What the agent sees" teaser -----------------------------------------
+
+function AgentTeaserCard({
+  source,
+  onViewSchema,
+  onRestudySchema,
+}: {
+  source: SourceDetail
+  onViewSchema?: () => void
+  onRestudySchema?: () => void
+}) {
+  const status = source.schema_status
+  return (
+    <Card data-testid="overview-agent-teaser">
       <CardHeader className="pb-2">
         <CardTitle className="flex items-center gap-2 text-sm font-medium">
-          <DatabaseIcon className="h-4 w-4" aria-hidden />
-          Connection &amp; schema
+          <ListTreeIcon className="h-4 w-4" aria-hidden />
+          What the agent sees
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-3 text-sm">
-        <div className="rounded-md border bg-muted/30 p-3 text-xs">
-          <div className="flex items-center gap-2 text-emerald-700 dark:text-emerald-300">
-            <LockIcon className="h-3.5 w-3.5" aria-hidden />
-            <span className="font-medium">Read-only safety enforced</span>
-          </div>
-          <p className="mt-1 text-muted-foreground">
-            All queries from the agent run with{' '}
-            <code className="rounded bg-background px-1">default_transaction_read_only=on</code> and
-            a statement timeout. The agent cannot mutate this database.
+        <div className="flex items-start gap-2 rounded-md border bg-muted/30 p-3 text-xs">
+          <LockIcon className="mt-0.5 h-3.5 w-3.5 shrink-0 text-emerald-700 dark:text-emerald-300" aria-hidden />
+          <p className="text-muted-foreground">
+            <span className="font-medium text-emerald-700 dark:text-emerald-300">
+              Read-only enforced
+            </span>{' '}
+            — the agent can&apos;t mutate this database. Queries run with a forced read-only
+            transaction and a statement timeout.
           </p>
         </div>
-        {source.study_state ? (
-          <div className="space-y-1">
-            <p className="text-xs uppercase tracking-wide text-muted-foreground">Studying agent</p>
-            <p>
-              State:{' '}
-              <code className="rounded bg-muted px-1.5 py-0.5 text-xs">{source.study_state}</code>
-            </p>
-            {source.tables_documented !== null && source.tables_documented !== undefined ? (
-              <p className="text-xs text-muted-foreground">
-                {source.tables_documented} tables documented
-                {source.tables_partial ? ` · ${source.tables_partial} partial` : null}
-              </p>
-            ) : null}
-            {source.last_error_phase ? (
-              <p className="text-xs text-destructive">
-                Last error phase: {source.last_error_phase}
-              </p>
-            ) : null}
-          </div>
-        ) : (
-          <p className="text-xs text-muted-foreground">
-            Schema not yet studied. Click <strong>Re-study schema</strong> in the Sync tab to start.
-          </p>
-        )}
+        <AgentTeaserBody
+          status={status}
+          tablesDocumented={source.tables_documented}
+          lastErrorPhase={source.last_error_phase}
+          lastErrorMessage={source.last_error_message}
+          onViewSchema={onViewSchema}
+          onRestudySchema={onRestudySchema}
+        />
       </CardContent>
     </Card>
+  )
+}
+
+function RestudyButton({ onRestudySchema }: { onRestudySchema?: () => void }) {
+  if (!onRestudySchema) return null
+  return (
+    <Button
+      type="button"
+      variant="outline"
+      size="sm"
+      onClick={onRestudySchema}
+      data-testid="overview-restudy-button"
+    >
+      Re-study schema
+    </Button>
+  )
+}
+
+interface AgentTeaserBodyProps {
+  status: SchemaStatus | null | undefined
+  tablesDocumented: number | null | undefined
+  lastErrorPhase: string | null | undefined
+  lastErrorMessage: string | null | undefined
+  onViewSchema?: () => void
+  onRestudySchema?: () => void
+}
+
+function AgentTeaserBody({
+  status,
+  tablesDocumented,
+  lastErrorPhase,
+  lastErrorMessage,
+  onViewSchema,
+  onRestudySchema,
+}: AgentTeaserBodyProps) {
+  if (status === 'READY') {
+    const n =
+      tablesDocumented !== null && tablesDocumented !== undefined ? tablesDocumented : 'several'
+    return (
+      <div className="space-y-2">
+        <p className="text-muted-foreground">
+          The agent works from a documented sketch of {n}{' '}
+          {tablesDocumented === 1 ? 'table' : 'tables'}.
+        </p>
+        {onViewSchema ? (
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={onViewSchema}
+            data-testid="overview-teaser-open-schema"
+          >
+            Open Schema tab →
+          </Button>
+        ) : null}
+      </div>
+    )
+  }
+  if (status === 'FAILED') {
+    const phaseClause = lastErrorPhase ? ` at phase ${lastErrorPhase}` : ''
+    const errorClause = lastErrorMessage ? `: ${lastErrorMessage}` : ''
+    return (
+      <div className="space-y-2">
+        <p className="text-muted-foreground">
+          Schema study failed{phaseClause}
+          {errorClause}. Fix the connection in Settings, then
+        </p>
+        <RestudyButton onRestudySchema={onRestudySchema} />
+      </div>
+    )
+  }
+  if (status === 'STALE') {
+    return (
+      <div className="space-y-2">
+        <p className="text-muted-foreground">
+          Drift detected — re-study to refresh the agent&apos;s view.
+        </p>
+        <RestudyButton onRestudySchema={onRestudySchema} />
+      </div>
+    )
+  }
+  // null / QUEUED / STUDYING
+  return (
+    <div className="space-y-2">
+      <p className="text-muted-foreground">
+        Schema not studied yet — it runs automatically after the source is created or its
+        credentials change. To run it now:
+      </p>
+      <RestudyButton onRestudySchema={onRestudySchema} />
+    </div>
+  )
+}
+
+// --- Footer line -----------------------------------------------------------
+
+function MetaFooter({ source }: { source: SourceDetail }) {
+  let createdLabel = '—'
+  try {
+    createdLabel = new Date(source.created_at).toLocaleDateString()
+  } catch {
+    createdLabel = source.created_at
+  }
+  const byClause = source.owner_email ? ` by ${source.owner_email}` : ''
+  return (
+    <p className="text-xs text-muted-foreground" data-testid="overview-meta-footer">
+      Created {createdLabel}
+      {byClause} · Updated {formatRelative(source.updated_at)}
+    </p>
   )
 }
 

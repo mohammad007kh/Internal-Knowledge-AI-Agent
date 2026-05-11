@@ -162,6 +162,13 @@ export interface SourceDetail extends SourceListItem {
   status: SourceStatus
   citations_enabled: boolean
   updated_at: string
+  // U10 — enriched on the detail endpoint only (the list endpoint omits
+  // both to avoid an N+1). `owner_email` is joined on `Source.owner_id`;
+  // `schema_summary` is the studying agent's one-line schema description
+  // from the latest *completed* SchemaStudy's persisted document JSON.
+  // Both `null` when unavailable (no owner row / no completed study).
+  owner_email: string | null
+  schema_summary: string | null
 }
 
 export interface PaginatedSources {

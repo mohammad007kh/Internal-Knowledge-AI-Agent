@@ -48,6 +48,7 @@ import { EditCredentialsDialog } from '@/app/(admin)/admin/sources/[id]/_compone
 import { SchemaViewer } from '@/app/(admin)/admin/sources/[id]/_components/SchemaViewer'
 import {
   CoverageCard,
+  DatabaseOverview,
   FreshnessCard,
   OverviewCallouts,
   SourceTypeOverview,
@@ -481,7 +482,7 @@ export default function SourceDetailPage() {
         <TabsList className="w-full justify-start overflow-x-auto">
           <TabsTrigger value="overview">Overview</TabsTrigger>
           <TabsTrigger value="test">Test</TabsTrigger>
-          <TabsTrigger value="documents">
+          <TabsTrigger value="schema">
             {dataTabLabelFor(source.source_type)}
             {documentsData && sourceKindOf(source.source_type) !== 'database' && (
               <span className="ml-1.5 rounded-full bg-muted px-1.5 py-0.5 text-xs tabular-nums">
@@ -519,20 +520,41 @@ export default function SourceDetailPage() {
             }
           />
 
-          {/* HEALTH ROW — three source-type-aware status cards replace the
-              old generic Documents/Chunks/Last-synced trio. Each card
-              exposes ONE thing the admin walks in to check. */}
-          <div className="grid gap-4 sm:grid-cols-3">
-            <StatusCard source={source} isDbLiveSource={isDbLiveSource} />
-            <CoverageCard source={source} isDbSource={isDbSource} stats={stats} />
-            <FreshnessCard source={source} isDbSource={isDbSource} />
-          </div>
+          {isDbSource ? (
+            /* DB sources get the enriched Overview (U10): hero + stat grid
+               (Status / Connection / Schema / Access / Retrieval) + "what
+               the agent sees" teaser + meta footer. The stat grid embeds
+               <StatusCard>; CoverageCard/FreshnessCard are folded in. */
+            <DatabaseOverview
+              source={source}
+              isDbLiveSource={isDbLiveSource}
+              onViewSchema={() => setActiveTab('schema')}
+              onManageAccess={() => setActiveTab('access')}
+              onRestudySchema={() =>
+                syncMutation.mutate(id, {
+                  onSuccess: (job) => {
+                    trackSessionJob(job)
+                    toast.success('Re-study started')
+                  },
+                  onError: (err) => toast.error(getErrorMessage(err)),
+                })
+              }
+            />
+          ) : (
+            <>
+              {/* HEALTH ROW — three source-type-aware status cards replace
+                  the old generic Documents/Chunks/Last-synced trio. */}
+              <div className="grid gap-4 sm:grid-cols-3">
+                <StatusCard source={source} isDbLiveSource={isDbLiveSource} />
+                <CoverageCard source={source} isDbSource={isDbSource} stats={stats} />
+                <FreshnessCard source={source} isDbSource={isDbSource} />
+              </div>
 
-          {/* TYPE-SPECIFIC OVERVIEW BLOCK — the big "what is this source"
-              card adapts to the source type so a Postgres connection
-              shows host/db/schema-coverage and a 12-PDF source shows
-              file count + size breakdown. */}
-          <SourceTypeOverview source={source} stats={stats} documents={documents} />
+              {/* TYPE-SPECIFIC OVERVIEW BLOCK — the big "what is this source"
+                  card adapts to the source type (files / web / connectors). */}
+              <SourceTypeOverview source={source} stats={stats} documents={documents} />
+            </>
+          )}
 
           {/* AI Description card removed — see AINamingCard on Settings tab.
               The new flow proposes name/description into the form and lets
@@ -545,7 +567,7 @@ export default function SourceDetailPage() {
         </TabsContent>
 
         {/* DATA — relabeled per source type (Files / Pages / Schema) */}
-        <TabsContent value="documents" className="mt-4">
+        <TabsContent value="schema" className="mt-4">
           <DataTabBody
             source={source}
             documents={documents}

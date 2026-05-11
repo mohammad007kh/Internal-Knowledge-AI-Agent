@@ -62,6 +62,8 @@ vi.mock('@/lib/api/sources', async (importOriginal) => {
     deleteSourceApi: (id: string) => deleteSourceMock(id),
     refreshDescriptionApi: vi.fn(),
     autoNameApi: vi.fn(),
+    // The enriched DB Overview (U10) calls useSourcePermissions → this API.
+    listSourcePermissionsApi: vi.fn(async () => [] as string[]),
   }
 })
 
@@ -106,6 +108,8 @@ function makeSource(overrides: Partial<SourceDetail> = {}): SourceDetail {
     status: 'ready',
     citations_enabled: true,
     updated_at: '2026-01-01T00:00:00Z',
+    owner_email: null,
+    schema_summary: null,
     ...overrides,
   } satisfies SourceDetail
 }

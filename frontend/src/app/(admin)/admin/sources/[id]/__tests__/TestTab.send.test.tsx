@@ -96,6 +96,8 @@ function makeSource(overrides: Partial<SourceDetail> = {}): SourceDetail {
     citations_enabled: true,
     updated_at: '2026-01-01T00:00:00Z',
     schema_status: 'READY',
+    owner_email: null,
+    schema_summary: null,
     ...overrides,
   } satisfies SourceDetail
 }
