@@ -317,17 +317,12 @@ export default function SourceDetailPage() {
   // silent on success for them. Failure toasts ALWAYS fire regardless.
   const sessionTriggeredJobIdsRef = useRef<Set<string>>(new Set())
 
-  // Live-source / DB derivation — needed for the status pill label and the
-  // sync-tab copy. Derived as soon as `source` is available.
-  const DB_TYPES = useMemo(
-    () => new Set<SourceType>(['postgresql', 'mysql', 'mssql', 'mongodb']),
-    []
-  )
-
   // Smart-toast hook: fires once per terminal transition. Hooks must be
   // called unconditionally — pass `null` until the source has loaded.
+  // `sourceKindOf` handles the backend's real 'database' value (the local
+  // dialect-name set this used to check never matched — see FX6).
   const isDbLiveSource = source
-    ? DB_TYPES.has(source.source_type) &&
+    ? sourceKindOf(source.source_type) === 'database' &&
       (source.source_mode === 'live' || source.retrieval_mode === 'text_to_query')
     : false
 
@@ -382,7 +377,7 @@ export default function SourceDetailPage() {
   // there are no documents to ingest. Re-running the pipeline triggers the
   // studying-agent to refresh the schema document. Re-label the action and
   // the Sync History heading accordingly.
-  const isDbSource = DB_TYPES.has(source.source_type)
+  const isDbSource = sourceKindOf(source.source_type) === 'database'
 
   function trackSessionJob(job: SyncJob) {
     sessionTriggeredJobIdsRef.current.add(job.id)

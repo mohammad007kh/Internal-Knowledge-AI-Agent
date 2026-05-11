@@ -294,3 +294,55 @@ describe('Settings field gating — hybrid retrieval_mode is deprecated', () => 
     expect(dbConfig.retrievalMode).toBe('readonly-chip')
   })
 })
+
+describe('Settings — Connection card gating (FX6: real "database" source_type)', () => {
+  it('renders the Connection card + Edit credentials for source_type === "database"', async () => {
+    // FX6 regression: the gating used to check a fictional dialect set
+    // (postgresql/mysql/…) that the backend StrEnum never emits — the real
+    // value is the literal "database", so the card was always hidden.
+    getSourceMock.mockResolvedValue(makeSource({ source_type: 'database' }))
+
+    renderPage()
+    await openSettings()
+
+    expect(await screen.findByTestId('connection-card-status')).toBeInTheDocument()
+    expect(screen.getByTestId('connection-card-edit')).toHaveTextContent(/edit credentials/i)
+    // The DB read-only chips must also render for the real value.
+    expect(screen.getByTestId('retrieval-mode-chip')).toBeInTheDocument()
+    expect(screen.getByTestId('source-mode-chip')).toBeInTheDocument()
+  })
+
+  it('does NOT render the Connection card for a file source', async () => {
+    getSourceMock.mockResolvedValue(
+      makeSource({ source_type: 'file_upload', source_mode: 'snapshot' })
+    )
+
+    renderPage()
+    await openSettings()
+
+    expect(screen.queryByTestId('connection-card-status')).toBeNull()
+    expect(screen.queryByTestId('connection-card-edit')).toBeNull()
+  })
+
+  it('does NOT render the Connection card for a web source', async () => {
+    getSourceMock.mockResolvedValue(
+      makeSource({ source_type: 'web_url', source_mode: 'snapshot' })
+    )
+
+    renderPage()
+    await openSettings()
+
+    expect(screen.queryByTestId('connection-card-status')).toBeNull()
+  })
+})
+
+describe('sourceKindOf — recognises the real backend SourceType values (FX6)', () => {
+  it('maps the backend StrEnum values to the right kind', async () => {
+    const { sourceKindOf } = await import('../_components/sourceTypeMatrix')
+    expect(sourceKindOf('database')).toBe('database')
+    expect(sourceKindOf('file_upload')).toBe('file')
+    expect(sourceKindOf('web_url')).toBe('web')
+    expect(sourceKindOf('confluence')).toBe('connector')
+    expect(sourceKindOf('sharepoint')).toBe('connector')
+  })
+})

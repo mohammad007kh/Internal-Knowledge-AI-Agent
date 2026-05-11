@@ -18,6 +18,10 @@ import type { SourceType, SyncMode } from '@/lib/api/sources'
 export type SourceKind = 'file' | 'web' | 'database' | 'connector'
 
 const DB_TYPES: ReadonlySet<SourceType> = new Set<SourceType>([
+  // 'database' is the value the backend StrEnum actually emits for DB
+  // sources. The dialect strings below are kept for forward-compat with any
+  // future "split the database type by dialect" change — harmless extras.
+  'database',
   'postgresql',
   'mysql',
   'mssql',

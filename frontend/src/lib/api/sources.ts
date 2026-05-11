@@ -4,7 +4,16 @@ import { apiClient } from '@/lib/api-client'
 // Source domain types
 // ---------------------------------------------------------------------------
 
+// NOTE: the backend `SourceType` StrEnum (backend/src/models/enums.py) only
+// emits FIVE values: 'web_url' | 'file_upload' | 'database' | 'confluence' |
+// 'sharepoint'. The granular dialect (postgresql/mysql/…) lives separately in
+// `connection.db_type`. The extra members below are kept for forward-compat /
+// older fixtures but the gating helpers in sourceTypeMatrix.ts MUST recognise
+// 'database' (it's what real DB sources actually carry).
 export type SourceType =
+  | 'web_url'
+  | 'file_upload'
+  | 'database'
   | 'confluence'
   | 'sharepoint'
   | 'google_drive'
@@ -19,8 +28,6 @@ export type SourceType =
   | 'csv'
   | 'txt'
   | 'markdown'
-  | 'web_url'
-  | 'file_upload'
 
 export type SourceStatus = 'pending' | 'syncing' | 'ready' | 'error' | 'disabled'
 export type SyncMode = 'manual' | 'scheduled' | 'delta'

@@ -33,6 +33,9 @@ import {
 } from 'lucide-react'
 
 const DB_TYPES: ReadonlySet<string> = new Set([
+  // 'database' is what the backend StrEnum actually emits; the dialect
+  // strings are forward-compat extras (see sourceTypeMatrix.ts).
+  'database',
   'postgresql',
   'mysql',
   'mssql',

@@ -53,10 +53,9 @@ function renderToolbar(args: RenderArgs = {}) {
 describe('AuditLogToolbar action dropdown', () => {
   it('emits the fully-qualified ai_model.create when that option is picked', async () => {
     const user = userEvent.setup()
-    const onChange = vi.fn<
-      [(prev: AuditLogFilterState) => AuditLogFilterState],
-      void
-    >()
+    // vitest 4's vi.fn() generic takes the function type, not [args, ret].
+    // The onChange prop is `(updater) => void`; calls[0][0] is the updater.
+    const onChange = vi.fn()
     renderToolbar({ onChange })
 
     const trigger = screen.getByLabelText('Filter by action')
@@ -86,10 +85,7 @@ describe('AuditLogToolbar action dropdown', () => {
     'emits the fully-qualified %s when that option is picked',
     async (expectedAction) => {
       const user = userEvent.setup()
-      const onChange = vi.fn<
-        [(prev: AuditLogFilterState) => AuditLogFilterState],
-        void
-      >()
+      const onChange = vi.fn()
       renderToolbar({ onChange })
 
       const trigger = screen.getByLabelText('Filter by action')
@@ -106,10 +102,9 @@ describe('AuditLogToolbar action dropdown', () => {
 
   it('All actions sentinel clears the filter', async () => {
     const user = userEvent.setup()
-    const onChange = vi.fn<
-      [(prev: AuditLogFilterState) => AuditLogFilterState],
-      void
-    >()
+    // vitest 4's vi.fn() generic takes the function type, not [args, ret].
+    // The onChange prop is `(updater) => void`; calls[0][0] is the updater.
+    const onChange = vi.fn()
     renderToolbar({ state: { action: 'ai_model.create' }, onChange })
 
     const trigger = screen.getByLabelText('Filter by action')
