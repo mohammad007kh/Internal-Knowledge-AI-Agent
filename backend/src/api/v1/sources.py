@@ -829,21 +829,17 @@ async def update_source_credentials(  # noqa: PLR0913 — FastAPI deps
             },
         )
 
-    # Verify there's at least one credential field on the request — pure
-    # confirm_password with no rotation fields is a no-op we reject so the
-    # audit trail can't be flooded with empty events.
+    # Build the set of fields the caller actually wants to change. With the
+    # FX7 dialog the frontend diffs the form against the fetched config and
+    # sends ONLY the changed keys — so a save with no edits arrives here as
+    # pure ``confirm_password`` with no rotation fields. That's a benign
+    # no-op: we short-circuit with the source unchanged (no connector test,
+    # no re-encrypt, no audit row, no re-study) rather than 400-ing the
+    # admin who just clicked Save on an untouched form.
     submitted = payload.model_dump(exclude_unset=True)
     submitted.pop("confirm_password", None)
     if not submitted:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail={
-                "type": "https://httpstatuses.com/400",
-                "title": "Bad Request",
-                "status": 400,
-                "detail": "No credential fields provided.",
-            },
-        )
+        return SourceResponse.model_validate(source)
 
     # Step 4: delegate to the service. Connector failure raises
     # ConnectorTestFailedError; we re-raise as HTTPException so the wire
@@ -919,6 +915,298 @@ async def update_source_credentials(  # noqa: PLR0913 — FastAPI deps
         )
 
     return SourceResponse.model_validate(updated)
+
+
+# ---------------------------------------------------------------------------
+# Read DB connection config — non-secret metadata only (FX7)
+#
+# Powers the EditCredentialsDialog pre-fill. SECURITY BOUNDARY:
+#   * NEVER returns the password.
+#   * NEVER returns the raw connection_string / uri / connection_uri (those
+#     can embed the password).
+#   * Returns ONLY the structured fields the admin already typed at creation
+#     (db_type / host / port / database / username / ssl_mode / collection)
+#     plus the SELECT `query` (which is not a secret) and a `has_password`
+#     boolean so the UI can show "•••• (unchanged)" vs "(none set)".
+#
+# Enforcement is a strict response model (extra='forbid') + a deliberate
+# field allowlist in the extraction helper below — a regression that adds a
+# secret-bearing key fails both the model and the body-scanning test.
+# ---------------------------------------------------------------------------
+
+
+# Mongo/SQL connection-string drivername → db_type, for the legacy-config
+# branch where the stored config has only a connection_string/uri.
+_DRIVERNAME_TO_DB_TYPE: dict[str, str] = {
+    "postgresql": "postgresql",
+    "postgres": "postgresql",
+    "mysql": "mysql",
+    "mariadb": "mysql",
+    "mssql": "mssql",
+    "mongodb": "mongodb",
+}
+
+# ssl_mode values the credentials schema accepts — anything else is dropped
+# so the pre-fill never selects a value the form/backend would later reject.
+_ALLOWED_SSL_MODES: frozenset[str] = frozenset(
+    {"disable", "require", "verify-ca", "verify-full"}
+)
+
+
+class SourceConnectionConfigResponse(BaseModel):
+    """Non-secret connection metadata for a database source (FX7).
+
+    Strict (``extra='forbid'``) so a regression that tries to widen the
+    response with ``password`` / ``connection_string`` / ``uri`` etc fails
+    at the model layer — independently of the body-scanning test.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    db_type: str | None = None
+    host: str | None = None
+    port: int | None = None
+    database: str | None = None
+    username: str | None = None
+    ssl_mode: str | None = None
+    collection: str | None = None
+    query: str | None = None
+    has_password: bool = False
+
+
+def _parse_connection_url(config: dict[str, Any]) -> Any | None:
+    """Parse the connection-string-style key on *config*, if any.
+
+    Returns the parsed :class:`sqlalchemy.engine.URL` or ``None`` when there
+    is no such key or it doesn't parse. Used to (a) recover host/port/user
+    for legacy configs that have nothing structured, and (b) detect whether
+    a password is embedded in the URL (the ``has_password`` flag) without
+    ever surfacing the URL itself.
+    """
+    raw_url = (
+        config.get("connection_string")
+        or config.get("uri")
+        or config.get("connection_uri")
+    )
+    if not isinstance(raw_url, str) or not raw_url.strip():
+        return None
+    from sqlalchemy.engine import make_url  # noqa: PLC0415
+
+    try:
+        return make_url(raw_url)
+    except Exception:  # noqa: BLE001 — malformed URL: behave as "no URL".
+        return None
+
+
+def _extract_connection_config(
+    config: dict[str, Any],
+) -> SourceConnectionConfigResponse:
+    """Project a decrypted connector config to the safe FX7 response shape.
+
+    Pure (no crypto, no I/O beyond an in-memory URL parse). The response
+    NEVER contains the password or the raw connection string/URI — a strict
+    response model plus this deliberate allowlist are the enforcement.
+
+    Two code paths:
+
+    * **Structured config** — the modern shape written by
+      :meth:`SourceService._build_database_config` carries ``host`` /
+      ``port`` / ``database`` / ``username`` (SQL dialects) or ``database``
+      / ``collection`` (Mongo), alongside a ``connection_string`` / ``uri``
+      we deliberately ignore for the visible fields. We read the structured
+      keys directly; any field still missing is back-filled from the parsed
+      connection URL with its password component dropped. ``has_password``
+      is ``True`` iff a non-empty ``password`` key is stored OR the parsed
+      URL embeds one.
+    * **Legacy config** — only a ``connection_string`` / ``uri`` /
+      ``connection_uri`` key, no structured fields. We parse it with
+      :func:`sqlalchemy.engine.make_url` and lift ``host`` / ``port`` /
+      ``database`` / ``username`` from the parsed URL, **dropping the
+      password component entirely**. ``db_type`` is mapped from the URL
+      drivername when recognisable, else ``None``. ``has_password`` is
+      ``bool(parsed.password)``.
+
+    The ``query`` (SELECT statement) is included verbatim — for a DB source
+    the query is not credential-bearing. ``ssl_mode`` is only surfaced when
+    it is one of the values the credentials schema allows; a legacy URL's
+    query-string ``sslmode`` is NOT trusted.
+    """
+    parsed = _parse_connection_url(config)
+    url_has_password = bool(parsed.password) if parsed is not None else False
+    db_type_from_url = (
+        _DRIVERNAME_TO_DB_TYPE.get((parsed.get_backend_name() or "").lower())
+        if parsed is not None
+        else None
+    )
+
+    has_structured = any(
+        k in config for k in ("host", "port", "database", "username")
+    )
+
+    if has_structured:
+        # Structured fields win; back-fill the rest from the parsed URL
+        # (password dropped). ssl_mode is read only from the structured key.
+        ssl_raw = config.get("ssl_mode")
+        ssl_mode = ssl_raw if ssl_raw in _ALLOWED_SSL_MODES else None
+        host = _coerce_str(config.get("host")) or (
+            _coerce_str(parsed.host) if parsed is not None else None
+        )
+        port = _coerce_port(config.get("port")) or (
+            parsed.port if parsed is not None else None
+        )
+        username = _coerce_str(config.get("username")) or (
+            _coerce_str(parsed.username) if parsed is not None else None
+        )
+        database = _coerce_str(config.get("database")) or (
+            _coerce_str(parsed.database) if parsed is not None else None
+        )
+        return SourceConnectionConfigResponse(
+            db_type=_coerce_db_type(config.get("db_type")) or db_type_from_url,
+            host=host,
+            port=port,
+            database=database,
+            username=username,
+            ssl_mode=ssl_mode,
+            collection=_coerce_str(config.get("collection")),
+            query=_coerce_str(config.get("query")),
+            has_password=bool(config.get("password")) or url_has_password,
+        )
+
+    # Legacy / structured-less: everything comes from the parsed URL.
+    if parsed is None:
+        return SourceConnectionConfigResponse(
+            db_type=_coerce_db_type(config.get("db_type")),
+            has_password=False,
+        )
+    return SourceConnectionConfigResponse(
+        db_type=_coerce_db_type(config.get("db_type")) or db_type_from_url,
+        host=_coerce_str(parsed.host),
+        port=parsed.port,
+        database=_coerce_str(parsed.database),
+        username=_coerce_str(parsed.username),
+        ssl_mode=None,  # never trust query-string sslmode from a legacy URL
+        collection=_coerce_str(config.get("collection")),
+        query=_coerce_str(config.get("query")),
+        has_password=url_has_password,
+    )
+
+
+def _coerce_str(value: Any) -> str | None:
+    """Return *value* as a non-empty string, else ``None``."""
+    if isinstance(value, str):
+        v = value.strip()
+        return v or None
+    return None
+
+
+def _coerce_port(value: Any) -> int | None:
+    """Return *value* as a valid TCP port (1–65535), else ``None``."""
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value if 1 <= value <= 65535 else None
+    if isinstance(value, str) and value.strip().isdigit():
+        port = int(value.strip())
+        return port if 1 <= port <= 65535 else None
+    return None
+
+
+def _coerce_db_type(value: Any) -> str | None:
+    """Normalise a stored ``db_type`` to the four values the UI knows."""
+    if not isinstance(value, str):
+        return None
+    v = value.strip().lower()
+    if v in {"postgresql", "mysql", "mssql", "mongodb"}:
+        return v
+    # Tolerate drivername-style values ("postgresql+asyncpg") and "postgres".
+    return _DRIVERNAME_TO_DB_TYPE.get(v.split("+", 1)[0])
+
+
+@router.get(
+    "/{source_id}/connection-config",
+    response_model=SourceConnectionConfigResponse,
+    summary="Non-secret connection metadata for a database source (pre-fill)",
+)
+async def get_source_connection_config(
+    source_id: uuid.UUID,
+    request: Request,
+    response: Response,
+    current_user: User = Depends(get_current_user),
+    service: SourceService = Depends(_get_source_service),
+    db: AsyncSession = Depends(get_db),
+) -> SourceConnectionConfigResponse:
+    """Return the source's non-secret connection fields for the edit dialog.
+
+    Authz + DB-only gating mirror ``PATCH /sources/{id}/credentials``: the
+    caller must be the owner or an admin, and the source must be of type
+    ``database`` (400 otherwise). 404 for a missing source.
+
+    The decrypted config is read via :meth:`SourceService.get_source_config`
+    (reusing the existing Fernet path — no crypto re-implemented here) and
+    projected through :func:`_extract_connection_config`, which strips the
+    password and the raw connection string/URI. Reading connection metadata
+    is mildly sensitive, so we write an ``admin_audit_log`` row with
+    ``action='source.connection_config_view'`` and an empty metadata dict
+    (the trail records *that* the admin viewed the config, not its values).
+    """
+    source = await service.get_source(source_id)
+    _assert_ownership_or_admin(source.owner_id, current_user)
+    if source.source_type != SourceType.DATABASE:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "type": "https://httpstatuses.com/400",
+                "title": "Bad Request",
+                "status": 400,
+                "detail": (
+                    "Connection config is only available for database sources."
+                ),
+            },
+        )
+
+    from src.core.exceptions import NotFoundError as _NotFoundError  # noqa: PLC0415
+
+    try:
+        config = await service.get_source_config(source_id)
+    except (HTTPException, _NotFoundError):
+        # Let the global handlers map these (404 etc) — they carry no
+        # connection-string material.
+        raise
+    except Exception as exc:  # noqa: BLE001
+        # A decrypt/parse failure must NOT echo anything that could carry a
+        # connection string. Log the type only; return a generic 500.
+        logger.error(
+            "Failed to read connection config for source_id=%s err_type=%s",
+            source_id,
+            type(exc).__name__,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={
+                "type": "https://httpstatuses.com/500",
+                "title": "Internal Server Error",
+                "status": 500,
+                "detail": "Could not read the stored connection config.",
+            },
+        ) from None
+
+    payload = _extract_connection_config(config)
+
+    await emit_audit(
+        AdminAuditLogRepository(db),
+        admin_user_id=current_user.id,
+        action="source.connection_config_view",
+        resource_type="source",
+        resource_id=source.id,
+        request=request,
+        metadata={},
+    )
+    await db.commit()
+
+    # host / username are not secret, but they're operationally sensitive —
+    # don't let a shared proxy / CDN cache this response.
+    response.headers["Cache-Control"] = "no-store"
+    return payload
 
 
 # ---------------------------------------------------------------------------

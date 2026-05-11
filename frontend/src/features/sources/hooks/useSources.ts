@@ -2,11 +2,13 @@
 
 import {
   type SchemaDocumentResponse,
+  type SourceConnectionConfig,
   type UpdateSourceRequest,
   autoNameApi,
   deleteSourceApi,
   getSchemaDocumentApi,
   getSourceApi,
+  getSourceConnectionConfigApi,
   getSourceStatsApi,
   listSourceDocumentsApi,
   listSourcesApi,
@@ -38,6 +40,8 @@ export const sourcesKeys = {
   documents: (id: string) => [...sourcesKeys.all, 'documents', id] as const,
   schemaDocument: (id: string) =>
     [...sourcesKeys.all, 'schema-document', id] as const,
+  connectionConfig: (id: string) =>
+    [...sourcesKeys.all, 'connection-config', id] as const,
 }
 
 // ---------------------------------------------------------------------------
@@ -183,6 +187,42 @@ export function useSchemaDocument(
     enabled: Boolean(sourceId) && enabled,
     staleTime: 60_000,
     // 404 is an expected state ("no study has run yet") — don't retry.
+    retry: false,
+  })
+}
+
+export interface UseSourceConnectionConfigOptions {
+  /**
+   * Gate the fetch. The EditCredentialsDialog passes `open` here so the
+   * config is only fetched when the dialog is actually shown.
+   */
+  enabled?: boolean
+}
+
+/**
+ * Fetch the non-secret connection metadata for a DB source (FX7).
+ *
+ * Drives the EditCredentialsDialog pre-fill. The response never contains the
+ * password or the raw connection string — only db_type/host/port/database/
+ * username/ssl_mode/collection/query and a `has_password` flag. `staleTime`
+ * is short (the config changes only on a credential rotation, which already
+ * invalidates `sourcesKeys.detail`); we still refetch each time the dialog
+ * opens so a rotation made elsewhere is reflected.
+ */
+export function useSourceConnectionConfig(
+  sourceId: string | undefined,
+  options: UseSourceConnectionConfigOptions = {}
+) {
+  const { enabled = true } = options
+  return useQuery<SourceConnectionConfig>({
+    queryKey: sourceId
+      ? sourcesKeys.connectionConfig(sourceId)
+      : ['sources', 'connection-config', 'empty'],
+    queryFn: () => getSourceConnectionConfigApi(sourceId as string),
+    enabled: Boolean(sourceId) && enabled,
+    // Don't keep a stale snapshot across dialog opens — refetch on mount.
+    staleTime: 0,
+    // 4xx (e.g. a non-DB source) is a "won't change on retry" state.
     retry: false,
   })
 }

@@ -648,3 +648,33 @@ def test_lockout_record_failure_called_on_wrong_password(app, client):
         called_with = kwargs.get("email")
     assert called_with == spies["admin_user"].email
     spies["lockout"].reset.assert_not_awaited()
+
+
+# ---------------------------------------------------------------------------
+# No-op save (FX7 — diffed-but-unchanged form)
+# ---------------------------------------------------------------------------
+
+
+def test_noop_save_with_only_confirm_password_returns_200_and_writes_no_audit(
+    app, client
+):
+    """FX7: the dialog diffs the form and sends ONLY changed keys, so a save
+    on an untouched form arrives as pure ``confirm_password``. That's a
+    benign no-op — 200 with the source unchanged, NO connector test, NO
+    re-encrypt, and crucially NO ``source.credentials_change`` audit row
+    (the re-auth still ran — lockout/bcrypt are gated before the
+    short-circuit — but nothing was changed, so nothing is logged).
+    """
+    resp = client.patch(
+        f"/sources/{_SOURCE_ID}/credentials",
+        json={"confirm_password": "AdminPw!23"},
+    )
+    assert resp.status_code == 200, resp.text
+
+    spies = app.state._spies
+    # The service's credential-update path is never invoked.
+    spies["service"].update_database_credentials.assert_not_awaited()
+    # No connector probe, no repo write, no audit row.
+    spies["connector_test"].assert_not_awaited()
+    spies["repo_update"].assert_not_awaited()
+    spies["audit_insert"].assert_not_awaited()

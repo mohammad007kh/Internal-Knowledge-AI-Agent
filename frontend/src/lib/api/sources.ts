@@ -410,6 +410,39 @@ export async function updateSourceCredentialsApi(
   return data
 }
 
+// ---------------------------------------------------------------------------
+// Read DB connection config — non-secret pre-fill for the edit dialog (FX7)
+//
+// `GET /api/v1/sources/{id}/connection-config` returns ONLY the connection
+// metadata the admin already typed at creation (db_type / host / port /
+// database / username / ssl_mode / collection) plus the SELECT `query` and
+// a `has_password` flag. The password and the raw connection string are
+// NEVER returned — the dialog pre-fills the visible fields and leaves the
+// password input empty (an empty password on submit = "keep current").
+// ---------------------------------------------------------------------------
+
+export interface SourceConnectionConfig {
+  db_type: 'postgresql' | 'mysql' | 'mssql' | 'mongodb' | null
+  host: string | null
+  port: number | null
+  database: string | null
+  username: string | null
+  ssl_mode: 'disable' | 'require' | 'verify-ca' | 'verify-full' | null
+  collection: string | null
+  query: string | null
+  /** True iff a password is currently stored — drives the UI placeholder. */
+  has_password: boolean
+}
+
+export async function getSourceConnectionConfigApi(
+  sourceId: string
+): Promise<SourceConnectionConfig> {
+  const { data } = await apiClient.get<SourceConnectionConfig>(
+    `/api/v1/sources/${sourceId}/connection-config`
+  )
+  return data
+}
+
 /**
  * Pre-persistence connection test. Used by the source wizard before any
  * Source row exists — caller passes the typed connection dict directly
