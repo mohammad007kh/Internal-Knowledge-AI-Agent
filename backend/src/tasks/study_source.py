@@ -55,8 +55,10 @@ logger = logging.getLogger(__name__)
 
 # Same agent version stamp persisted on every SchemaStudy row. Bump when the
 # studying-agent's pipeline contract changes so the admin viewer can render
-# "agent v1.2 produced this" alongside the document.
-_AGENT_VERSION = "studying-agent@0.1"
+# "agent v1.2 produced this" alongside the document. Kept in sync with
+# :data:`src.services.db_introspection.sql_inspector.AGENT_VERSION` — the
+# inspector stamps the document, the orchestrator stamps the study row.
+_AGENT_VERSION = "studying-agent@0.2"
 
 
 def _sanitise(message: str) -> str:
@@ -277,10 +279,21 @@ def _phase_from_exception(exc: BaseException) -> str:
     PREFIX of one of those states (NOT the in-flight phase name from
     :data:`~src.models.schema_study.STUDY_PHASES`, which uses ``CONNECTING``).
 
-    Most failures during early development land in CONNECT (auth /
-    network). NotImplementedError surfaces for non-DB connectors — the
-    INVENTORY phase owns that classification.
+    Resolution order:
+
+    1. :class:`~src.services.db_introspection._errors.SchemaStudyPhaseError`
+       carries an explicit ``.phase`` (already a failed-state prefix) — the
+       inspector knows best, so trust it.
+    2. ConnectionError / TimeoutError → CONNECT (network / auth class).
+    3. Anything else (incl. NotImplementedError for non-SQL connectors) →
+       INVENTORY — the safest "something went wrong early" bucket.
     """
+    from src.services.db_introspection._errors import (  # noqa: PLC0415
+        SchemaStudyPhaseError,
+    )
+
+    if isinstance(exc, SchemaStudyPhaseError):
+        return exc.phase
     if isinstance(exc, (ConnectionError, TimeoutError)):
         return "CONNECT"
     return "INVENTORY"

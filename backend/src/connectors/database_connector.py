@@ -4,7 +4,7 @@ import hashlib
 import logging
 import uuid
 from collections.abc import AsyncIterator
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import create_async_engine
@@ -13,6 +13,9 @@ from src.connectors.base import BaseConnector, Document
 from src.connectors.registry import register
 from src.models.enums import SourceType
 from src.services.db_safety import validate_sql
+
+if TYPE_CHECKING:  # pragma: no cover - typing only
+    from src.services.db_introspection.schema_doc import SchemaDocument
 
 logger = logging.getLogger(__name__)
 
@@ -75,6 +78,20 @@ class DatabaseConnector(BaseConnector):
 
     async def test_connection(self) -> bool:
         return await self._delegate.test_connection()
+
+    async def study_schema(self) -> "SchemaDocument":
+        """Produce a :class:`SchemaDocument` for this DB source.
+
+        SQL dialects (postgresql / mysql / mssql) delegate to
+        :class:`SqlDatabaseConnector`; MongoDB introspection is a later
+        phase and raises :class:`NotImplementedError` so the orchestrator
+        records it as a phase failure rather than silently writing nothing.
+        """
+        if isinstance(self._delegate, SqlDatabaseConnector):
+            return await self._delegate.study_schema()
+        raise NotImplementedError(
+            "MongoDB schema introspection is a later phase"
+        )
 
 
 class SqlDatabaseConnector(BaseConnector):
@@ -304,3 +321,54 @@ class SqlDatabaseConnector(BaseConnector):
                 self._conn_str_hash,
             )
             return False
+
+    # ------------------------------------------------------------------ #
+    # Schema study (studying-agent)
+    # ------------------------------------------------------------------ #
+
+    async def study_schema(self) -> "SchemaDocument":
+        """Run the studying-agent's 6-phase introspection for this source.
+
+        Delegates to :func:`src.services.db_introspection.sql_inspector.study_sql_schema`,
+        which opens its own read-only-hardened engine, reflects the schema,
+        samples (PII-redacted), and asks the ``schema_inspector`` LLM stage
+        for table descriptions + a corpus summary.
+
+        The connector's own ``_engine`` (used for document extraction) is
+        intentionally NOT reused — the inspector wants a fresh hardened
+        engine and disposes it itself.
+
+        Raises:
+            SchemaStudyPhaseError: on a fatal phase failure (the orchestrator
+                derives the failed state from ``.phase``).
+        """
+        from src.services.db_introspection.sql_inspector import (  # noqa: PLC0415
+            study_sql_schema,
+        )
+
+        db_type = str(self._config.get("db_type") or "postgresql")
+        resolver = self._resolve_ai_model_resolver()
+        return await study_sql_schema(
+            connection_string=self._config["connection_string"],
+            db_type=db_type,
+            ai_model_resolver=resolver,
+        )
+
+    @staticmethod
+    def _resolve_ai_model_resolver() -> Any:
+        """Best-effort fetch of the singleton :class:`AIModelResolver`.
+
+        Returns ``None`` if the DI container can't be constructed (e.g. in a
+        stripped-down test context) — the inspector then skips the
+        DESCRIBING phase and marks the study partial rather than failing.
+        """
+        try:
+            from src.core.container import Container  # noqa: PLC0415
+
+            return Container.ai_model_resolver()
+        except Exception:  # noqa: BLE001 - degrade gracefully
+            logger.warning(
+                "SqlDatabaseConnector: AIModelResolver unavailable — "
+                "DESCRIBING phase will be skipped"
+            )
+            return None

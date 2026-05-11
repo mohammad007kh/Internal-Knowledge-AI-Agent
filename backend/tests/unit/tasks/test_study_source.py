@@ -314,6 +314,83 @@ async def test_failure_path_marks_failed_and_flips_schema_status():
     assert "failed" in statuses
 
 
+async def test_failure_path_uses_phase_from_schema_study_phase_error():
+    """When the connector raises a ``SchemaStudyPhaseError`` carrying an
+    explicit ``.phase``, the orchestrator stamps that phase's ``_FAILED``
+    state — not the legacy ConnectionError heuristic."""
+    from src.services.db_introspection import SchemaStudyPhaseError
+
+    source = _make_db_source()
+
+    session = MagicMock()
+    session.commit = AsyncMock()
+    session.execute = AsyncMock()
+    session.flush = AsyncMock()
+    session.add = MagicMock()
+
+    study_row = MagicMock()
+    study_row.id = uuid.uuid4()
+
+    get_by_id = AsyncMock(return_value=source)
+    is_running = AsyncMock(return_value=False)
+    create_study = AsyncMock(return_value=study_row)
+    set_schema_status = AsyncMock()
+    mark_completed = AsyncMock()
+    mark_failed = AsyncMock()
+
+    connector_stub = MagicMock()
+    connector_stub.study_schema = AsyncMock(
+        side_effect=SchemaStudyPhaseError(
+            phase="SAMPLING",
+            error_key="SAMPLE_TIMEOUT",
+            message="Sampling main.orders timed out.",
+        )
+    )
+    factory_build = MagicMock(return_value=connector_stub)
+
+    factory = _patch_session_factory(session)
+
+    from src.repositories.schema_study_repository import SchemaStudyRepository
+    from src.repositories.source_repository import SourceRepository
+
+    with (
+        patch("src.tasks.study_source.AsyncSessionLocal", factory),
+        patch.object(SourceRepository, "get_by_id", get_by_id, create=False),
+        patch.object(
+            SourceRepository, "set_schema_status", set_schema_status, create=False
+        ),
+        patch.object(
+            SchemaStudyRepository, "is_running", is_running, create=False
+        ),
+        patch.object(
+            SchemaStudyRepository, "create_study", create_study, create=False
+        ),
+        patch.object(
+            SchemaStudyRepository, "mark_completed", mark_completed, create=False
+        ),
+        patch.object(
+            SchemaStudyRepository, "mark_failed", mark_failed, create=False
+        ),
+        patch(
+            "src.tasks.study_source.ConnectorFactory",
+            return_value=MagicMock(build=factory_build),
+        ),
+    ):
+        from src.tasks.study_source import _run
+
+        result = await _run(source.id)
+
+    assert result["status"] == "failed"
+    assert result["phase"] == "SAMPLING"
+    assert "main.orders timed out" in result["error"]
+    # mark_failed stamps the SAMPLING_FAILED state via phase="SAMPLING".
+    mark_failed.assert_awaited_once()
+    assert mark_failed.await_args.kwargs["phase"] == "SAMPLING"
+    statuses = [c.args[1] for c in set_schema_status.await_args_list]
+    assert "studying" in statuses
+    assert "failed" in statuses
+
+
 # ---------------------------------------------------------------------------
 # Non-database source — skipped without touching state
 # ---------------------------------------------------------------------------
