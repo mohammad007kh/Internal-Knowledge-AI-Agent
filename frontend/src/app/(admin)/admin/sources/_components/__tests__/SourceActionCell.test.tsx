@@ -300,4 +300,35 @@ describe('SourceActionCell — DB source verbs', () => {
     )
     expect(screen.getByText(/pending wiring/i)).toBeInTheDocument()
   })
+
+  // FX8: the backend StrEnum emits the literal `'database'`, not a per-dialect
+  // string. The DB-verb branch must fire for `source_type === 'database'`
+  // exactly as it does for the forward-compat `'postgresql'` value above.
+  it('renders the DB "Approve" verb for source_type === "database"', async () => {
+    const onApprove = vi.fn()
+    render(
+      <SourceActionCell
+        source={dbSource({ source_type: 'database' })}
+        onApprove={onApprove}
+      />
+    )
+    const button = screen.getByRole('button', { name: /Approve Sales replica/i })
+    expect(button).toHaveTextContent(/^Approve$/)
+    await userEvent.click(button)
+    expect(onApprove).toHaveBeenCalledWith('src-db')
+  })
+
+  it('renders the DB study phase label for source_type === "database"', () => {
+    render(
+      <SourceActionCell
+        source={dbSource({
+          source_type: 'database',
+          is_active: true,
+          schema_status: 'STUDYING' as SchemaStatus,
+          study_state: 'INVENTORY' as StudyState,
+        })}
+      />
+    )
+    expect(screen.getByText(/Listing tables/i)).toBeInTheDocument()
+  })
 })

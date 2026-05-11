@@ -10,16 +10,19 @@
  *       Approve & ingest → Run now → Working on it… → Ready for chat
  *       (or View error / Re-run on the unhappy paths)
  *
- *   • postgresql / mysql / mssql / mongodb     → DB-source verbs
+ *   • source_type === 'database'               → DB-source verbs
  *       Approve → Queued for study → Studying… → Documented · N tables
  *       (or "Approve to enable" / "Re-study" / "Edit credentials" on the
  *       partial / drift / failed paths)
+ *       (Discriminator is `sourceKindOf(type) === 'database'` — the backend
+ *       StrEnum emits the literal `'database'`, not a per-dialect string.)
  *
  * The component is callback-driven and pure — no React Query, no hooks
  * except local Popover state. Wave 3 wires the real `onApprove` / `onSync` /
  * `onStudy` / `onRetry` handlers to mutations.
  */
 
+import { sourceKindOf } from '@/app/(admin)/admin/sources/[id]/_components/sourceTypeMatrix'
 import { Button } from '@/components/ui/button'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import type { SourceListItem, SourceType } from '@/lib/api/sources'
@@ -27,10 +30,8 @@ import { cn } from '@/lib/utils'
 import { CheckCircle2, Loader2 } from 'lucide-react'
 import { useState } from 'react'
 
-const DATABASE_TYPES: readonly SourceType[] = ['postgresql', 'mysql', 'mssql', 'mongodb']
-
 function isDatabaseSource(type: SourceType | string): boolean {
-  return (DATABASE_TYPES as readonly string[]).includes(type)
+  return sourceKindOf(type as SourceType) === 'database'
 }
 
 interface SourceActionCellProps {

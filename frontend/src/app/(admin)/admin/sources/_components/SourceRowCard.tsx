@@ -5,6 +5,7 @@ import { DatabaseStudyStrip } from '@/app/(admin)/admin/sources/_components/Data
 import { IngestionStrip } from '@/app/(admin)/admin/sources/_components/IngestionStrip'
 import { PendingNamePill } from '@/app/(admin)/admin/sources/_components/PendingNamePill'
 import { SourceActionCell } from '@/app/(admin)/admin/sources/_components/SourceActionCell'
+import { sourceKindOf } from '@/app/(admin)/admin/sources/[id]/_components/sourceTypeMatrix'
 import { Button } from '@/components/ui/button'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { formatRelative } from '@/features/sources/format'
@@ -14,10 +15,11 @@ import { Eye, MoreHorizontal, Trash2 } from 'lucide-react'
 import Link from 'next/link'
 import { useState } from 'react'
 
-const DATABASE_TYPES: readonly SourceType[] = ['postgresql', 'mysql', 'mssql', 'mongodb']
-
+// DB-source affordances key off the real `source_type === 'database'`
+// discriminator (the backend StrEnum value), via the shared `sourceKindOf`
+// helper — not a fictional per-dialect set. See sourceTypeMatrix.ts.
 function isDatabaseSource(type: SourceType | string): boolean {
-  return (DATABASE_TYPES as readonly string[]).includes(type)
+  return sourceKindOf(type as SourceType) === 'database'
 }
 
 interface SourceRowCardProps {

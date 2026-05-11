@@ -12,6 +12,7 @@ import {
   type TypeGroup,
 } from '@/app/(admin)/admin/sources/_components/SourcesToolbar'
 import { derivePhase } from '@/app/(admin)/admin/sources/_components/sourcePhase'
+import { sourceKindOf } from '@/app/(admin)/admin/sources/[id]/_components/sourceTypeMatrix'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -59,24 +60,6 @@ import Link from 'next/link'
 import { useDeferredValue, useMemo, useState } from 'react'
 import { toast } from 'sonner'
 
-const DATABASE_TYPES: readonly SourceType[] = ['postgresql', 'mysql', 'mssql', 'mongodb']
-const FILE_TYPES: readonly SourceType[] = [
-  'pdf',
-  'docx',
-  'xlsx',
-  'csv',
-  'txt',
-  'markdown',
-  'file_upload',
-]
-const WEB_TYPES: readonly SourceType[] = ['web_url']
-const INTEGRATION_TYPES: readonly SourceType[] = [
-  'confluence',
-  'sharepoint',
-  'google_drive',
-  'notion',
-]
-
 const TYPE_GROUP_LABEL: Record<Exclude<TypeGroup, 'all'>, string> = {
   database: 'Database',
   file: 'Files',
@@ -84,19 +67,27 @@ const TYPE_GROUP_LABEL: Record<Exclude<TypeGroup, 'all'>, string> = {
   integration: 'Integration',
 }
 
-function getTypeGroup(type: SourceType | string): Exclude<TypeGroup, 'all'> | 'other' {
-  if ((DATABASE_TYPES as readonly string[]).includes(type)) return 'database'
-  if ((FILE_TYPES as readonly string[]).includes(type)) return 'file'
-  if ((WEB_TYPES as readonly string[]).includes(type)) return 'web'
-  if ((INTEGRATION_TYPES as readonly string[]).includes(type)) return 'integration'
-  return 'other'
+/**
+ * Map a source type onto a toolbar filter group.
+ *
+ * Delegates to `sourceKindOf` — the single source of truth for "what coarse
+ * kind is this type" (FX6/FX8). The backend StrEnum emits `'database'` (not a
+ * per-dialect string), `'file_upload'`, `'web_url'`, `'confluence'`,
+ * `'sharepoint'`; `sourceKindOf` already handles every value plus the
+ * forward-compat dialect extras. The only mapping wrinkle: `sourceKindOf`
+ * names SaaS connectors `'connector'` while the toolbar calls that group
+ * `'integration'`.
+ */
+export function getTypeGroup(type: SourceType | string): Exclude<TypeGroup, 'all'> {
+  const kind = sourceKindOf(type as SourceType)
+  return kind === 'connector' ? 'integration' : kind
 }
 
 function TypePill({ type }: { type: SourceType | string }) {
   const meta = getSourceTypeMeta(type)
   const group = getTypeGroup(type)
-  const groupLabel = group === 'other' ? meta.label : TYPE_GROUP_LABEL[group]
-  const showSubLabel = group !== 'other' && groupLabel !== meta.label
+  const groupLabel = TYPE_GROUP_LABEL[group]
+  const showSubLabel = groupLabel !== meta.label
   return (
     <span className="inline-flex items-center gap-2 rounded-md border bg-muted/40 px-2 py-1 text-xs">
       <meta.icon className="h-3.5 w-3.5 text-muted-foreground" aria-hidden />
