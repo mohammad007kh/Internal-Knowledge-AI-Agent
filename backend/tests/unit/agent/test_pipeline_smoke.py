@@ -5,13 +5,24 @@ import uuid
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from langchain_core.language_models.fake_chat_models import FakeListChatModel
 
 from src.agent.pipeline import build_pipeline, run_pipeline
 from src.services.ai_model_resolver import AIModelClient
 
 
 @pytest.fixture()
-def mocked_pipeline():
+def mocked_pipeline(monkeypatch: pytest.MonkeyPatch):
+    # The synthesizer node (FX3) builds a LangChain ``ChatOpenAI`` via
+    # ``build_chat_model``; in tests there's no API key, so swap in a fake
+    # streaming chat model. ``generate_response`` resolves the factory at
+    # call time, so patching the name it imports is enough — the pipeline
+    # graph calls the node without passing ``chat_model_factory``.
+    monkeypatch.setattr(
+        "src.agent.nodes.generate.build_chat_model",
+        lambda _client: FakeListChatModel(responses=["Here is the answer."]),
+    )
+
     mock_db = AsyncMock()
 
     mock_embedding = AsyncMock()

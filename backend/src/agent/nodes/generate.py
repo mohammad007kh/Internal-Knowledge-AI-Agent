@@ -69,7 +69,7 @@ async def generate_response(
     *,
     ai_model_resolver: AIModelResolver,
     langfuse: Langfuse,
-    chat_model_factory: Any = build_chat_model,
+    chat_model_factory: Any = None,
 ) -> dict:  # type: ignore[type-arg]
     """Run the LLM and set state["final_answer"].
 
@@ -77,12 +77,18 @@ async def generate_response(
     On permanent failure sets ``state["error"]`` and returns an
     empty-context fallback message.
 
-    The ``chat_model_factory`` parameter exists so unit tests can inject a
+    The ``chat_model_factory`` parameter exists so callers can inject a
     :class:`langchain_core.language_models.fake_chat_models.FakeListChatModel`
-    (or any other ``BaseChatModel``) in place of :class:`ChatOpenAI`.  The
-    default factory builds a real ``ChatOpenAI`` from the resolved
-    :class:`AIModelClient`.
+    (or any other ``BaseChatModel``) in place of :class:`ChatOpenAI`. It
+    defaults to ``None`` and is resolved to :func:`build_chat_model` at call
+    time — so a test can ``monkeypatch.setattr("src.agent.nodes.generate.
+    build_chat_model", ...)`` and the patch takes effect even though the
+    pipeline graph calls this node without passing the kwarg. (A module-level
+    default like ``= build_chat_model`` would be bound at def-time and ignore
+    the patch.)
     """
+    if chat_model_factory is None:
+        chat_model_factory = build_chat_model
     client: AIModelClient = await ai_model_resolver.resolve(_STAGE)
 
     span = langfuse.span(  # type: ignore[attr-defined]

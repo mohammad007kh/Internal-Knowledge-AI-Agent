@@ -390,6 +390,10 @@ def _make_source_row(*, source_type_value: str = "web_url") -> MagicMock:
     src.tables_partial = None
     src.last_error_phase = None
     src.last_error_message = None
+    # U10 — detail-endpoint enrichment fields. Concrete (not MagicMock) or
+    # SourceResponse.model_validate fails strict typing on the response.
+    src.owner_email = "admin@example.com"
+    src.schema_summary = None
     return src
 
 
