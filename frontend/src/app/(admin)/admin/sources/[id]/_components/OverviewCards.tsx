@@ -24,6 +24,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
 import { useSourcePermissions } from '@/features/source-permissions/hooks/useSourcePermissions'
 import type { SchemaStatus, SourceDetail } from '@/lib/api/sources'
+import { formatRelative } from '@/lib/format'
 import { cn } from '@/lib/utils'
 import {
   AlertTriangleIcon,
@@ -35,7 +36,6 @@ import {
   LockIcon,
   PlugIcon,
 } from 'lucide-react'
-import { formatRelative } from './SyncStatusPill'
 
 const DB_TYPES: ReadonlySet<string> = new Set([
   // 'database' is what the backend StrEnum actually emits; the dialect
@@ -440,6 +440,14 @@ function DbHeroCard({ source }: { source: SourceDetail }) {
           >
             <ListTreeIcon className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
             <span>Schema: {source.schema_summary}</span>
+          </p>
+        ) : null}
+        {/* Snapshot-mode DB sources re-study on a cron schedule; live ones
+            never sync, so nothing renders for them. The raw cron string is
+            shown verbatim — a human-readable parse is out of scope. */}
+        {source.source_mode === 'snapshot' && source.sync_schedule ? (
+          <p className="text-xs text-muted-foreground/80" data-testid="overview-sync-schedule">
+            Synced on schedule: <code>{source.sync_schedule}</code>
           </p>
         ) : null}
       </CardContent>

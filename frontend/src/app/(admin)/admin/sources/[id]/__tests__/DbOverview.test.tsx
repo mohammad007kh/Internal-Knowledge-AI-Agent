@@ -218,6 +218,42 @@ describe('DB Overview — hero card', () => {
   })
 })
 
+describe('DB Overview — sync schedule (snapshot mode)', () => {
+  it('shows the cron schedule for a snapshot-mode DB source', async () => {
+    getSourceMock.mockResolvedValue(
+      makeSource({ source_mode: 'snapshot', sync_schedule: '0 3 * * *' })
+    )
+    renderPage()
+    await waitForOverview()
+
+    const line = await screen.findByTestId('overview-sync-schedule')
+    expect(line).toHaveTextContent(/Synced on schedule/i)
+    expect(line).toHaveTextContent('0 3 * * *')
+  })
+
+  it('does not show the schedule line for a live DB source', async () => {
+    getSourceMock.mockResolvedValue(
+      makeSource({ source_mode: 'live', sync_schedule: '0 3 * * *' })
+    )
+    renderPage()
+    await waitForOverview()
+
+    expect(await screen.findByTestId('db-overview')).toBeInTheDocument()
+    expect(screen.queryByTestId('overview-sync-schedule')).toBeNull()
+  })
+
+  it('does not show the schedule line for a snapshot DB source with no schedule', async () => {
+    getSourceMock.mockResolvedValue(
+      makeSource({ source_mode: 'snapshot', sync_schedule: null })
+    )
+    renderPage()
+    await waitForOverview()
+
+    expect(await screen.findByTestId('db-overview')).toBeInTheDocument()
+    expect(screen.queryByTestId('overview-sync-schedule')).toBeNull()
+  })
+})
+
 describe('DB Overview — "what the agent sees" teaser', () => {
   it('schema_status null → "not studied yet" copy + Re-study button that calls triggerSyncApi once', async () => {
     getSourceMock.mockResolvedValue(makeSource({ schema_status: null, tables_documented: null }))

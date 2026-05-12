@@ -592,11 +592,15 @@ async def get_source(
     # render "Created … by alice@" without a second fetch (U10).
     response.owner_email = await repo.get_owner_email(source_id)
 
-    # Project the latest SchemaStudy for DB sources.
+    # Project the latest SchemaStudy for DB sources. The latest study (any
+    # state — drives ``study_state`` / ``tables_documented`` / ``last_error_*``)
+    # and the latest *completed* study's one-line ``summary`` come back from a
+    # single bounded ``schema_studies`` scan rather than two sequential reads
+    # of the same table (U10 follow-up).
     if str(source.source_type) == "database" or getattr(
         source.source_type, "value", None
     ) == "database":
-        latest_study = await _load_latest_schema_study(db, source_id)
+        latest_study, schema_summary = await repo.get_study_summary_bundle(source_id)
         if latest_study is not None:
             response.study_state = getattr(latest_study, "state", None)
             response.last_error_phase = getattr(latest_study, "last_error_phase", None)
@@ -609,42 +613,14 @@ async def get_source(
                 if isinstance(tables, list):
                     response.tables_documented = len(tables)
 
-        # Studying-agent's one-line schema summary — pulled from the latest
-        # *completed* study's persisted SchemaDocument JSON (``summary``
-        # key). None when no study has completed, the JSON is None, or there
-        # is no ``summary`` key (U10).
-        completed_study = await repo.get_latest_completed_study(source_id)
-        if completed_study is not None:
-            completed_json = getattr(completed_study, "schema_document_json", None)
-            if isinstance(completed_json, dict):
-                summary = completed_json.get("summary")
-                if isinstance(summary, str) and summary.strip():
-                    response.schema_summary = summary
+        # Studying-agent's one-line schema summary — from the latest
+        # *completed* study's persisted SchemaDocument JSON (``summary`` key).
+        # None when no study has completed, the JSON is None, or there is no
+        # ``summary`` key (U10).
+        if schema_summary is not None:
+            response.schema_summary = schema_summary
 
     return response
-
-
-async def _load_latest_schema_study(
-    db: AsyncSession, source_id: uuid.UUID
-) -> object | None:
-    """Return the most-recent :class:`SchemaStudy` row for *source_id*,
-    or None when none exists.
-
-    Used by :func:`get_source` to enrich the detail-page response. Lives
-    here (rather than on a repository) because it's a single targeted
-    read, not a CRUD-shaped operation.
-    """
-    from sqlalchemy import select  # noqa: PLC0415
-
-    from src.models.schema_study import SchemaStudy  # noqa: PLC0415
-
-    stmt = (
-        select(SchemaStudy)
-        .where(SchemaStudy.source_id == source_id)
-        .order_by(SchemaStudy.started_at.desc())
-        .limit(1)
-    )
-    return (await db.execute(stmt)).scalar_one_or_none()
 
 
 # ---------------------------------------------------------------------------

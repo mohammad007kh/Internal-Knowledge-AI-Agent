@@ -111,6 +111,98 @@ class TestListWithCountsExcludesFailed:
         assert "connection_status =" not in joined
 
 
+class TestGetStudySummaryBundle:
+    """Repository-level: ``get_study_summary_bundle`` folds the detail page's
+    two former ``schema_studies`` reads into one bounded scan.
+
+    Drives a fake session that returns a fixed ordered list of study rows
+    (newest first) so we can assert the latest-row pick + the
+    newest-with-document summary pick without a live DB.
+    """
+
+    @staticmethod
+    def _study(*, state: str, doc_json: object | None):
+        from unittest.mock import MagicMock
+
+        s = MagicMock()
+        s.state = state
+        s.schema_document_json = doc_json
+        return s
+
+    def _repo_over(self, rows: list):
+        from unittest.mock import AsyncMock, MagicMock
+
+        from sqlalchemy.ext.asyncio import AsyncSession
+
+        from src.repositories.source_repository import SourceRepository
+
+        emitted: list = []
+
+        async def _execute(stmt, *args, **kwargs):  # noqa: ANN001
+            emitted.append(stmt)
+
+            class _Scalars:
+                def all(self) -> list:
+                    return rows
+
+            class _Result:
+                def scalars(self) -> "_Scalars":
+                    return _Scalars()
+
+            return _Result()
+
+        session = AsyncMock(spec=AsyncSession)
+        session.execute = AsyncMock(side_effect=_execute)
+        repo = SourceRepository(session=session)
+        return repo, session, emitted
+
+    @pytest.mark.asyncio
+    async def test_no_studies_returns_none_none(self) -> None:
+        repo, session, emitted = self._repo_over([])
+        latest, summary = await repo.get_study_summary_bundle(uuid.uuid4())
+        assert latest is None
+        assert summary is None
+        # Exactly one round-trip to schema_studies.
+        assert session.execute.await_count == 1
+
+    @pytest.mark.asyncio
+    async def test_single_scan_returns_latest_and_summary(self) -> None:
+        newest = self._study(state="STUDYING", doc_json=None)
+        completed = self._study(
+            state="READY", doc_json={"summary": "12-table star schema", "tables": []}
+        )
+        older = self._study(state="READY", doc_json={"summary": "stale", "tables": []})
+        repo, session, _ = self._repo_over([newest, completed, older])
+
+        latest, summary = await repo.get_study_summary_bundle(uuid.uuid4())
+
+        assert latest is newest  # most-recent row, any state
+        assert summary == "12-table star schema"  # newest row with a document
+        assert session.execute.await_count == 1  # one query, not two
+
+    @pytest.mark.asyncio
+    async def test_summary_none_when_newest_document_lacks_summary(self) -> None:
+        # Mirrors the old get_latest_completed_study semantics: an older
+        # completed study's summary is NOT surfaced when the newest one's
+        # document JSON has no usable ``summary`` key.
+        newest_doc = self._study(state="READY", doc_json={"tables": []})
+        older_doc = self._study(state="READY", doc_json={"summary": "old", "tables": []})
+        repo, _, _ = self._repo_over([newest_doc, older_doc])
+
+        latest, summary = await repo.get_study_summary_bundle(uuid.uuid4())
+        assert latest is newest_doc
+        assert summary is None
+
+    @pytest.mark.asyncio
+    async def test_summary_none_when_summary_blank(self) -> None:
+        only = self._study(state="READY", doc_json={"summary": "   ", "tables": []})
+        repo, _, _ = self._repo_over([only])
+
+        latest, summary = await repo.get_study_summary_bundle(uuid.uuid4())
+        assert latest is only
+        assert summary is None
+
+
 class TestSourceListItemSchema:
     """The new connection_status fields surface on the wire DTOs."""
 
@@ -1272,7 +1364,7 @@ class TestGetSourceDetailEnrichment:
         source_id,
         owner_email,
     ):
-        from unittest.mock import AsyncMock, MagicMock
+        from unittest.mock import AsyncMock
 
         from fastapi import FastAPI
 
@@ -1288,33 +1380,28 @@ class TestGetSourceDetailEnrichment:
         async def _owner_email(self, _src_id):  # noqa: ANN001
             return owner_email
 
-        # Default: a completed study with a summary in its persisted JSON.
-        study_obj = MagicMock()
-        study_obj.schema_document_json = {
-            "summary": "Star-schema sales warehouse with 12 fact/dim tables.",
+        # Default: no latest-study row, but the latest *completed* study
+        # carries a summary in its persisted JSON. ``get_study_summary_bundle``
+        # is the single read the detail endpoint now makes — it returns
+        # ``(latest_study, schema_summary)``. ``state`` is the dict so tests
+        # can flip the summary at runtime via ``app.state.bundle``.
+        bundle: dict[str, object | None] = {
+            "latest_study": None,
+            "schema_summary": "Star-schema sales warehouse with 12 fact/dim tables.",
         }
+        bundle_calls: list[uuid.UUID] = []
 
-        async def _latest_completed(self, _src_id):  # noqa: ANN001
-            return study_obj
-
-        async def _latest_study(_db, _src_id):  # noqa: ANN001
-            # The detail endpoint's own _load_latest_schema_study — return
-            # None so the study_state projection branch is a no-op for this
-            # test (we exercise schema_summary via get_latest_completed_study).
-            return None
+        async def _summary_bundle(self, src_id):  # noqa: ANN001
+            bundle_calls.append(src_id)
+            return bundle["latest_study"], bundle["schema_summary"]
 
         monkeypatch.setattr(
             SourceRepository, "get_owner_email", _owner_email, raising=True
         )
         monkeypatch.setattr(
             SourceRepository,
-            "get_latest_completed_study",
-            _latest_completed,
-            raising=True,
-        )
-        monkeypatch.setattr(
-            "src.api.v1.sources._load_latest_schema_study",
-            _latest_study,
+            "get_study_summary_bundle",
+            _summary_bundle,
             raising=True,
         )
 
@@ -1325,7 +1412,8 @@ class TestGetSourceDetailEnrichment:
         app.dependency_overrides[require_admin] = lambda: admin_user
         app.dependency_overrides[get_db] = lambda: db
         app.dependency_overrides[_get_source_service] = lambda: service_stub
-        app.state.study_obj = study_obj
+        app.state.bundle = bundle
+        app.state.bundle_calls = bundle_calls
         return app
 
     @pytest.fixture()
@@ -1350,27 +1438,48 @@ class TestGetSourceDetailEnrichment:
             == "Star-schema sales warehouse with 12 fact/dim tables."
         )
 
-    def test_schema_summary_none_when_no_completed_study(
-        self, app, client, source_id, monkeypatch
-    ):
+    def test_detail_uses_single_study_bundle_read(self, app, client, source_id):
+        """The duplicate-``schema_studies``-scan regression is locked down:
+        the detail endpoint reads schema studies via ``get_study_summary_bundle``
+        exactly once (it replaced the former ``_load_latest_schema_study`` +
+        ``get_latest_completed_study`` pair on this path)."""
         from src.repositories.source_repository import SourceRepository
 
-        async def _none(self, _src_id):  # noqa: ANN001
-            return None
+        # The new bundle method is the one the endpoint calls.
+        assert hasattr(SourceRepository, "get_study_summary_bundle")
 
-        monkeypatch.setattr(
-            SourceRepository, "get_latest_completed_study", _none, raising=True
-        )
-
+        app.state.bundle_calls.clear()
         resp = client.get(f"/sources/{source_id}")
         assert resp.status_code == 200, resp.text
-        assert resp.json()["schema_summary"] is None
+        # One read of schema studies for this source — not two.
+        assert app.state.bundle_calls == [source_id]
 
-    def test_schema_summary_none_when_json_missing_summary_key(
+    def test_schema_summary_none_when_no_completed_study(
         self, app, client, source_id
     ):
-        # The JSON exists but has no "summary" key → schema_summary stays null.
-        app.state.study_obj.schema_document_json = {"tables": []}
+        # No completed study → the bundle's schema_summary slot is None.
+        app.state.bundle["schema_summary"] = None
         resp = client.get(f"/sources/{source_id}")
         assert resp.status_code == 200, resp.text
         assert resp.json()["schema_summary"] is None
+
+    def test_study_state_projected_from_latest_study(self, app, client, source_id):
+        # When the bundle carries a latest study (any state), its pipeline
+        # fields project onto the response; ``tables_documented`` comes from
+        # the document JSON's ``tables`` length.
+        from unittest.mock import MagicMock
+
+        latest = MagicMock()
+        latest.state = "READY_PARTIAL"
+        latest.last_error_phase = "DESCRIBE"
+        latest.last_error_message = "LLM timeout"
+        latest.schema_document_json = {"tables": [{"name": "a"}, {"name": "b"}]}
+        app.state.bundle["latest_study"] = latest
+
+        resp = client.get(f"/sources/{source_id}")
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert body["study_state"] == "READY_PARTIAL"
+        assert body["last_error_phase"] == "DESCRIBE"
+        assert body["last_error_message"] == "LLM timeout"
+        assert body["tables_documented"] == 2

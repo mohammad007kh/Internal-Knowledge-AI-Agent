@@ -23,31 +23,13 @@
 
 import { Badge } from '@/components/ui/badge'
 import type { SourceDetail } from '@/lib/api/sources'
+import { formatRelative } from '@/lib/format'
 import { cn } from '@/lib/utils'
 
-// ---------------------------------------------------------------------------
-// Relative-time formatter (no extra deps; we already have date-fns nowhere)
-//
-// Resolution: seconds within the first minute, minutes within the first hour,
-// hours within the first day, then the locale date string. Null inputs render
-// as "—" so the caller never has to guard.
-// ---------------------------------------------------------------------------
-
-export function formatRelative(value: string | null | undefined, now: number = Date.now()): string {
-  if (!value) return '—'
-  const ts = new Date(value).getTime()
-  if (Number.isNaN(ts)) return '—'
-  const deltaSec = Math.max(0, Math.round((now - ts) / 1000))
-  if (deltaSec < 5) return 'just now'
-  if (deltaSec < 60) return `${deltaSec}s ago`
-  const deltaMin = Math.round(deltaSec / 60)
-  if (deltaMin < 60) return `${deltaMin}m ago`
-  const deltaHr = Math.round(deltaMin / 60)
-  if (deltaHr < 24) return `${deltaHr}h ago`
-  const deltaDay = Math.round(deltaHr / 24)
-  if (deltaDay < 14) return `${deltaDay}d ago`
-  return new Date(value).toLocaleDateString()
-}
+// `formatRelative` moved to `@/lib/format` (a pure util doesn't belong in a
+// component module). Re-exported here so existing importers — which may reach
+// for either module — keep working.
+export { formatRelative }
 
 // ---------------------------------------------------------------------------
 // Pill state derivation

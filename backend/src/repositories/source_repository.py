@@ -532,6 +532,69 @@ class SourceRepository(BaseRepository[Source]):
         result = await self._session.execute(stmt)
         return result.scalar_one_or_none()
 
+    # Bounded look-back for the detail-page bundle below — large enough that a
+    # queued/running study in front of the last *completed* one doesn't hide
+    # the summary, small enough to stay a single cheap LIMIT-ed scan.
+    _STUDY_BUNDLE_SCAN_LIMIT = 5
+
+    async def get_study_summary_bundle(
+        self, source_id: uuid.UUID
+    ) -> tuple[Any | None, str | None]:
+        """Return ``(latest_study, schema_summary)`` for *source_id* in one query.
+
+        Folds the detail endpoint's two former ``schema_studies`` reads —
+        "latest study, any state" (drives ``study_state`` /
+        ``tables_documented`` / ``last_error_*``) and "latest *completed*
+        study's ``schema_document_json['summary']``" — into a single
+        ``ORDER BY started_at DESC LIMIT n`` scan, picking both rows in
+        Python:
+
+        * ``latest_study`` — the most-recent :class:`SchemaStudy` row (any
+          state), or ``None`` when the studying agent has never run. This is
+          exactly the row the old ``_load_latest_schema_study`` returned.
+        * ``schema_summary`` — the ``schema_document_json['summary']`` of the
+          *newest* row whose ``schema_document_json`` is not null (the old
+          ``get_latest_completed_study`` target), but only when that value is
+          a non-empty string; ``None`` otherwise. Byte-identical to the
+          previous two-call path: an older completed study's summary is never
+          surfaced just because the newest completed one lacks the key.
+
+        The scan window (:data:`_STUDY_BUNDLE_SCAN_LIMIT`) is intentionally
+        small: in practice the latest completed study is at or near the top of
+        the list, and a one-off cap keeps this O(1) regardless of how many
+        studies have queued historically. If a deployment somehow had more
+        than ``n`` newer non-completed studies in front of the last completed
+        one, the summary line falls back to ``None`` — degraded, not wrong.
+        """
+        from src.models.schema_study import SchemaStudy  # noqa: PLC0415
+
+        stmt = (
+            select(SchemaStudy)
+            .where(SchemaStudy.source_id == source_id)
+            .order_by(SchemaStudy.started_at.desc())
+            .limit(self._STUDY_BUNDLE_SCAN_LIMIT)
+        )
+        result = await self._session.execute(stmt)
+        rows = list(result.scalars().all())
+        if not rows:
+            return None, None
+
+        latest_study = rows[0]
+        schema_summary: str | None = None
+        for row in rows:
+            doc_json = getattr(row, "schema_document_json", None)
+            if doc_json is None:
+                continue
+            # Newest row with a non-null document — mirror the old
+            # get_latest_completed_study target. Read summary off *this* row
+            # only, then stop (even if it has no usable summary).
+            if isinstance(doc_json, dict):
+                candidate = doc_json.get("summary")
+                if isinstance(candidate, str) and candidate.strip():
+                    schema_summary = candidate
+            break
+        return latest_study, schema_summary
+
     async def get_owner_email(self, source_id: uuid.UUID) -> str | None:
         """Return the email of the user who owns *source_id*, or None.
 
