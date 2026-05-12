@@ -79,19 +79,19 @@ async def list_audit_log(
     )
 
     repo = AdminAuditLogRepository(db)
-    # Wrap both reads in a single transaction so `total` and `rows` come
-    # from the same MVCC snapshot.  Without this, an audit row appended
-    # between the two awaits would make `total` and `len(rows)` inconsistent
-    # and break the client-side pagination math.  The audit table is
-    # append-only, so READ COMMITTED (the default) is enough — the count's
-    # snapshot is taken at the start of the txn.
-    async with db.begin():
-        rows = await repo.list_paginated(
-            filters,
-            limit=page_size,
-            offset=(page - 1) * page_size,
-        )
-        total = await repo.count(filters)
+    # The ``admin_audit_log`` table is append-only, so a row inserted between
+    # the two awaits below can only ever make ``total`` slightly larger than
+    # ``len(rows)`` warrants — never inconsistent in a way that breaks the
+    # client.  An explicit ``async with db.begin():`` here would raise
+    # ``InvalidRequestError: A transaction is already begun on this Session``
+    # because the request-scoped session from :func:`get_db` auto-begins on
+    # first use, so we run both reads directly on the session.
+    rows = await repo.list_paginated(
+        filters,
+        limit=page_size,
+        offset=(page - 1) * page_size,
+    )
+    total = await repo.count(filters)
 
     items = [
         AuditLogEntryPublic(

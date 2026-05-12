@@ -33,6 +33,7 @@ os.environ.setdefault("ENCRYPTION_KEY", "dGVzdGVuY3J5cHRpb25rZXkxMjM0NTY3ODk=")
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from sqlalchemy.exc import InvalidRequestError
 
 from src.api.middleware.error_handler import register_exception_handlers
 from src.api.v1.admin.audit_log import router as audit_log_router
@@ -81,13 +82,16 @@ def _fake_db_session() -> MagicMock:
     db.execute = AsyncMock()
     db.flush = AsyncMock()
     db.commit = AsyncMock()
-    # `async with db.begin():` — return an async context manager. The route
-    # wraps both repo reads in a single transaction (snapshot consistency);
-    # the test session needs to honour that protocol without a real engine.
-    txn = AsyncMock()
-    txn.__aenter__ = AsyncMock(return_value=txn)
-    txn.__aexit__ = AsyncMock(return_value=None)
-    db.begin = MagicMock(return_value=txn)
+    # The real request-scoped ``AsyncSession`` (from ``get_db``) auto-begins a
+    # transaction on first use, so calling ``db.begin()`` on it raises
+    # ``InvalidRequestError: A transaction is already begun on this Session``.
+    # Mirror that here so a regression that re-introduces ``async with
+    # db.begin():`` in the route is caught by these tests (it used to slip
+    # through because the mock made ``begin`` a harmless no-op context manager).
+    def _begin_raises(*_args, **_kwargs):
+        raise InvalidRequestError("A transaction is already begun on this Session.")
+
+    db.begin = MagicMock(side_effect=_begin_raises)
     return db
 
 
@@ -350,72 +354,45 @@ class TestAdminOnly:
 
 
 # ---------------------------------------------------------------------------
-# Snapshot consistency (count race regression)
+# Transaction handling (autobegin regression — was 500ing every request)
 # ---------------------------------------------------------------------------
 
 
-class TestSnapshotConsistency:
-    """Regression: list_paginated() and count() must run in the same txn.
+class TestTransactionHandling:
+    """Regression: the route must NOT open its own ``db.begin()``.
 
-    Without a wrapping transaction, an audit row appended between the two
-    awaits would make `total` larger than `len(rows)` warrants — the client
-    would render a "next page" button that paginates into a phantom row.
+    The request-scoped session from ``get_db`` auto-begins a transaction on
+    first use, so an explicit ``async with db.begin():`` raised
+    ``InvalidRequestError: A transaction is already begun on this Session.`` —
+    which 500'd *every* audit-log request.  The ``admin_audit_log`` table is
+    append-only, so the (theoretical) snapshot-consistency concern that
+    motivated the wrapper does not apply.
     """
 
-    def test_both_repo_reads_run_inside_db_begin(self, admin_client, monkeypatch) -> None:
+    def test_plain_get_with_no_filters_returns_200(self, admin_client) -> None:
         tc, repo, _admin = admin_client
+        repo.list_paginated.return_value = []
+        repo.count.return_value = 0
 
-        # Track ordering: did `db.begin().__aenter__` fire before either
-        # repo read, and `__aexit__` after both?
-        events: list[str] = []
+        resp = tc.get("/admin/audit-log", params={"page": 1, "page_size": 50})
 
-        async def _list(*_args, **_kwargs):
-            events.append("list_paginated")
-            return [(_make_log_row(id=1), "alice@example.com")]
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert body["items"] == []
+        assert body["total"] == 0
+        assert body["page"] == 1
+        assert body["page_size"] == 50
 
-        async def _count(*_args, **_kwargs):
-            events.append("count")
-            return 1
-
-        repo.list_paginated.side_effect = _list
-        repo.count.side_effect = _count
-
-        # Replace the dependency override with a session whose `begin()`
-        # appends to the same `events` list so we can assert ordering.
-        from src.core.database import get_db as _get_db
-
-        def _instrumented_session():
-            db = MagicMock()
-            db.execute = AsyncMock()
-            db.flush = AsyncMock()
-            db.commit = AsyncMock()
-            txn = AsyncMock()
-
-            async def _enter(*_a, **_kw):
-                events.append("begin")
-                return txn
-
-            async def _exit(*_a, **_kw):
-                events.append("commit")
-                return None
-
-            txn.__aenter__ = _enter
-            txn.__aexit__ = _exit
-            db.begin = MagicMock(return_value=txn)
-            return db
-
-        # Re-attach onto the existing TestClient's app.
-        tc.app.dependency_overrides[_get_db] = _instrumented_session
+    def test_route_does_not_open_a_transaction(self, admin_client) -> None:
+        tc, repo, _admin = admin_client
+        repo.list_paginated.return_value = [(_make_log_row(id=1), "alice@example.com")]
+        repo.count.return_value = 1
 
         resp = tc.get("/admin/audit-log")
 
+        # The fixture's session raises ``InvalidRequestError`` from
+        # ``db.begin()`` (mirroring the real autobegin session), so a 200 here
+        # proves the route never called it.
         assert resp.status_code == 200, resp.text
-        # Both repo reads must occur strictly between begin and commit —
-        # otherwise the snapshot guarantee is broken.
-        assert events[0] == "begin", events
-        assert events[-1] == "commit", events
-        assert "list_paginated" in events[1:-1]
-        assert "count" in events[1:-1]
-        # And `total` matches `len(rows)` from the same snapshot.
         body = resp.json()
         assert body["total"] == len(body["items"]) == 1
