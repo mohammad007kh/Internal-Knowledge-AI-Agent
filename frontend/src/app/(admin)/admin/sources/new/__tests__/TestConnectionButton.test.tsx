@@ -216,4 +216,60 @@ describe('NewSourcePage — Test connection button', () => {
     const errorBox = await screen.findByTestId('test-connection-error')
     expect(errorBox).toHaveTextContent(/could not connect to database source/i)
   })
+
+  it('surfaces the backend RFC-7807 detail from a raw axios-shaped error (FX13)', async () => {
+    // The interceptor doesn't always flatten problem+json (content-type
+    // mismatch / direct apiClient call), so the raw AxiosError reaches the
+    // caller with the useless generic `.message`. The wizard must dig the
+    // backend's `detail` out of `response.data` instead.
+    inspectSourceMock.mockRejectedValueOnce({
+      isAxiosError: true,
+      message: 'Request failed with status code 422',
+      response: {
+        status: 422,
+        data: {
+          type: 'about:blank',
+          title: 'Unprocessable Entity',
+          status: 422,
+          detail: 'Could not connect to database source',
+        },
+      },
+    })
+
+    renderPage()
+    const user = await selectDatabaseSourceType()
+    await fillRequiredDatabaseFields(user)
+    await user.click(getTestButton())
+
+    const errorBox = await screen.findByTestId('test-connection-error')
+    expect(errorBox).toHaveTextContent(/could not connect to database source/i)
+    expect(errorBox).not.toHaveTextContent(/request failed with status code/i)
+  })
+
+  it('surfaces the nested HTTPException(detail={...}) message (FX13)', async () => {
+    inspectSourceMock.mockRejectedValueOnce({
+      isAxiosError: true,
+      message: 'Request failed with status code 422',
+      response: {
+        status: 422,
+        data: {
+          detail: {
+            type: 'about:blank',
+            title: 'Unprocessable Entity',
+            status: 422,
+            detail: 'Connection test failed with the supplied credentials.',
+          },
+        },
+      },
+    })
+
+    renderPage()
+    const user = await selectDatabaseSourceType()
+    await fillRequiredDatabaseFields(user)
+    await user.click(getTestButton())
+
+    const errorBox = await screen.findByTestId('test-connection-error')
+    expect(errorBox).toHaveTextContent(/connection test failed with the supplied credentials/i)
+    expect(errorBox).not.toHaveTextContent(/request failed with status code/i)
+  })
 })

@@ -18,6 +18,7 @@ import {
   triggerSyncApi,
   updateSourceApi,
 } from '@/lib/api/sources'
+import { extractApiErrorMessage } from '@/lib/api-error'
 import { getErrorMessage } from '@/lib/errors'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
@@ -269,7 +270,9 @@ export function useTestConnection() {
       }
     },
     onError: (error: unknown) => {
-      toast.error(getErrorMessage(error) || 'Connection test failed')
+      // Surface the backend's actual reason (e.g. "Could not connect to
+      // database source") rather than the generic axios string.
+      toast.error(extractApiErrorMessage(error))
     },
   })
 }

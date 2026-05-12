@@ -60,13 +60,13 @@ import {
   sourcesKeys,
   useSourceConnectionConfig,
 } from '@/features/sources/hooks/useSources'
+import { extractApiErrorMessage } from '@/lib/api-error'
 import {
   type SourceConnectionConfig,
   type SourceDetail,
   type UpdateSourceCredentialsRequest,
   updateSourceCredentialsApi,
 } from '@/lib/api/sources'
-import { getErrorMessage } from '@/lib/errors'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { AlertTriangleIcon, Loader2Icon } from 'lucide-react'
 import { useEffect, useState } from 'react'
@@ -188,16 +188,13 @@ export function EditCredentialsDialog({
       // the same RFC-7807 envelope, so the error message tells the
       // admin which side failed.
       //
-      // We prefer the raw message when available because the global
-      // `getErrorMessage` fallback collapses every non-status error into
-      // the generic "Something went wrong" string — which would hide the
-      // exact "Confirm-password does not match." / "Connection test
-      // failed." copy the backend painstakingly emits.
-      const message =
-        err instanceof Error && err.message
-          ? err.message
-          : getErrorMessage(err)
-      setSubmitError(message)
+      // `extractApiErrorMessage` digs the backend's `detail` out of the
+      // raw AxiosError (`updateSourceCredentialsApi` calls `apiClient`
+      // directly, so axios's useless "Request failed with status code 422"
+      // is what would otherwise reach us) — including the nested
+      // `detail.detail` shape FastAPI emits for `HTTPException(detail={...})`,
+      // which carries the "…Credentials were NOT updated." copy verbatim.
+      setSubmitError(extractApiErrorMessage(err))
     },
   })
 

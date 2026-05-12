@@ -55,6 +55,7 @@ import {
   useCreateSource,
 } from '@/hooks/use-create-source'
 import { useUploadFile } from '@/hooks/use-upload-url'
+import { extractApiErrorMessage } from '@/lib/api-error'
 import {
   type InspectSourceResponse,
   inspectSourceApi,
@@ -540,7 +541,7 @@ export default function NewSourcePage() {
         router.push(`/admin/sources/${result.id}`)
       },
       onError: (err) => {
-        toast.error(err.message || 'Failed to create source')
+        toast.error(extractApiErrorMessage(err) || 'Failed to create source')
       },
     })
   }
@@ -1203,10 +1204,15 @@ interface TestConnectionButtonProps {
 }
 
 function getTestConnectionErrorMessage(error: unknown): string {
-  if (error instanceof Error && error.message) {
-    return error.message
+  // Surface the backend's RFC-7807 `detail` ("Could not connect to database
+  // source", etc.) rather than axios's generic "Request failed with status
+  // code 422". `extractApiErrorMessage` handles both the raw AxiosError (when
+  // `inspectSourceApi` calls `apiClient` directly) and a pre-flattened Error.
+  const message = extractApiErrorMessage(error)
+  if (message === 'An unexpected error occurred.') {
+    return 'Could not connect. Check the connection details and try again.'
   }
-  return 'Could not connect. Check the connection details and try again.'
+  return message
 }
 
 function TestConnectionButton({ form }: TestConnectionButtonProps) {

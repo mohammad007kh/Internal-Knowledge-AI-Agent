@@ -1,6 +1,7 @@
 'use client'
 
-import { apiClient, parseErrorResponse } from '@/lib/api-client'
+import { apiClient } from '@/lib/api-client'
+import { extractApiErrorMessage } from '@/lib/api-error'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 
 /**
@@ -85,7 +86,10 @@ async function createSource(payload: CreateSourcePayload): Promise<CreatedSource
     const { data } = await apiClient.post<CreatedSource>('/api/v1/sources', payload)
     return data
   } catch (error: unknown) {
-    throw parseErrorResponse(error)
+    // Surface the backend's RFC-7807 `detail` (incl. the nested
+    // `detail.detail` shape FastAPI emits for `HTTPException(detail={...})`)
+    // rather than axios's generic "Request failed with status code …".
+    throw new Error(extractApiErrorMessage(error))
   }
 }
 
