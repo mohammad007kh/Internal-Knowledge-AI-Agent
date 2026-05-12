@@ -87,12 +87,23 @@ function TypePill({ type }: { type: SourceType | string }) {
   const meta = getSourceTypeMeta(type)
   const group = getTypeGroup(type)
   const groupLabel = TYPE_GROUP_LABEL[group]
-  const showSubLabel = groupLabel !== meta.label
+  // Only append a sub-label when it's a *real* refinement of the group —
+  // e.g. group "Database" + dialect "PostgreSQL". For the consolidated
+  // source types ('database'/'web_url'/'file_upload'/'confluence'/
+  // 'sharepoint') meta.label is just a near-dupe of the group ("database",
+  // "Web URL"), so showing it produced redundant noise like "Database·
+  // database". Compare case-insensitively and skip when one contains the
+  // other.
+  const a = groupLabel.toLowerCase()
+  const b = meta.label.toLowerCase()
+  const showSubLabel = a !== b && !a.includes(b) && !b.includes(a)
   return (
-    <span className="inline-flex items-center gap-2 rounded-md border bg-muted/40 px-2 py-1 text-xs">
-      <meta.icon className="h-3.5 w-3.5 text-muted-foreground" aria-hidden />
+    <span className="inline-flex items-center gap-1.5 rounded-md border bg-muted/40 px-2 py-1 text-xs">
+      <meta.icon className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
       <span className="font-medium text-foreground">{groupLabel}</span>
-      {showSubLabel ? <span className="text-muted-foreground">· {meta.label}</span> : null}
+      {showSubLabel ? (
+        <span className="text-muted-foreground">· {meta.label}</span>
+      ) : null}
     </span>
   )
 }
@@ -409,19 +420,19 @@ export function SourcesTable({ demoSources }: SourcesTableProps = {}) {
             ))}
           </div>
 
-          {/* Desktop table — horizontally scrollable so long descriptions /
-              the 7 columns can extend past the page width instead of being
-              clipped (overflow-hidden) or squished. */}
+          {/* Desktop table. Kept compact so it fits the page on a laptop with
+              the sidebar expanded — modest min-widths, `overflow-x-auto` only
+              as a safety net for very narrow viewports. */}
           <div className="hidden overflow-x-auto rounded-md border sm:block">
-            <Table>
+            <Table className="w-full">
               <TableHeader className="bg-card/95 backdrop-blur supports-[backdrop-filter]:bg-card/75">
                 <TableRow>
-                  <TableHead className="min-w-[260px]">Name</TableHead>
+                  <TableHead className="min-w-[200px]">Name</TableHead>
                   <TableHead>Type</TableHead>
                   <TableHead>Mode</TableHead>
-                  <TableHead className="min-w-[180px]">Next step</TableHead>
-                  <TableHead className="min-w-[320px]">Ingestion</TableHead>
-                  <TableHead>Last synced</TableHead>
+                  <TableHead>Next step</TableHead>
+                  <TableHead className="min-w-[200px]">Ingestion</TableHead>
+                  <TableHead className="whitespace-nowrap">Last synced</TableHead>
                   <TableHead className="text-right">Actions</TableHead>
                 </TableRow>
               </TableHeader>
@@ -458,7 +469,14 @@ export function SourcesTable({ demoSources }: SourcesTableProps = {}) {
                                 {source.name}
                               </Link>
                             )}
-                            <p className="line-clamp-2 text-xs text-muted-foreground">
+                            <p
+                              className="truncate text-xs text-muted-foreground"
+                              title={
+                                source.description?.trim()
+                                  ? source.description
+                                  : undefined
+                              }
+                            >
                               {source.description_status === 'pending_ai'
                                 ? '—'
                                 : source.description?.trim()
