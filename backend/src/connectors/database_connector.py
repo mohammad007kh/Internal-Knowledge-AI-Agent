@@ -83,15 +83,17 @@ class DatabaseConnector(BaseConnector):
         """Produce a :class:`SchemaDocument` for this DB source.
 
         SQL dialects (postgresql / mysql / mssql) delegate to
-        :class:`SqlDatabaseConnector`; MongoDB introspection is a later
-        phase and raises :class:`NotImplementedError` so the orchestrator
-        records it as a phase failure rather than silently writing nothing.
+        :class:`SqlDatabaseConnector`; MongoDB delegates to
+        :class:`~src.connectors.mongodb_connector.MongoDBConnector` (schema-
+        on-read). The delegate raises :class:`SchemaStudyPhaseError` on a
+        fatal phase failure so the orchestrator stamps the right state.
         """
-        if isinstance(self._delegate, SqlDatabaseConnector):
-            return await self._delegate.study_schema()
-        raise NotImplementedError(
-            "MongoDB schema introspection is a later phase"
-        )
+        study_schema = getattr(self._delegate, "study_schema", None)
+        if study_schema is None:
+            raise NotImplementedError(
+                f"{type(self._delegate).__name__} does not implement study_schema()"
+            )
+        return await study_schema()
 
 
 class SqlDatabaseConnector(BaseConnector):
@@ -153,29 +155,75 @@ class SqlDatabaseConnector(BaseConnector):
     # Lifecycle
     # ------------------------------------------------------------------ #
 
+    async def _build_hardened_engine(
+        self, *, pool_size: int, pool_pre_ping: bool
+    ) -> Any:
+        """Build an async engine with per-dialect read-only hardening applied.
+
+        * **postgresql** — connection-string augmentation
+          (``default_transaction_read_only=on`` + ``statement_timeout``).
+        * **mysql** — a ``connect`` event handler issues ``SET SESSION
+          TRANSACTION READ ONLY`` + server-side timeouts on every connection.
+        * **mssql** — ``connect_args`` carry the driver command timeout and a
+          ``connect`` handler issues ``SET LOCK_TIMEOUT`` + ``READ
+          UNCOMMITTED`` isolation (lock-avoidance — SQL Server has no
+          per-session read-only switch; enforcement is the SELECT-only gate +
+          read-only-by-nature reflection).
+        """
+        from src.services.db_safety import (  # noqa: PLC0415
+            harden_connection,
+            harden_postgres_connection,
+            mssql_connect_args,
+        )
+
+        conn_str: str = self._config["connection_string"]
+        db_type = self._config.get("db_type")
+        connect_args: dict[str, Any] = {}
+        if db_type == "postgresql" or (
+            db_type is None and conn_str.startswith(("postgresql", "postgres"))
+        ):
+            try:
+                conn_str = await harden_postgres_connection(conn_str)
+            except ValueError:
+                logger.warning(
+                    "DatabaseConnector: postgres hardening rejected URL "
+                    "[conn_hash=%s] — falling back to raw conn_str",
+                    self._conn_str_hash,
+                )
+        elif db_type == "mssql":
+            connect_args = mssql_connect_args()
+
+        engine = create_async_engine(
+            conn_str,
+            pool_pre_ping=pool_pre_ping,
+            pool_size=pool_size,
+            max_overflow=0,
+            connect_args=connect_args,
+        )
+        if db_type in ("mysql", "mssql"):
+            try:
+                harden_connection(engine, dialect=db_type)  # type: ignore[arg-type]
+            except Exception:  # noqa: BLE001 - best-effort, never fatal
+                logger.warning(
+                    "DatabaseConnector: %s hardening could not be wired "
+                    "[conn_hash=%s] — continuing",
+                    db_type,
+                    self._conn_str_hash,
+                )
+        return engine
+
     async def connect(self) -> None:
         """
         Create an async SQLAlchemy engine and perform a connectivity check.
         Raises ConnectionError (not the raw driver exception, which may contain
         the connection string in its message) if the test SELECT 1 fails.
+
+        The engine is read-only-hardened per dialect — see
+        :meth:`_build_hardened_engine`.
         """
-        conn_str: str = self._config["connection_string"]
-        # Phase 1: harden Postgres connections only.  For other dialects
-        # (mysql/mssql) this is a no-op and is expanded in Phase 2.
-        db_type = self._config.get("db_type")
-        if db_type == "postgresql" or (
-            db_type is None and conn_str.startswith(("postgresql", "postgres"))
-        ):
-            from src.services.db_safety import (  # noqa: PLC0415
-                harden_postgres_connection,
-            )
-            conn_str = await harden_postgres_connection(conn_str)
         try:
-            engine = create_async_engine(
-                conn_str,
-                pool_pre_ping=True,
-                pool_size=2,
-                max_overflow=0,
+            engine = await self._build_hardened_engine(
+                pool_size=2, pool_pre_ping=True
             )
             async with engine.connect() as conn:
                 await conn.execute(sa.text("SELECT 1"))
@@ -279,37 +327,20 @@ class SqlDatabaseConnector(BaseConnector):
 
     async def test_connection(self) -> bool:
         """
-        Execute SELECT 1 via a temporary engine.
+        Execute SELECT 1 via a temporary read-only-hardened engine.
         Returns False (not raises) on any failure.
         connection_string MUST NOT appear in any log or exception message.
 
-        Postgres connections are hardened the same way ``connect()`` hardens
-        them: ``default_transaction_read_only=on`` + ``statement_timeout`` are
-        applied at the libpq layer so even the connectivity probe cannot mutate
-        the source database.
+        The probe uses the same per-dialect hardening as ``connect()``
+        (:meth:`_build_hardened_engine`) so even the connectivity check
+        cannot mutate the source database (Postgres: libpq read-only +
+        statement_timeout; MySQL: ``SET SESSION TRANSACTION READ ONLY`` +
+        timeouts; MSSQL: lock-timeout + READ UNCOMMITTED — see that method).
         """
-        conn_str: str = self._config["connection_string"]
-        db_type = self._config.get("db_type")
-        if db_type == "postgresql" or (
-            db_type is None and conn_str.startswith(("postgresql", "postgres"))
-        ):
-            from src.services.db_safety import (  # noqa: PLC0415
-                harden_postgres_connection,
-            )
-            try:
-                conn_str = await harden_postgres_connection(conn_str)
-            except ValueError:
-                # Defensive: fall back to the raw string if the hardener
-                # rejects the URL. test_connection still returns False if the
-                # raw connection itself fails, so we don't widen the blast
-                # radius by silently down-grading safety here.
-                logger.warning(
-                    "DatabaseConnector.test_connection: harden rejected URL "
-                    "[conn_hash=%s] — falling back to raw conn_str",
-                    self._conn_str_hash,
-                )
         try:
-            engine = create_async_engine(conn_str, pool_size=1, max_overflow=0)
+            engine = await self._build_hardened_engine(
+                pool_size=1, pool_pre_ping=False
+            )
             async with engine.connect() as conn:
                 await conn.execute(sa.text("SELECT 1"))
             await engine.dispose()

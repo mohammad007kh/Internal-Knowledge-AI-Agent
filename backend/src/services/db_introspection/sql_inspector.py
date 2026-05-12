@@ -65,7 +65,12 @@ from src.services.db_introspection.schema_doc import (
     SchemaDocument,
     TableDoc,
 )
-from src.services.db_safety import harden_postgres_connection, validate_sql
+from src.services.db_safety import (
+    harden_connection,
+    harden_postgres_connection,
+    mssql_connect_args,
+    validate_sql,
+)
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from src.services.ai_model_resolver import AIModelResolver
@@ -76,9 +81,12 @@ logger = logging.getLogger(__name__)
 # Constants / caps
 # ---------------------------------------------------------------------------
 
-#: The studying-agent version this inspector emits. Bumped from @0.1 (the
-#: Phase-1 contract-only release) now that the real pipeline ships.
-AGENT_VERSION = "studying-agent@0.2"
+#: The studying-agent version this inspector emits. @0.1 was the Phase-1
+#: contract-only release; @0.2 shipped the real SQL pipeline; @0.3 adds
+#: per-dialect MySQL/MSSQL connection hardening + the MongoDB inspector.
+#: Kept in sync with :data:`src.tasks.study_source._AGENT_VERSION` and
+#: :data:`src.services.db_introspection.mongo_inspector.AGENT_VERSION`.
+AGENT_VERSION = "studying-agent@0.3"
 
 #: Hard cap on tables reflected per source. Beyond this we log + truncate.
 _MAX_TABLES = 200
@@ -244,8 +252,21 @@ def _render_default(default: Any) -> str | None:
 
 
 async def _build_engine(connection_string: str, db_type: str) -> AsyncEngine:
-    """Create a fresh async engine with read-only hardening applied."""
+    """Create a fresh async engine with per-dialect read-only hardening.
+
+    * **postgresql** — the connection *string* gets ``-c
+      default_transaction_read_only=on -c statement_timeout=N`` via
+      :func:`harden_postgres_connection` (before the engine is built).
+    * **mysql** — a ``connect`` event handler issues ``SET SESSION
+      TRANSACTION READ ONLY`` + server-side timeouts on every pooled
+      connection (:func:`harden_connection`).
+    * **mssql** — ``connect_args`` carry the driver command timeout and a
+      ``connect`` handler issues ``SET LOCK_TIMEOUT`` + ``READ UNCOMMITTED``
+      isolation (lock-avoidance; **not** a read-only guarantee — see
+      :mod:`src.services.db_safety.connection_hardening`).
+    """
     conn_str = connection_string
+    connect_args: dict[str, Any] = {}
     if db_type == "postgresql" or conn_str.startswith(("postgresql", "postgres")):
         try:
             conn_str = await harden_postgres_connection(
@@ -258,7 +279,33 @@ async def _build_engine(connection_string: str, db_type: str) -> AsyncEngine:
                 "sql_inspector: postgres hardening rejected the URL — "
                 "falling back to raw connection string"
             )
-    return create_async_engine(conn_str, pool_pre_ping=True, pool_size=2, max_overflow=0)
+    elif db_type == "mssql":
+        connect_args = mssql_connect_args(_STATEMENT_TIMEOUT_MS)
+
+    engine = create_async_engine(
+        conn_str,
+        pool_pre_ping=True,
+        pool_size=2,
+        max_overflow=0,
+        connect_args=connect_args,
+    )
+
+    # Engine-level (event-based) hardening for MySQL / MSSQL. No-op for
+    # Postgres (already hardened via the connection string above).
+    if db_type in ("mysql", "mssql"):
+        try:
+            harden_connection(
+                engine,
+                dialect=db_type,  # type: ignore[arg-type]
+                statement_timeout_ms=_STATEMENT_TIMEOUT_MS,
+            )
+        except Exception:  # noqa: BLE001 - hardening is best-effort, never fatal
+            logger.warning(
+                "sql_inspector: %s connection hardening could not be wired — "
+                "continuing (SELECT-only gate + read-only reflection still apply)",
+                db_type,
+            )
+    return engine
 
 
 async def _reflect(engine: AsyncEngine, fn: Any) -> Any:

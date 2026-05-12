@@ -5,7 +5,8 @@ tests can patch :data:`AsyncIOMotorClient` without a real install.
 """
 from __future__ import annotations
 
-from typing import Any, AsyncIterator
+import logging
+from typing import TYPE_CHECKING, Any, AsyncIterator
 
 try:
     from motor.motor_asyncio import AsyncIOMotorClient
@@ -14,6 +15,11 @@ except ImportError:
 
 from src.connectors.base import BaseConnector, Document
 from src.core.exceptions import ServiceUnavailableError
+
+if TYPE_CHECKING:  # pragma: no cover - typing only
+    from src.services.db_introspection.schema_doc import SchemaDocument
+
+logger = logging.getLogger(__name__)
 
 
 class MongoDBConnector(BaseConnector):
@@ -112,3 +118,50 @@ class MongoDBConnector(BaseConnector):
         col = db[collection]
         cursor = col.find(query)
         return await cursor.to_list(length=None)
+
+    # ------------------------------------------------------------------
+    # Schema study (studying-agent)
+    # ------------------------------------------------------------------
+
+    async def study_schema(self) -> "SchemaDocument":
+        """Run the studying-agent's schema-on-read introspection for this source.
+
+        Delegates to
+        :func:`src.services.db_introspection.mongo_inspector.study_mongo_schema`,
+        which opens its own Motor client (lazily importing the driver) and
+        disposes it itself — the connector's own ``_client`` is not reused.
+
+        Raises:
+            SchemaStudyPhaseError: on a fatal phase failure (driver missing,
+                cannot connect, cannot list / inspect any collection).
+        """
+        from src.services.db_introspection.mongo_inspector import (  # noqa: PLC0415
+            study_mongo_schema,
+        )
+
+        resolver = self._resolve_ai_model_resolver()
+        return await study_mongo_schema(
+            uri=self._config.get("uri", "mongodb://localhost:27017"),
+            database=self._config.get("database", ""),
+            collection_filter=self._config.get("collection") or None,
+            ai_model_resolver=resolver,
+        )
+
+    @staticmethod
+    def _resolve_ai_model_resolver() -> Any:
+        """Best-effort fetch of the singleton :class:`AIModelResolver`.
+
+        Returns ``None`` if the DI container can't be constructed — the
+        inspector then skips the DESCRIBING phase and marks the study
+        partial rather than failing.
+        """
+        try:
+            from src.core.container import Container  # noqa: PLC0415
+
+            return Container.ai_model_resolver()
+        except Exception:  # noqa: BLE001 - degrade gracefully
+            logger.warning(
+                "MongoDBConnector: AIModelResolver unavailable — "
+                "DESCRIBING phase will be skipped"
+            )
+            return None

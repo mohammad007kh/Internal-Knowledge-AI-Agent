@@ -56,9 +56,10 @@ logger = logging.getLogger(__name__)
 # Same agent version stamp persisted on every SchemaStudy row. Bump when the
 # studying-agent's pipeline contract changes so the admin viewer can render
 # "agent v1.2 produced this" alongside the document. Kept in sync with
-# :data:`src.services.db_introspection.sql_inspector.AGENT_VERSION` — the
+# :data:`src.services.db_introspection.sql_inspector.AGENT_VERSION` and
+# :data:`src.services.db_introspection.mongo_inspector.AGENT_VERSION` — the
 # inspector stamps the document, the orchestrator stamps the study row.
-_AGENT_VERSION = "studying-agent@0.2"
+_AGENT_VERSION = "studying-agent@0.3"
 
 
 def _sanitise(message: str) -> str:

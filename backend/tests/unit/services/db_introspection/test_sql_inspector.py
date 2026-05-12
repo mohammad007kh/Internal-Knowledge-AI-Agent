@@ -272,7 +272,7 @@ async def test_full_pipeline_inventory_columns_sampling_describing():
 
     # --- assembled document ---------------------------------------------
     assert doc.dialect == "postgresql"
-    assert doc.agent_version == "studying-agent@0.2"
+    assert doc.agent_version == "studying-agent@0.3"
     assert len(doc.fingerprint) == 64
     assert doc.study_duration_ms >= 0
     assert doc.vector_index_ref is None

@@ -1,36 +1,74 @@
-"""Connection-hardening helpers for Postgres source databases.
+"""Connection-hardening helpers for source databases (Postgres / MySQL / MSSQL).
 
-Provides defense-in-depth read-only enforcement at the SQLAlchemy/asyncpg
+Provides defense-in-depth read-only enforcement at the SQLAlchemy/driver
 layer.  Even if the admin supplies a credential with write access, the
-framework refuses to mutate via three independent layers:
+framework refuses to mutate via several independent layers:
 
+PostgreSQL
+----------
 1. **libpq client options** — :func:`harden_postgres_connection` augments
    the connection URL with ``-c default_transaction_read_only=on`` and
    ``-c statement_timeout=N``.  Every transaction starts read-only and
    has a server-side timeout, regardless of role privileges.
-
 2. **Per-transaction SET LOCAL** — :func:`read_only_session` issues
    ``SET LOCAL transaction_read_only TO on`` and
    ``SET LOCAL statement_timeout = N`` at the start of every transaction.
    ``LOCAL`` scopes the setting to the transaction so connection-pool
    reuse cannot leak state.
-
 3. **Explicit ROLLBACK on exit** — even SELECTs that took advisory locks
    or advanced sequences are rolled back on context-manager exit (success
    or failure path).
 
-The network/role layer (CREATE ROLE ... LOGIN NOINHERIT, GRANT SELECT only,
-``pg_hba.conf`` restrictions) is the admin's responsibility — see commit
-#131 once it lands.
+MySQL / MariaDB
+---------------
+:func:`harden_mysql_connection` registers an ``"connect"`` event handler
+on the engine that, on **every** pooled connection, issues:
 
-Phase 1 = Postgres only.  MySQL / MSSQL / Mongo equivalents land in Phase 2.
+* ``SET SESSION TRANSACTION READ ONLY`` — the session refuses DML/DDL.
+* ``SET SESSION max_execution_time = <ms>`` (MySQL 5.7.8+) AND
+  ``SET SESSION max_statement_time = <secs>`` (MariaDB) — a server-side
+  per-statement timeout.  We set both defensively; the flavour that
+  doesn't recognise one just raises, which we swallow.
+* ``SET SESSION innodb_lock_wait_timeout = <secs>`` — bounds how long a
+  row-lock wait blocks (introspection should never block on a writer).
+
+Each ``SET`` is wrapped in a try/except that logs at WARNING and continues
+— a managed-MySQL flavour (PlanetScale, Aurora, ...) may reject one.
+
+SQL Server (MSSQL)  ⚠️  IMPORTANT — limited read-only enforcement
+-----------------------------------------------------------------
+SQL Server has **no clean per-session read-only switch** like Postgres's
+``default_transaction_read_only`` GUC.  Genuine read-only on SQL Server
+requires *either*:
+
+* an ``ApplicationIntent=ReadOnly`` connection routed to an AlwaysOn
+  *readable secondary replica* (not generally available), *or*
+* a least-privilege login — ``GRANT SELECT`` only, with ``DENY INSERT,
+  UPDATE, DELETE, ...`` everything else.
+
+So for MSSQL the *enforcement* of read-only is the **sqlglot SELECT-only
+gate** (:func:`src.services.db_safety.validate_sql`) on the sampling
+SELECT, plus the fact that SQLAlchemy reflection is read-only by nature.
+:func:`harden_mssql_connection` only does what it *can* per-session:
+
+* ``SET LOCK_TIMEOUT <ms>`` — caps how long a lock wait blocks.
+* ``SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED`` — so introspection
+  does not take shared locks / block writers.  **This is NOT read-only
+  enforcement** — it's lock-avoidance only.
+* the command/query timeout is set on the engine (``connect_args``
+  ``timeout=`` — honoured by pyodbc/aioodbc) by the caller.
+
+Operators connecting an MSSQL source **should** use a SELECT-only login.
+
+The network/role layer (CREATE ROLE ... LOGIN NOINHERIT, GRANT SELECT
+only, ``pg_hba.conf`` restrictions) is the admin's responsibility.
 """
 from __future__ import annotations
 
 import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 from urllib.parse import (
     parse_qsl,
     quote,
@@ -41,6 +79,7 @@ from urllib.parse import (
 )
 
 import sqlalchemy as sa
+from sqlalchemy import event
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
@@ -71,6 +110,31 @@ DEFAULT_STATEMENT_TIMEOUT_MS = 30_000
 # fixed shape (``-c key=value``).
 _FLAG_READ_ONLY = "-c default_transaction_read_only=on"
 
+#: Contract dialect literals this module knows how to harden.
+HardenableDialect = Literal["postgresql", "mysql", "mssql"]
+
+#: Sentinel attribute set on an engine once an engine-level ``connect`` handler
+#: has been wired by this module.  Re-registering the handler on the same engine
+#: would stack duplicates (every ``SET SESSION ...`` then runs twice), so the
+#: harden_* helpers below check this first and return early if it's already
+#: ``True``.  The check uses an identity comparison (``is True``) rather than
+#: truthiness so a stand-in object that auto-creates attributes (a ``MagicMock``
+#: in tests, say) doesn't accidentally look already-hardened on the first call.
+_HARDENED_SENTINEL = "_kb_hardened"
+
+
+def _already_hardened(engine: object) -> bool:
+    """Return True iff *engine* has already had a ``connect`` handler wired."""
+    return getattr(engine, _HARDENED_SENTINEL, None) is True
+
+
+def _mark_hardened(engine: object) -> None:
+    """Stamp *engine* as hardened.  No-op if the object forbids the attribute."""
+    try:
+        setattr(engine, _HARDENED_SENTINEL, True)
+    except AttributeError:  # pragma: no cover - engine forbids attribute set
+        pass
+
 
 def _is_postgres_url(connection_string: str) -> bool:
     """Return True iff *connection_string* uses a Postgres scheme."""
@@ -78,8 +142,13 @@ def _is_postgres_url(connection_string: str) -> bool:
     return scheme in _POSTGRES_SCHEMES
 
 
+def _ms_to_secs_ceil(ms: int) -> int:
+    """Convert *ms* to a whole number of seconds, rounding up, min 1."""
+    return max(1, -(-ms // 1000))
+
+
 # ---------------------------------------------------------------------------
-# Public API
+# Public API — PostgreSQL
 # ---------------------------------------------------------------------------
 
 
@@ -165,6 +234,179 @@ async def harden_postgres_connection(
     return urlunsplit(
         (parts.scheme, parts.netloc, parts.path, new_query, parts.fragment)
     )
+
+
+# ---------------------------------------------------------------------------
+# Public API — engine-level hardening (MySQL / MSSQL) + dispatcher
+# ---------------------------------------------------------------------------
+
+
+def _exec_set(connection: object, statement: str) -> None:
+    """Run a single ``SET ...`` on a raw DBAPI connection; swallow failures.
+
+    A managed-MySQL flavour (Aurora, PlanetScale, ...) or an older MariaDB
+    may reject a particular ``SET`` knob — we log at WARNING and continue so
+    one rejected knob doesn't abort the whole connection.
+    """
+    cursor = None
+    try:
+        cursor = connection.cursor()  # type: ignore[attr-defined]
+        cursor.execute(statement)
+    except Exception:  # noqa: BLE001 - best-effort hardening, never fatal
+        logger.warning(
+            "connection_hardening: server rejected %r — continuing without it",
+            statement,
+        )
+    finally:
+        if cursor is not None:
+            try:
+                cursor.close()
+            except Exception:  # noqa: BLE001
+                pass
+
+
+def harden_mysql_connection(
+    engine: "AsyncEngine",
+    *,
+    statement_timeout_ms: int = DEFAULT_STATEMENT_TIMEOUT_MS,
+) -> None:
+    """Register a ``connect`` handler that hardens every pooled MySQL/MariaDB
+    connection to read-only with server-side timeouts.
+
+    On each new DBAPI connection the handler issues (each independently,
+    swallowing rejections):
+
+    * ``SET SESSION TRANSACTION READ ONLY``
+    * ``SET SESSION max_execution_time = <ms>``  (MySQL 5.7.8+)
+    * ``SET SESSION max_statement_time = <secs>``  (MariaDB equivalent)
+    * ``SET SESSION innodb_lock_wait_timeout = <secs>``
+
+    Parameters
+    ----------
+    engine:
+        The async engine whose underlying ``sync_engine`` we attach the
+        ``connect`` event to.  Idempotent per engine — a second call on the
+        same engine is a no-op (guarded by the :data:`_HARDENED_SENTINEL`
+        attribute) so duplicate ``SET SESSION ...`` handlers can't stack.
+    statement_timeout_ms:
+        Per-statement server-side timeout in milliseconds.  Must be positive.
+    """
+    if statement_timeout_ms <= 0:
+        raise ValueError(
+            f"statement_timeout_ms must be positive; got {statement_timeout_ms!r}"
+        )
+    if _already_hardened(engine):
+        return
+    _mark_hardened(engine)
+
+    timeout_secs = _ms_to_secs_ceil(statement_timeout_ms)
+    statements = (
+        "SET SESSION TRANSACTION READ ONLY",
+        f"SET SESSION max_execution_time = {statement_timeout_ms}",
+        f"SET SESSION max_statement_time = {timeout_secs}",
+        f"SET SESSION innodb_lock_wait_timeout = {timeout_secs}",
+    )
+
+    @event.listens_for(engine.sync_engine, "connect")
+    def _on_connect(dbapi_connection: object, _connection_record: object) -> None:
+        for stmt in statements:
+            _exec_set(dbapi_connection, stmt)
+
+
+def harden_mssql_connection(
+    engine: "AsyncEngine",
+    *,
+    statement_timeout_ms: int = DEFAULT_STATEMENT_TIMEOUT_MS,
+) -> None:
+    """Register a ``connect`` handler that applies the *limited* per-session
+    hardening SQL Server supports.
+
+    ⚠️  SQL Server has **no per-session read-only switch**.  Read-only is
+    enforced by the sqlglot SELECT-only gate + read-only-by-nature
+    reflection — operators connecting an MSSQL source should use a
+    SELECT-only login.  This function only does lock-avoidance:
+
+    * ``SET LOCK_TIMEOUT <ms>`` — caps how long a lock wait blocks.
+    * ``SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED`` — introspection
+      does not take shared locks / block writers (NOT read-only enforcement).
+
+    The command/query timeout itself belongs in the engine's ``connect_args``
+    (``timeout=<secs>`` — honoured by pyodbc/aioodbc); the caller sets it.
+
+    Parameters
+    ----------
+    engine:
+        The async engine to attach the ``connect`` event to.  Idempotent per
+        engine — a second call is a no-op (guarded by the
+        :data:`_HARDENED_SENTINEL` attribute).
+    statement_timeout_ms:
+        Used for ``SET LOCK_TIMEOUT`` (milliseconds).  Must be positive.
+    """
+    if statement_timeout_ms <= 0:
+        raise ValueError(
+            f"statement_timeout_ms must be positive; got {statement_timeout_ms!r}"
+        )
+    if _already_hardened(engine):
+        return
+    _mark_hardened(engine)
+
+    statements = (
+        f"SET LOCK_TIMEOUT {statement_timeout_ms}",
+        "SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED",
+    )
+
+    @event.listens_for(engine.sync_engine, "connect")
+    def _on_connect(dbapi_connection: object, _connection_record: object) -> None:
+        for stmt in statements:
+            _exec_set(dbapi_connection, stmt)
+
+
+def mssql_connect_args(statement_timeout_ms: int = DEFAULT_STATEMENT_TIMEOUT_MS) -> dict[str, int]:
+    """Return ``connect_args`` that set the driver command timeout for MSSQL.
+
+    pyodbc / aioodbc honour ``timeout`` (in *seconds*) as the command
+    timeout.  Pass the result through to ``create_async_engine(...,
+    connect_args=...)`` for an ``mssql+...`` URL.
+    """
+    return {"timeout": _ms_to_secs_ceil(statement_timeout_ms)}
+
+
+def harden_connection(
+    engine: "AsyncEngine",
+    *,
+    dialect: HardenableDialect,
+    statement_timeout_ms: int = DEFAULT_STATEMENT_TIMEOUT_MS,
+) -> None:
+    """Apply the appropriate engine-level hardening for *dialect*.
+
+    Dispatches to :func:`harden_mysql_connection` or
+    :func:`harden_mssql_connection`.  For ``"postgresql"`` this is a no-op —
+    Postgres hardening lives in the connection *string* (see
+    :func:`harden_postgres_connection`), applied before the engine is built.
+
+    Parameters
+    ----------
+    engine:
+        The freshly-created async engine.
+    dialect:
+        ``"postgresql"`` | ``"mysql"`` | ``"mssql"``.
+    statement_timeout_ms:
+        Server-side per-statement timeout budget in milliseconds.
+    """
+    if dialect == "mysql":
+        harden_mysql_connection(engine, statement_timeout_ms=statement_timeout_ms)
+    elif dialect == "mssql":
+        harden_mssql_connection(engine, statement_timeout_ms=statement_timeout_ms)
+    elif dialect == "postgresql":
+        # No-op: Postgres is hardened via the connection string.
+        return
+    else:  # pragma: no cover - exhaustive over the Literal
+        raise ValueError(f"harden_connection: unsupported dialect {dialect!r}")
+
+
+# ---------------------------------------------------------------------------
+# Public API — Postgres read-only session
+# ---------------------------------------------------------------------------
 
 
 @asynccontextmanager
