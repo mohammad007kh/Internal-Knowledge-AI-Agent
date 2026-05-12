@@ -409,12 +409,14 @@ export function SourcesTable({ demoSources }: SourcesTableProps = {}) {
             ))}
           </div>
 
-          {/* Desktop table */}
-          <div className="hidden overflow-hidden rounded-md border sm:block">
+          {/* Desktop table — horizontally scrollable so long descriptions /
+              the 7 columns can extend past the page width instead of being
+              clipped (overflow-hidden) or squished. */}
+          <div className="hidden overflow-x-auto rounded-md border sm:block">
             <Table>
-              <TableHeader className="sticky top-0 z-10 bg-card/95 backdrop-blur supports-[backdrop-filter]:bg-card/75">
+              <TableHeader className="bg-card/95 backdrop-blur supports-[backdrop-filter]:bg-card/75">
                 <TableRow>
-                  <TableHead className="min-w-[220px]">Name</TableHead>
+                  <TableHead className="min-w-[260px]">Name</TableHead>
                   <TableHead>Type</TableHead>
                   <TableHead>Mode</TableHead>
                   <TableHead className="min-w-[180px]">Next step</TableHead>
@@ -456,7 +458,7 @@ export function SourcesTable({ demoSources }: SourcesTableProps = {}) {
                                 {source.name}
                               </Link>
                             )}
-                            <p className="truncate text-xs text-muted-foreground">
+                            <p className="line-clamp-2 text-xs text-muted-foreground">
                               {source.description_status === 'pending_ai'
                                 ? '—'
                                 : source.description?.trim()
