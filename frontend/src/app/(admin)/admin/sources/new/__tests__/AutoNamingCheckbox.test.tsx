@@ -15,7 +15,7 @@
 import type { CreatedSource, CreateSourcePayload } from '@/hooks/use-create-source'
 import type { UploadFileResult } from '@/hooks/use-upload-url'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import type { ReactNode } from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -107,9 +107,16 @@ function renderPage() {
 
 async function uploadOneFile() {
   const file = new File(['hello'], 'note.pdf', { type: 'application/pdf' })
-  const input = screen.getByLabelText('Upload files') as HTMLInputElement
-  const user = userEvent.setup()
-  await user.upload(input, file)
+  // The Files card now renders <FileDropzone /> as the picker; drop a file on
+  // the dropzone button to exercise the real validation → enqueue path.
+  const dropzone = screen.getByRole('button', { name: /upload files/i })
+  fireEvent.drop(dropzone, {
+    dataTransfer: {
+      files: [file],
+      items: [{ kind: 'file', type: file.type, getAsFile: () => file }],
+      types: ['Files'],
+    },
+  })
   // Wait for the optimistic queue to drain through the mocked upload.
   // Use the row's status `<span>Uploaded</span>` (exact match) to avoid
   // colliding with the summary's "1 uploaded" text.

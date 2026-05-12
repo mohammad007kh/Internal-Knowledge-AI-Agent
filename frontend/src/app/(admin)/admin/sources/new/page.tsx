@@ -11,7 +11,6 @@ import {
   GlobeIcon,
   InfoIcon,
   Loader2Icon,
-  PlusIcon,
   RefreshCwIcon,
   SparklesIcon,
   XIcon,
@@ -24,6 +23,7 @@ import { toast } from 'sonner'
 import { z } from 'zod'
 
 import { EmbedderPicker } from '@/components/admin/EmbedderPicker'
+import { FileDropzone } from '@/components/admin/FileDropzone'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Checkbox } from '@/components/ui/checkbox'
@@ -86,7 +86,6 @@ const FILE_EXTENSION_MAP: Record<string, FileTypeKey> = {
   markdown: 'markdown',
 }
 
-const ACCEPTED_FILE_EXTENSIONS = '.pdf,.docx,.xlsx,.csv,.txt,.md,.markdown'
 const MAX_PARALLEL_UPLOADS = 3
 
 const FILE_TYPE_LABELS: Record<FileTypeKey, string> = {
@@ -304,7 +303,6 @@ export default function NewSourcePage() {
   const uploadFile = useUploadFile()
 
   const [uploads, setUploads] = useState<UploadEntry[]>([])
-  const fileInputRef = useRef<HTMLInputElement | null>(null)
 
   // Counters derived from uploads state.
   const uploadSummary = useMemo(() => {
@@ -430,16 +428,14 @@ export default function NewSourcePage() {
   )
 
   const enqueueFiles = useCallback(
-    (files: FileList | File[]) => {
+    (files: File[]) => {
+      // Files arrive pre-validated from <FileDropzone /> (extension + MIME +
+      // size). detectFileType therefore always resolves; the null branch is a
+      // defensive no-op, never the rejection path it used to be.
       const newEntries: UploadEntry[] = []
-      const rejected: string[] = []
-
-      for (const file of Array.from(files)) {
+      for (const file of files) {
         const fileType = detectFileType(file.name)
-        if (!fileType) {
-          rejected.push(file.name)
-          continue
-        }
+        if (!fileType) continue
         newEntries.push({
           localId: makeLocalId(),
           file,
@@ -451,11 +447,6 @@ export default function NewSourcePage() {
         })
       }
 
-      if (rejected.length > 0) {
-        toast.error(
-          `Unsupported file type: ${rejected.join(', ')}. Allowed: PDF, Word, Excel, CSV, Text, Markdown.`
-        )
-      }
       if (newEntries.length === 0) return
 
       setUploads((prev) => [...prev, ...newEntries])
@@ -463,13 +454,6 @@ export default function NewSourcePage() {
     },
     [drainQueue]
   )
-
-  function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
-    const list = e.target.files
-    if (!list || list.length === 0) return
-    enqueueFiles(list)
-    if (fileInputRef.current) fileInputRef.current.value = ''
-  }
 
   function handleRetry(localId: string) {
     const entry = uploads.find((u) => u.localId === localId)
@@ -479,10 +463,6 @@ export default function NewSourcePage() {
 
   function handleRemove(localId: string) {
     setUploads((prev) => prev.filter((u) => u.localId !== localId))
-  }
-
-  function handleAddMore() {
-    fileInputRef.current?.click()
   }
 
   async function onSubmit(values: FormValues) {
@@ -654,9 +634,8 @@ export default function NewSourcePage() {
                 <FilesPickerSection
                   uploads={uploads}
                   summary={uploadSummary}
-                  fileInputRef={fileInputRef}
-                  onPick={handleFileChange}
-                  onAddMore={handleAddMore}
+                  disabled={createSource.isPending}
+                  onAddFiles={enqueueFiles}
                   onRetry={handleRetry}
                   onRemove={handleRemove}
                 />
@@ -1379,9 +1358,10 @@ interface UploadSummaryShape {
 interface FilesPickerSectionProps {
   uploads: UploadEntry[]
   summary: UploadSummaryShape
-  fileInputRef: React.MutableRefObject<HTMLInputElement | null>
-  onPick: (e: React.ChangeEvent<HTMLInputElement>) => void
-  onAddMore: () => void
+  /** True while the create-source mutation is in flight — locks the dropzone. */
+  disabled: boolean
+  /** Receives the already-validated files emitted by the dropzone. */
+  onAddFiles: (files: File[]) => void
   onRetry: (localId: string) => void
   onRemove: (localId: string) => void
 }
@@ -1389,43 +1369,23 @@ interface FilesPickerSectionProps {
 function FilesPickerSection({
   uploads,
   summary,
-  fileInputRef,
-  onPick,
-  onAddMore,
+  disabled,
+  onAddFiles,
   onRetry,
   onRemove,
 }: FilesPickerSectionProps) {
   return (
     <div className="space-y-3">
       {uploads.length === 0 ? (
-        <div className="space-y-2">
-          <label className="block text-sm font-medium" htmlFor="file-upload">
-            Upload files
-          </label>
-          <input
-            ref={fileInputRef}
-            id="file-upload"
-            type="file"
-            multiple
-            accept={ACCEPTED_FILE_EXTENSIONS}
-            onChange={onPick}
-            className="block w-full text-sm text-muted-foreground file:mr-4 file:rounded-md file:border-0 file:bg-primary file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-primary-foreground hover:file:bg-primary/90"
-            aria-label="Upload files"
-          />
-          <p className="text-xs text-muted-foreground">
-            Select one or more files. Allowed: PDF, Word, Excel, CSV, Text, Markdown.
-          </p>
-        </div>
+        <FileDropzone variant="full" onFiles={onAddFiles} disabled={disabled} />
       ) : (
         <>
-          <input
-            ref={fileInputRef}
-            type="file"
-            multiple
-            accept={ACCEPTED_FILE_EXTENSIONS}
-            onChange={onPick}
-            className="sr-only"
-            aria-label="Add more files"
+          {/* The compact dropzone IS the "add more" affordance. It locks
+              while any upload is in flight so the queue stays coherent. */}
+          <FileDropzone
+            variant="compact"
+            onFiles={onAddFiles}
+            disabled={disabled || summary.inFlight > 0}
           />
           <UploadSummary summary={summary} />
           <ul className="space-y-2" aria-label="Selected files">
@@ -1433,10 +1393,6 @@ function FilesPickerSection({
               <UploadRow key={entry.localId} entry={entry} onRetry={onRetry} onRemove={onRemove} />
             ))}
           </ul>
-          <Button type="button" variant="outline" size="sm" onClick={onAddMore} className="gap-1.5">
-            <PlusIcon className="h-4 w-4" aria-hidden />
-            Add more files
-          </Button>
         </>
       )}
     </div>
