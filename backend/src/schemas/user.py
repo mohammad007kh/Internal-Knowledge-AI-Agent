@@ -32,12 +32,29 @@ class UserResponse(BaseModel):
 
 
 class UserListResponse(BaseModel):
-    """Paginated list of users."""
+    """Paginated list of users (legacy ``limit``/``offset`` envelope).
+
+    Retained for the service-layer ``UserService.list_users`` API and its
+    tests. The admin list endpoint now returns :class:`UserPage` instead.
+    """
 
     items: list[UserResponse]
     total: int
     limit: int
     offset: int
+
+
+class UserPage(BaseModel):
+    """Paginated response envelope for ``GET /api/v1/users``.
+
+    Mirrors the ``{items, total, page, page_size}`` shape used by the other
+    paginated admin endpoints (e.g. ``GET /api/v1/admin/audit-log``).
+    """
+
+    items: list[UserResponse]
+    total: int
+    page: int
+    page_size: int
 
 
 # ---------------------------------------------------------------------------

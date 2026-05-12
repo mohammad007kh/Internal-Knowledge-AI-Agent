@@ -18,13 +18,13 @@ from src.core.deps import get_current_user, require_role
 from src.models.user import User, UserRole
 from src.repositories.admin_audit_log_repository import AdminAuditLogRepository
 from src.repositories.invitation_repository import InvitationRepository
-from src.repositories.user_repository import UserRepository
+from src.repositories.user_repository import UserRepository, UserStatusFilter
 from src.schemas.invitation import InvitationListResponse, InvitationPublic
 from src.schemas.user import (
     InvitationCreateRequest,
     RoleChangeRequest,
     UpdateUserRequest,
-    UserListResponse,
+    UserPage,
     UserPublic,
     UserResponse,
     UserUpdateRequest,
@@ -34,6 +34,10 @@ from src.services.source_permission_service import SourcePermissionService
 from src.services.user_service import UserService
 
 router = APIRouter()
+
+#: Pagination defaults for the admin user list (matches the audit-log endpoint).
+_PAGE_SIZE_DEFAULT = 50
+_PAGE_SIZE_MAX = 200
 
 
 # ---------------------------------------------------------------------------
@@ -66,20 +70,31 @@ def _get_user_service() -> UserService:
 # ---------------------------------------------------------------------------
 
 
-@router.get("", response_model=UserListResponse)
+@router.get("", response_model=UserPage)
 async def list_users(
-    limit: int = Query(50, ge=1, le=200),
-    offset: int = Query(0, ge=0),
-    admin: User = Depends(AdminOnly),
-    user_svc: UserService = Depends(_get_user_service),
-) -> UserListResponse:
-    """Return a paginated list of active users."""
-    users, total = await user_svc.list_users(admin, limit=limit, offset=offset)
-    return UserListResponse(
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=_PAGE_SIZE_DEFAULT, ge=1, le=_PAGE_SIZE_MAX),
+    status_filter: UserStatusFilter = Query(default="all", alias="status"),
+    _admin: User = Depends(AdminOnly),
+    db: AsyncSession = Depends(get_db),
+) -> UserPage:
+    """Return a paginated list of users for the admin console. Admin-only.
+
+    Unlike most listings, **deactivated users are included by default**
+    (``status=all``) so admins can see and re-activate them. Pass
+    ``status=active`` / ``status=inactive`` to narrow the result. Results
+    are ordered by ``created_at`` so pagination is stable; ``total`` is the
+    unfiltered-by-page count for the selected ``status``.
+    """
+    repo = UserRepository(db)
+    offset = (page - 1) * page_size
+    users = await repo.list_paginated(status=status_filter, limit=page_size, offset=offset)
+    total = await repo.count_users(status=status_filter)
+    return UserPage(
         items=[UserResponse.model_validate(u) for u in users],
         total=total,
-        limit=limit,
-        offset=offset,
+        page=page,
+        page_size=page_size,
     )
 
 
@@ -389,24 +404,81 @@ async def deactivate_user(
     await db.commit()
 
 
-@router.patch("/{user_id}", response_model=UserResponse, summary="Activate or deactivate a user")
+@router.patch("/{user_id}", response_model=UserResponse, summary="Update a user")
 async def update_user(
     user_id: UUID,
     body: UpdateUserRequest,
+    request: Request,
     admin: User = Depends(AdminOnly),
     user_svc: UserService = Depends(_get_user_service),
     db: AsyncSession = Depends(get_db),
 ) -> UserResponse:
-    """Toggle ``is_active`` for a user. Admin-only."""
+    """Partial admin update of a user — ``full_name`` and/or ``is_active``.
+
+    Only fields actually present in the request body that *change* state do
+    any work; a request that matches the current state is a no-op (no audit
+    row, no token revocation). Each effective change writes an audit row:
+
+    * ``full_name`` change → ``user.update``
+    * ``is_active`` true → ``user.reactivate``
+    * ``is_active`` false → ``user.deactivate`` — this delegates to
+      :meth:`UserService.deactivate_user`, mirroring ``DELETE /users/{id}``,
+      so the self-deactivation guard and refresh-token revocation apply here
+      too.
+    """
     repo = UserRepository(db)
-    if body.is_active is not None:
-        updated = await repo.set_active(user_id, body.is_active)
-        if updated is None:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found.")
-        await db.commit()
-        return UserResponse.model_validate(updated)
-    # No-op: return current user
-    user = await repo.get_by_id(user_id)
-    if user is None:
+    target = await repo.get_by_id(user_id)
+    if target is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found.")
-    return UserResponse.model_validate(user)
+
+    changed = False
+
+    # ── full_name ────────────────────────────────────────────────────
+    if body.full_name is not None and body.full_name != target.full_name:
+        await repo.update(user_id, full_name=body.full_name)
+        await emit_audit(
+            AdminAuditLogRepository(db),
+            admin_user_id=admin.id,
+            action="user.update",
+            resource_type="user",
+            resource_id=user_id,
+            request=request,
+            metadata={"full_name": body.full_name},
+        )
+        changed = True
+
+    # ── is_active ────────────────────────────────────────────────────
+    if body.is_active is not None and body.is_active != target.is_active:
+        if body.is_active:
+            await repo.set_active(user_id, True)
+            await emit_audit(
+                AdminAuditLogRepository(db),
+                admin_user_id=admin.id,
+                action="user.reactivate",
+                resource_type="user",
+                resource_id=user_id,
+                request=request,
+                metadata={},
+            )
+        else:
+            # Delegate so the self-lock-out guard + refresh-token revocation
+            # run; the service does not emit an audit row, so the route does.
+            await user_svc.deactivate_user(admin, user_id)
+            await emit_audit(
+                AdminAuditLogRepository(db),
+                admin_user_id=admin.id,
+                action="user.deactivate",
+                resource_type="user",
+                resource_id=user_id,
+                request=request,
+                metadata={},
+            )
+        changed = True
+
+    if changed:
+        await db.commit()
+        refreshed = await repo.get_by_id(user_id)
+        if refreshed is not None:
+            return UserResponse.model_validate(refreshed)
+
+    return UserResponse.model_validate(target)

@@ -1,6 +1,6 @@
 'use client'
 
-import type { AdminUser } from '@/components/admin/UsersTable'
+import type { UserListItem } from '@/lib/api/users'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from '@/components/ui/sheet'
@@ -56,8 +56,8 @@ function formatLastSeen(iso: string | null): string {
   return `Last seen ${t.toLocaleDateString()}`
 }
 
-async function getUserApi(id: string): Promise<AdminUser> {
-  const res = await apiClient.get<AdminUser>(`/api/v1/users/${id}`)
+async function getUserApi(id: string): Promise<UserListItem> {
+  const res = await apiClient.get<UserListItem>(`/api/v1/users/${id}`)
   return res.data
 }
 
