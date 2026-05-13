@@ -54,15 +54,40 @@ def _get_permission_service() -> SourcePermissionService:
     return Container.source_permission_service()
 
 
-def _get_user_service() -> UserService:
-    """Resolve :class:`UserService` from the DI container.
+def _get_user_service(
+    db: AsyncSession = Depends(get_db),
+) -> UserService:
+    """Construct :class:`UserService` bound to the request-scoped DB session.
 
-    Uses a lazy import so that the module can be loaded without triggering
-    the full container wiring (helpful for unit tests).
+    Replaces the legacy ``Container.user_service()`` resolver, which built
+    UserService's repos against a *separate* :class:`AsyncSession`. That
+    session was never committed by the route handler (the route only
+    committed its own ``db``-scoped audit-log session), so every mutating
+    service call — including ``deactivate_user`` from the PATCH /users
+    handler — flushed to a doomed session whose changes were rolled back
+    at GC. From the API client's perspective the PATCH returned 200 with
+    the user's old state, and the row never actually changed. See FX20.
+
+    All repos now share the same :class:`AsyncSession` as the audit log,
+    so the existing ``await db.commit()`` at the end of the route
+    persists every change atomically.
     """
     from src.core.container import Container  # noqa: PLC0415
+    from src.repositories.invitation_repository import (  # noqa: PLC0415
+        InvitationRepository,
+    )
+    from src.repositories.refresh_token_repository import (  # noqa: PLC0415
+        RefreshTokenRepository,
+    )
+    from src.repositories.user_repository import UserRepository  # noqa: PLC0415
 
-    return Container.user_service()
+    return UserService(
+        user_repo=UserRepository(db),
+        invitation_repo=InvitationRepository(db),
+        password_service=Container.password_service(),
+        refresh_token_repo=RefreshTokenRepository(db),
+        email_service=Container.email_service(),
+    )
 
 
 # ---------------------------------------------------------------------------
