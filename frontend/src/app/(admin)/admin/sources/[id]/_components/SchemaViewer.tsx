@@ -29,7 +29,6 @@
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { ErrorState } from '@/components/ui/ErrorState'
 import { Input } from '@/components/ui/input'
 import {
   Select,
@@ -53,15 +52,19 @@ import {
 import {
   type ColumnDoc,
   type SchemaDocument,
+  type SourceDetail,
   type TableDoc,
   SchemaDocumentNotFoundError,
   emitSamplesRevealedApi,
 } from '@/lib/api/sources'
+import { extractApiErrorMessage } from '@/lib/api-error'
 import { cn } from '@/lib/utils'
 import {
+  AlertCircleIcon,
   AlertTriangleIcon,
   ChevronDownIcon,
   ChevronRightIcon,
+  Loader2Icon,
   RefreshCwIcon,
 } from 'lucide-react'
 import { useState } from 'react'
@@ -75,14 +78,44 @@ type SortMode = 'name' | 'rows-desc' | 'cols-desc'
 
 export interface SchemaViewerProps {
   sourceId: string
+  /**
+   * Optional source detail used to differentiate the four "non-ready"
+   * states the schema-document endpoint alone cannot tell apart:
+   *
+   *   - never studied (`schema_status` null / 'PENDING') → empty state
+   *   - studying right now (`'QUEUED'` / `'STUDYING'`)   → spinner
+   *   - last run failed (`'FAILED'`)                      → error + phase
+   *   - studied but found zero tables                     → empty-DB hint
+   *
+   * Backwards compatible: when omitted, the component falls back to its
+   * pre-FX18 behaviour (404 → empty, anything else → generic error).
+   */
+  source?: SourceDetail | null
 }
 
 /**
  * Top-level viewer. Owns the sample-values toggle, search input, sort
  * mode, and per-row expansion state.
  */
-export function SchemaViewer({ sourceId }: SchemaViewerProps) {
-  const query = useSchemaDocument(sourceId)
+export function SchemaViewer({ sourceId, source }: SchemaViewerProps) {
+  const schemaStatus = source?.schema_status ?? null
+  // STUDYING / QUEUED are short-circuited *before* the React Query result so
+  // the spinner appears immediately even on a cold cache. The parent page's
+  // `useSource(..., { pollWhileRunning: 'auto' })` already polls every 3s
+  // while these states are active, so the tab auto-flips when ready.
+  const isStudying = schemaStatus === 'STUDYING' || schemaStatus === 'QUEUED'
+  // FAILED is also short-circuited: we render the error UI from the source
+  // detail's `last_error_*` fields and never hit the schema-document endpoint
+  // (it would return either a stale doc from a previous successful run or a
+  // 404 — neither is helpful here).
+  const isKnownFailed = schemaStatus === 'FAILED'
+
+  // Don't fire the schema-document fetch while the studying agent is still
+  // running or the last run failed — both branches render without needing
+  // the document payload.
+  const query = useSchemaDocument(sourceId, {
+    enabled: !isStudying && !isKnownFailed,
+  })
   const triggerSync = useTriggerSync()
 
   // Session-scoped — explicitly NOT persisted to localStorage so the audit
@@ -92,25 +125,69 @@ export function SchemaViewer({ sourceId }: SchemaViewerProps) {
   const [sortMode, setSortMode] = useState<SortMode>('name')
   const [expanded, setExpanded] = useState<Record<string, boolean>>({})
 
+  // --- State branching --------------------------------------------------
+  // Order is intentional: studying beats failed (the next run might already
+  // be in flight); failed beats not-yet-documented; document-with-zero-tables
+  // beats default empty (we have a real answer, just no rows).
+
+  if (isStudying) {
+    return <SchemaStudyingState />
+  }
+
+  if (isKnownFailed) {
+    return (
+      <SchemaFailedState
+        phase={source?.last_error_phase ?? null}
+        message={source?.last_error_message ?? null}
+        onRestudy={() => triggerSync.mutate(sourceId)}
+        restudying={triggerSync.isPending}
+      />
+    )
+  }
+
   if (query.isPending) {
     return <SchemaViewerSkeleton />
   }
 
   if (query.isError) {
-    // 404 → empty state. `getSchemaDocumentApi` re-throws as the typed
+    // 404 → "not yet studied". `getSchemaDocumentApi` re-throws as the typed
     // SchemaDocumentNotFoundError so we don't have to parse strings here.
     if (query.error instanceof SchemaDocumentNotFoundError) {
-      return <SchemaNotYetDocumented />
+      return (
+        <SchemaNotYetDocumented
+          onRestudy={() => triggerSync.mutate(sourceId)}
+          restudying={triggerSync.isPending}
+        />
+      )
     }
+    // Anything else is a real fetch error — surface the backend's message.
     return (
-      <ErrorState
-        message="Failed to load schema. Please retry."
-        onRetry={() => void query.refetch()}
+      <SchemaFailedState
+        phase={null}
+        message={extractApiErrorMessage(query.error)}
+        onRestudy={() => void query.refetch()}
+        restudying={query.isFetching}
+        retryLabel="Retry"
       />
     )
   }
 
   const doc = query.data.schema_document
+
+  // The studying agent completed but introspection returned zero tables.
+  // Likely cause: pointed at an empty database or one the credentials
+  // can't see. Surface a distinct empty state rather than the
+  // unfiltered-empty-list look further down.
+  if (doc.tables.length === 0) {
+    return (
+      <SchemaEmptyDatabase
+        dialect={doc.dialect}
+        onRestudy={() => triggerSync.mutate(sourceId)}
+        restudying={triggerSync.isPending}
+      />
+    )
+  }
+
   const visibleTables = filterAndSortTables(doc.tables, search, sortMode)
 
   const handleToggleSamples = (next: boolean): void => {
@@ -278,16 +355,167 @@ function SchemaViewerSkeleton() {
   )
 }
 
-function SchemaNotYetDocumented() {
+interface RestudyActionProps {
+  onRestudy: () => void
+  restudying: boolean
+  label?: string
+}
+
+function RestudyAction({ onRestudy, restudying, label = 'Run schema study' }: RestudyActionProps) {
+  return (
+    <Button
+      type="button"
+      variant="outline"
+      size="sm"
+      onClick={onRestudy}
+      disabled={restudying}
+      data-testid="schema-restudy-action"
+    >
+      <RefreshCwIcon className="mr-1.5 h-3.5 w-3.5" aria-hidden />
+      {restudying ? 'Starting…' : label}
+    </Button>
+  )
+}
+
+interface SchemaNotYetDocumentedProps {
+  onRestudy: () => void
+  restudying: boolean
+}
+
+function SchemaNotYetDocumented({ onRestudy, restudying }: SchemaNotYetDocumentedProps) {
   return (
     <div
-      className="space-y-2 rounded-md border bg-muted/20 p-6 text-sm"
+      className="space-y-3 rounded-md border bg-muted/20 p-6 text-sm"
       data-testid="schema-empty-state"
     >
-      <p className="font-medium">Schema not yet documented.</p>
+      <p className="font-medium">This source hasn&apos;t been studied yet.</p>
       <p className="text-xs text-muted-foreground">
-        Click <strong>Re-study schema</strong> in the Sync tab to start.
+        The AI catalogs the schema on first sync — trigger a study or run a
+        sync to populate it.
       </p>
+      <RestudyAction onRestudy={onRestudy} restudying={restudying} />
+    </div>
+  )
+}
+
+function SchemaStudyingState() {
+  return (
+    <div
+      className="space-y-3 rounded-md border bg-muted/20 p-6 text-sm"
+      data-testid="schema-studying-state"
+      role="status"
+      aria-live="polite"
+    >
+      <div className="flex items-center gap-2 font-medium">
+        <Loader2Icon
+          className="h-4 w-4 animate-spin text-muted-foreground"
+          aria-hidden
+        />
+        <span>The AI is studying the schema right now.</span>
+      </div>
+      <p className="text-xs text-muted-foreground">
+        This usually takes 10–30s. The page will refresh automatically when
+        it&apos;s ready.
+      </p>
+      <div className="space-y-2 pt-1">
+        <Skeleton className="h-3 w-full max-w-md" />
+        <Skeleton className="h-9 w-full" />
+        <Skeleton className="h-12 w-full" />
+        <Skeleton className="h-12 w-full" />
+      </div>
+    </div>
+  )
+}
+
+interface SchemaFailedStateProps {
+  phase: string | null
+  message: string | null
+  onRestudy: () => void
+  restudying: boolean
+  retryLabel?: string
+}
+
+function SchemaFailedState({
+  phase,
+  message,
+  onRestudy,
+  restudying,
+  retryLabel = 'Re-study schema',
+}: SchemaFailedStateProps) {
+  return (
+    <div
+      className="space-y-3 rounded-md border border-destructive/40 bg-destructive/5 p-6 text-sm"
+      data-testid="schema-failed-state"
+      role="alert"
+    >
+      <div className="flex items-start gap-2">
+        <AlertCircleIcon
+          className="mt-0.5 h-4 w-4 shrink-0 text-destructive"
+          aria-hidden
+        />
+        <div className="space-y-1">
+          <p className="font-medium text-destructive">Schema study failed.</p>
+          {phase ? (
+            <p
+              className="text-xs text-muted-foreground"
+              data-testid="schema-failed-phase"
+            >
+              Failed during phase <span className="font-mono">{phase}</span>.
+            </p>
+          ) : null}
+          {message ? (
+            <p
+              className="break-words text-xs text-muted-foreground"
+              data-testid="schema-failed-message"
+            >
+              {message}
+            </p>
+          ) : (
+            <p className="text-xs text-muted-foreground">
+              No details reported by the studying agent.
+            </p>
+          )}
+        </div>
+      </div>
+      <RestudyAction
+        onRestudy={onRestudy}
+        restudying={restudying}
+        label={retryLabel}
+      />
+    </div>
+  )
+}
+
+interface SchemaEmptyDatabaseProps {
+  dialect: string
+  onRestudy: () => void
+  restudying: boolean
+}
+
+function SchemaEmptyDatabase({
+  dialect,
+  onRestudy,
+  restudying,
+}: SchemaEmptyDatabaseProps) {
+  return (
+    <div
+      className="space-y-3 rounded-md border bg-muted/20 p-6 text-sm"
+      data-testid="schema-empty-database-state"
+    >
+      <p className="font-medium">
+        The studying agent found no tables in the connected database.
+      </p>
+      <p className="text-xs text-muted-foreground">
+        The {dialect} connection succeeded, but the studying agent didn&apos;t
+        see any user tables. Double-check the connection — particularly the
+        database name and schema search path — to make sure you pointed at
+        the right database, then re-run the study.
+      </p>
+      <RestudyAction
+        onRestudy={onRestudy}
+        restudying={restudying}
+        label="Re-study schema"
+      />
     </div>
   )
 }

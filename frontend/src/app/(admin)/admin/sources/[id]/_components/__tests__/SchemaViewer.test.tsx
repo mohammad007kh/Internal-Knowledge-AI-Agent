@@ -28,6 +28,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   type SchemaDocument,
   type SchemaDocumentResponse,
+  type SourceDetail,
   type TableDoc,
   SchemaDocumentNotFoundError,
 } from '@/lib/api/sources'
@@ -180,14 +181,48 @@ function makeResponse(
   } satisfies SchemaDocumentResponse
 }
 
-function renderViewer(sourceId = 'src-1') {
+function renderViewer(
+  sourceId = 'src-1',
+  source: SourceDetail | null = null,
+) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   })
   function Wrapper({ children }: { children: ReactNode }) {
     return <QueryClientProvider client={client}>{children}</QueryClientProvider>
   }
-  return render(<SchemaViewer sourceId={sourceId} />, { wrapper: Wrapper })
+  return render(
+    <SchemaViewer sourceId={sourceId} source={source} />,
+    { wrapper: Wrapper },
+  )
+}
+
+/**
+ * Minimal SourceDetail factory used by the FX18 four-state tests. The
+ * SchemaViewer only reads `schema_status`, `last_error_phase`, and
+ * `last_error_message` off the source; everything else is filler the
+ * type system demands.
+ */
+function makeSource(overrides: Partial<SourceDetail> = {}): SourceDetail {
+  const base: SourceDetail = {
+    id: 'src-1',
+    name: 'Test DB',
+    source_type: 'database',
+    is_active: true,
+    created_at: new Date().toISOString(),
+    source_mode: 'live',
+    retrieval_mode: 'text_to_query',
+    description: null,
+    sync_mode: 'manual',
+    sync_schedule: null,
+    last_synced_at: null,
+    status: 'ready',
+    citations_enabled: false,
+    updated_at: new Date().toISOString(),
+    owner_email: null,
+    schema_summary: null,
+  }
+  return { ...base, ...overrides } satisfies SourceDetail
 }
 
 // ---------------------------------------------------------------------------
@@ -222,8 +257,142 @@ describe('SchemaViewer — loading and error states', () => {
     getSchemaDocumentMock.mockRejectedValue(new SchemaDocumentNotFoundError())
     renderViewer()
     const empty = await screen.findByTestId('schema-empty-state')
-    expect(empty).toHaveTextContent(/Schema not yet documented/i)
-    expect(empty).toHaveTextContent(/Re-study schema/i)
+    expect(empty).toHaveTextContent(/hasn['’]t been studied yet/i)
+    expect(empty).toHaveTextContent(/AI catalogs the schema on first sync/i)
+    // Inline "Run schema study" action — distinct from the generic
+    // pre-FX18 "Re-study schema in the Sync tab" prose.
+    expect(
+      within(empty).getByTestId('schema-restudy-action'),
+    ).toHaveTextContent(/Run schema study/i)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// FX18 — four distinguishable non-ready states
+// ---------------------------------------------------------------------------
+
+describe('SchemaViewer — FX18 four-state UX', () => {
+  it('STUDYING — shows the in-progress spinner and skips the document fetch', () => {
+    const fetchSpy = vi.fn()
+    getSchemaDocumentMock.mockImplementation(async (id) => {
+      fetchSpy(id)
+      // The component should NOT fetch while schema_status is STUDYING.
+      return Promise.resolve(makeResponse())
+    })
+    renderViewer('src-1', makeSource({ schema_status: 'STUDYING' }))
+
+    const studying = screen.getByTestId('schema-studying-state')
+    expect(studying).toHaveTextContent(
+      /AI is studying the schema right now/i,
+    )
+    expect(studying).toHaveTextContent(/10[–-]30s/i)
+    // ARIA live region for screen readers.
+    expect(studying).toHaveAttribute('role', 'status')
+    // Critically: do NOT hit the schema-document endpoint while studying —
+    // the parent page's `useSource(..., { pollWhileRunning: 'auto' })`
+    // already polls and will flip schema_status to READY when done.
+    expect(fetchSpy).not.toHaveBeenCalled()
+  })
+
+  it('QUEUED — also renders the studying spinner', () => {
+    renderViewer('src-1', makeSource({ schema_status: 'QUEUED' }))
+    expect(screen.getByTestId('schema-studying-state')).toBeInTheDocument()
+  })
+
+  it('FAILED — surfaces the studying agent error phase and message', () => {
+    renderViewer(
+      'src-1',
+      makeSource({
+        schema_status: 'FAILED',
+        last_error_phase: 'CONNECT',
+        last_error_message: 'Could not reach host on port 5432.',
+      }),
+    )
+
+    const failed = screen.getByTestId('schema-failed-state')
+    expect(failed).toHaveTextContent(/Schema study failed/i)
+    expect(within(failed).getByTestId('schema-failed-phase')).toHaveTextContent(
+      /CONNECT/,
+    )
+    expect(
+      within(failed).getByTestId('schema-failed-message'),
+    ).toHaveTextContent(/Could not reach host on port 5432/i)
+    expect(
+      within(failed).getByTestId('schema-restudy-action'),
+    ).toBeInTheDocument()
+  })
+
+  it('FAILED — clicking re-study triggers a new sync', async () => {
+    const user = userEvent.setup()
+    renderViewer(
+      'src-7',
+      makeSource({
+        id: 'src-7',
+        schema_status: 'FAILED',
+        last_error_phase: 'INVENTORY',
+        last_error_message: 'Permission denied to schema.',
+      }),
+    )
+
+    await user.click(screen.getByTestId('schema-restudy-action'))
+    await waitFor(() =>
+      expect(triggerSyncMock).toHaveBeenCalledWith('src-7'),
+    )
+  })
+
+  it('READY with zero tables — distinct empty-database state, not generic empty', async () => {
+    getSchemaDocumentMock.mockResolvedValue(
+      makeResponse(makeDoc({ tables: [] })),
+    )
+    renderViewer('src-1', makeSource({ schema_status: 'READY' }))
+
+    const emptyDb = await screen.findByTestId(
+      'schema-empty-database-state',
+    )
+    expect(emptyDb).toHaveTextContent(/found no tables/i)
+    expect(emptyDb).toHaveTextContent(/postgresql/i)
+    expect(emptyDb).toHaveTextContent(/database name/i)
+    // The pre-FX18 generic empty-state must NOT also render.
+    expect(
+      screen.queryByTestId('schema-empty-state'),
+    ).not.toBeInTheDocument()
+  })
+
+  it('non-404 fetch error — surfaces the backend message via extractApiErrorMessage', async () => {
+    const apiError = {
+      response: {
+        status: 500,
+        data: {
+          detail: {
+            detail: 'Database introspection timed out after 30s.',
+            title: 'Internal Server Error',
+          },
+        },
+      },
+      message: 'Request failed with status code 500',
+    }
+    getSchemaDocumentMock.mockRejectedValue(apiError)
+    renderViewer('src-1', makeSource({ schema_status: 'READY' }))
+
+    const failed = await screen.findByTestId('schema-failed-state')
+    expect(
+      within(failed).getByTestId('schema-failed-message'),
+    ).toHaveTextContent(/Database introspection timed out after 30s/i)
+    // No upstream phase — only the document fetch failed.
+    expect(
+      within(failed).queryByTestId('schema-failed-phase'),
+    ).not.toBeInTheDocument()
+  })
+
+  it('null schema_status with 404 — empty state offers "Run schema study"', async () => {
+    getSchemaDocumentMock.mockRejectedValue(new SchemaDocumentNotFoundError())
+    renderViewer('src-1', makeSource({ schema_status: null }))
+
+    const empty = await screen.findByTestId('schema-empty-state')
+    expect(empty).toHaveTextContent(/hasn['’]t been studied yet/i)
+    expect(
+      within(empty).getByTestId('schema-restudy-action'),
+    ).toHaveTextContent(/Run schema study/i)
   })
 })
 

@@ -1606,7 +1606,7 @@ function DataTabBody({ source, documents, documentsTotal }: DataTabBodyProps) {
     kind === 'database' ? 'Table' : kind === 'file' ? 'File ID' : 'Page ID'
 
   if (kind === 'database') {
-    return <SchemaViewer sourceId={source.id} />
+    return <SchemaViewer sourceId={source.id} source={source} />
   }
 
   if (documents.length === 0) {
