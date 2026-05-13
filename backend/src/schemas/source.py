@@ -101,11 +101,16 @@ class DatabaseConnectionConfig(BaseModel):
       * SQL  → ``{connection_string, query, ssl_mode?}`` for ``DatabaseConnector``
       * Mongo → ``{uri, database, collection}`` for ``MongoDBConnector``
 
-    For SQL dialects the ``query`` field is REQUIRED — the user must supply a
-    SELECT statement that returns the rows to index. Read-only is enforced
-    independently by ``is_safe_sql`` in the text_to_query node, which rejects
-    any non-SELECT statement at execution time. The MongoDB ``collection``
-    field is also required.
+    For SQL dialects ``query`` is OPTIONAL. The studying agent enumerates
+    the schema on its own (``study_schema``), and chat questions are handled
+    by the ``text_to_query`` node which generates a SELECT from the question
+    + schema doc at query time — neither path needs a pre-stored query.
+    A query value, if supplied, is used only by the legacy "extract every
+    row as a document" path (``SqlDatabaseConnector.extract_documents``).
+
+    Read-only is enforced independently by ``is_safe_sql`` in the
+    text_to_query node, which rejects any non-SELECT statement at execution
+    time. The MongoDB ``collection`` field is required.
 
     Credentials are URL-quoted at translation time before being placed into
     any connection string (see :func:`SourceService._build_database_config`).
@@ -127,18 +132,24 @@ class DatabaseConnectionConfig(BaseModel):
 
     @model_validator(mode="after")
     def _enforce_per_dialect_shape(self) -> DatabaseConnectionConfig:
-        """Enforce SQL vs MongoDB field requirements after parse.
+        """Enforce per-dialect field requirements after parse.
 
-        SQL dialects: ``query`` is required (must be a non-empty SELECT).
-        MongoDB: ``collection`` is required.
+        MongoDB: ``collection`` is required (the connector needs to know
+        which collection to read).
+
+        SQL dialects: no per-dialect required fields beyond the base
+        connection params. ``query`` is OPTIONAL — see class docstring.
+        An empty/whitespace-only ``query`` is normalised to ``None`` so
+        the connector's ``extract_documents`` path can short-circuit
+        cleanly instead of running ``SELECT  ;``.
         """
         if self.db_type == "mongodb":
             if not self.collection or not self.collection.strip():
                 raise ValueError("'collection' is required for MongoDB sources.")
             return self
-        # SQL branch
-        if not self.query or not self.query.strip():
-            raise ValueError("'query' is required for SQL dialects.")
+        # SQL branch — empty query → None so downstream paths don't see "".
+        if self.query is not None and not self.query.strip():
+            object.__setattr__(self, "query", None)
         return self
 
 
