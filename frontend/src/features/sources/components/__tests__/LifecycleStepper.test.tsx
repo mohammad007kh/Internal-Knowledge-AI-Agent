@@ -191,4 +191,50 @@ describe('LifecycleStepper', () => {
       )
     })
   })
+
+  describe('FX26: file pending_upload chip is hasUpload-aware', () => {
+    it('without hasUpload, the file pending_upload chip reads "Waiting for upload"', () => {
+      render(<LifecycleStepper phase="pending_upload" sourceKind="file" />)
+      const chips = screen.getAllByTestId('lifecycle-step')
+      const pendingChip = chips.find(
+        (c) => c.getAttribute('data-phase') === 'pending_upload'
+      )
+      expect(pendingChip?.textContent).toContain('Waiting for upload')
+    })
+
+    it('with hasUpload=true the file pending_upload chip flips to "Queued for indexing"', () => {
+      render(
+        <LifecycleStepper
+          phase="pending_upload"
+          sourceKind="file"
+          hasUpload
+        />
+      )
+      const chips = screen.getAllByTestId('lifecycle-step')
+      const pendingChip = chips.find(
+        (c) => c.getAttribute('data-phase') === 'pending_upload'
+      )
+      expect(pendingChip?.textContent).toContain('Queued for indexing')
+    })
+
+    it('hasUpload does not change DB / web / connector pending chip labels', () => {
+      // The flag is only meaningful for the file pending_upload pair.
+      render(
+        <LifecycleStepper
+          phase="pending_upload"
+          sourceKind="database"
+          hasUpload
+        />
+      )
+      const dbChips = screen.getAllByTestId('lifecycle-step')
+      const dbPending = dbChips.find(
+        (c) => c.getAttribute('data-phase') === 'pending_upload'
+      )
+      expect(dbPending?.textContent).toContain('Queued')
+      // The DB queued copy is intentionally "Queued" (not "Queued for
+      // indexing") — keep the assertion strict so a regression that
+      // bleeds the file-specific copy elsewhere shows up here.
+      expect(dbPending?.textContent).not.toContain('for indexing')
+    })
+  })
 })

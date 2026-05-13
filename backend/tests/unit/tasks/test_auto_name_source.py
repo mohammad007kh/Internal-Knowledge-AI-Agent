@@ -117,6 +117,14 @@ async def test_happy_path_writes_ai_name_and_description() -> None:
             "src.tasks.auto_name_source._generate_name_and_description",
             new=AsyncMock(return_value=("Q4 Sales Files", "Q4 sales reports.")),
         ),
+        # FX26 — the rescue-sync hook opens its own session; patch it out
+        # so the naming-pipeline assertions below stay focused on what we
+        # are actually testing. Hook-specific behaviour is covered by the
+        # dedicated tests further down.
+        patch(
+            "src.tasks.auto_name_source._maybe_enqueue_initial_sync",
+            new=AsyncMock(return_value=False),
+        ),
     ):
         result = await _run(source.id)
 
@@ -149,6 +157,10 @@ async def test_appends_history_row_when_prior_description_present() -> None:
             "src.tasks.auto_name_source._generate_name_and_description",
             new=AsyncMock(return_value=("Q4 Sales Files", "Q4 sales reports.")),
         ),
+        patch(
+            "src.tasks.auto_name_source._maybe_enqueue_initial_sync",
+            new=AsyncMock(return_value=False),
+        ),
     ):
         await _run(source.id)
 
@@ -180,7 +192,149 @@ async def test_does_not_append_history_row_when_no_prior_description() -> None:
             "src.tasks.auto_name_source._generate_name_and_description",
             new=AsyncMock(return_value=("Q4 Sales Files", "Q4 sales reports.")),
         ),
+        patch(
+            "src.tasks.auto_name_source._maybe_enqueue_initial_sync",
+            new=AsyncMock(return_value=False),
+        ),
     ):
         await _run(source.id)
 
     session.add.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# FX26 — initial-sync rescue hook
+# ---------------------------------------------------------------------------
+
+
+async def test_initial_sync_rescue_enqueues_when_no_sync_job_exists() -> None:
+    """FX26 happy path: auto-name completed, no SyncJob row → enqueue
+    ``tasks.sync_source`` so the source actually gets ingested."""
+    from src.tasks.auto_name_source import _maybe_enqueue_initial_sync
+
+    dispatched: list[uuid.UUID] = []
+
+    def fake_dispatch(source_id: uuid.UUID) -> None:
+        dispatched.append(source_id)
+
+    source_id = uuid.uuid4()
+    with (
+        patch(
+            "src.tasks.auto_name_source._count_sync_jobs",
+            new=AsyncMock(return_value=0),
+        ),
+        patch(
+            "src.tasks.auto_name_source._dispatch_sync_source",
+            new=fake_dispatch,
+        ),
+    ):
+        enqueued = await _maybe_enqueue_initial_sync(source_id)
+
+    assert enqueued is True
+    assert dispatched == [source_id]
+
+
+async def test_initial_sync_rescue_skips_when_sync_job_already_exists() -> None:
+    """Idempotency: if any SyncJob row exists for this source the rescue
+    must be a no-op. Prevents double-syncs when the create endpoint's
+    enqueue + this hook both fire successfully."""
+    from src.tasks.auto_name_source import _maybe_enqueue_initial_sync
+
+    dispatch_mock = MagicMock()
+    with (
+        patch(
+            "src.tasks.auto_name_source._count_sync_jobs",
+            new=AsyncMock(return_value=1),
+        ),
+        patch(
+            "src.tasks.auto_name_source._dispatch_sync_source",
+            new=dispatch_mock,
+        ),
+    ):
+        enqueued = await _maybe_enqueue_initial_sync(uuid.uuid4())
+
+    assert enqueued is False
+    dispatch_mock.assert_not_called()
+
+
+async def test_initial_sync_rescue_swallows_dispatch_errors() -> None:
+    """A broker outage during the rescue dispatch must NOT undo the
+    naming write that just committed in ``_run``. The hook returns
+    ``False`` and the caller proceeds."""
+    from src.tasks.auto_name_source import _maybe_enqueue_initial_sync
+
+    def boom(_source_id: uuid.UUID) -> None:
+        raise RuntimeError("broker down")
+
+    with (
+        patch(
+            "src.tasks.auto_name_source._count_sync_jobs",
+            new=AsyncMock(return_value=0),
+        ),
+        patch(
+            "src.tasks.auto_name_source._dispatch_sync_source",
+            new=boom,
+        ),
+    ):
+        enqueued = await _maybe_enqueue_initial_sync(uuid.uuid4())
+
+    assert enqueued is False
+
+
+async def test_initial_sync_rescue_swallows_count_errors() -> None:
+    """A DB outage while reading the SyncJob count must not bubble. The
+    naming write upstream is the durable outcome of the task."""
+    from src.tasks.auto_name_source import _maybe_enqueue_initial_sync
+
+    dispatch_mock = MagicMock()
+    with (
+        patch(
+            "src.tasks.auto_name_source._count_sync_jobs",
+            new=AsyncMock(side_effect=RuntimeError("db down")),
+        ),
+        patch(
+            "src.tasks.auto_name_source._dispatch_sync_source",
+            new=dispatch_mock,
+        ),
+    ):
+        enqueued = await _maybe_enqueue_initial_sync(uuid.uuid4())
+
+    assert enqueued is False
+    dispatch_mock.assert_not_called()
+
+
+async def test_run_calls_initial_sync_rescue_after_naming_commit() -> None:
+    """End-to-end: ``_run`` must invoke ``_maybe_enqueue_initial_sync``
+    AFTER the naming commit, so a hook failure can't roll back the AI
+    naming write. Verified by patching the hook and asserting it was
+    awaited exactly once after the session commit."""
+    source = _make_pending_source()
+    session, factory = _patched_session(load_returns=source)
+
+    fake_profiler = MagicMock()
+    fake_profiler.profile = AsyncMock(return_value=_profile_for(source))
+    fake_factory = MagicMock(for_source=MagicMock(return_value=fake_profiler))
+
+    rescue_mock = AsyncMock(return_value=True)
+
+    with (
+        patch("src.tasks.auto_name_source.AsyncSessionLocal", factory),
+        patch(
+            "src.tasks.auto_name_source._build_profiler_factory",
+            return_value=fake_factory,
+        ),
+        patch(
+            "src.tasks.auto_name_source._generate_name_and_description",
+            new=AsyncMock(return_value=("Q4 Sales Files", "Q4 sales reports.")),
+        ),
+        patch(
+            "src.tasks.auto_name_source._maybe_enqueue_initial_sync",
+            new=rescue_mock,
+        ),
+    ):
+        result = await _run(source.id)
+
+    rescue_mock.assert_awaited_once_with(source.id)
+    session.commit.assert_awaited_once()
+    assert result["status"] == "ai_set"
+    assert result["initial_sync_enqueued"] is True

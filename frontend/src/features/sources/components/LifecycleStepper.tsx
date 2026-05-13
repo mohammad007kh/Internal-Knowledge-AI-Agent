@@ -36,6 +36,13 @@ interface LifecycleStepperProps {
    * that haven't been migrated render exactly the previous behaviour.
    */
   sourceKind?: SourceKind
+  /**
+   * FX26 — when true for a file source, retunes the `pending_upload` chip
+   * label from "Waiting for upload" to "Queued for indexing". Has no
+   * effect on any other (phase, kind) combination. Defaults to `false` so
+   * callers that don't know about the flag keep the existing copy.
+   */
+  hasUpload?: boolean
   className?: string
 }
 
@@ -155,11 +162,13 @@ function Connector({ done }: { done: boolean }) {
 export function LifecycleStepper({
   phase,
   sourceKind = 'file',
+  hasUpload = false,
   className,
 }: LifecycleStepperProps) {
   const order = phaseOrderFor(sourceKind)
   const currentIndex = stepIndex(phase, order)
   const isFailed = phase === 'failed'
+  const labelOpts = { hasUpload }
 
   return (
     <TooltipProvider delayDuration={150}>
@@ -178,8 +187,8 @@ export function LifecycleStepper({
               currentIndex={currentIndex}
               stepPhase={stepPhase}
               isFailed={isFailed}
-              label={phaseLabel(stepPhase, sourceKind)}
-              hint={phaseHint(stepPhase, sourceKind)}
+              label={phaseLabel(stepPhase, sourceKind, labelOpts)}
+              hint={phaseHint(stepPhase, sourceKind, labelOpts)}
             />
             {idx < order.length - 1 ? (
               <Connector done={idx < currentIndex} />

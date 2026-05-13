@@ -321,6 +321,40 @@ describe('phaseLabel', () => {
       expect(phaseLabel(phase)).toBe(phaseLabel(phase, 'file'))
     }
   })
+
+  describe('FX26: file pending_upload label is hasUpload-aware', () => {
+    it('with hasUpload=true the file label flips to "Queued for indexing"', () => {
+      expect(
+        phaseLabel('pending_upload', 'file', { hasUpload: true })
+      ).toBe('Queued for indexing')
+    })
+
+    it('with hasUpload=false the file label stays "Waiting for upload"', () => {
+      expect(
+        phaseLabel('pending_upload', 'file', { hasUpload: false })
+      ).toBe('Waiting for upload')
+    })
+
+    it('omitting opts is equivalent to hasUpload=false (back-compat)', () => {
+      expect(phaseLabel('pending_upload', 'file')).toBe('Waiting for upload')
+    })
+
+    it('does not affect other phases or kinds', () => {
+      // hasUpload is only meaningful for the file pending_upload pair.
+      expect(
+        phaseLabel('chunking', 'file', { hasUpload: true })
+      ).toBe('Chunking content')
+      expect(
+        phaseLabel('pending_upload', 'database', { hasUpload: true })
+      ).toBe('Queued')
+      expect(
+        phaseLabel('pending_upload', 'web', { hasUpload: true })
+      ).toBe('Queued')
+      expect(
+        phaseLabel('pending_upload', 'connector', { hasUpload: true })
+      ).toBe('Queued')
+    })
+  })
 })
 
 describe('phaseHint', () => {
@@ -357,6 +391,20 @@ describe('phaseHint', () => {
     for (const phase of inFlightPhases) {
       expect(phaseHint(phase)).toBe(phaseHint(phase, 'file'))
     }
+  })
+
+  describe('FX26: file pending_upload hint is hasUpload-aware', () => {
+    it('with hasUpload=true the hint reflects "queued for indexing"', () => {
+      expect(
+        phaseHint('pending_upload', 'file', { hasUpload: true })
+      ).toMatch(/queued/i)
+    })
+
+    it('with hasUpload=false the hint still mentions object storage', () => {
+      expect(
+        phaseHint('pending_upload', 'file', { hasUpload: false })
+      ).toMatch(/object storage/i)
+    })
   })
 })
 

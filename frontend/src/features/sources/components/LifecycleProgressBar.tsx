@@ -22,19 +22,26 @@ interface LifecycleProgressBarProps {
   className?: string
   /** Optional sub-line shown beneath the bar (e.g. "started 12s ago"). */
   detail?: string | null
+  /**
+   * FX26 — when true (file source with bytes in object storage) the
+   * `pending_upload` label flips to "Queued for indexing" to match the
+   * stepper. Default `false` keeps the existing copy for legacy callers.
+   */
+  hasUpload?: boolean
 }
 
 export function LifecycleProgressBar({
   phase,
   className,
   detail,
+  hasUpload = false,
 }: LifecycleProgressBarProps) {
   // FX16 contract: progress bar disappears when the process is done.
   if (!isInFlightPhase(phase)) return null
 
   const percent = phaseProgress(phase)
   const indeterminate = phase === 'pending_upload'
-  const label = phaseLabel(phase)
+  const label = phaseLabel(phase, 'file', { hasUpload })
 
   return (
     <div

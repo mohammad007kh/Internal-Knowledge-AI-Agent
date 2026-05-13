@@ -470,11 +470,18 @@ export default function SourceDetailPage() {
                 admin agency. The confirm dialog protects against misclicks. */}
             {lifecycle.canStopSync ? (
               <Button
-                variant="destructive"
+                // U16-ux: outline, NOT destructive. Cancellation halts a
+                // process and retains completed work — destructive red is
+                // semantically reserved for delete-source / drop-data
+                // actions. Neutral outline keeps the affordance hierarchy
+                // honest and visually pairs with the active progress bar
+                // without competing for attention.
+                variant="outline"
                 size="sm"
                 onClick={() => setConfirmStopSync(true)}
                 disabled={cancelSyncMutation.isPending}
                 aria-label={`Stop in-progress sync for ${source.name}`}
+                aria-busy={cancelSyncMutation.isPending}
                 data-testid="header-stop-sync"
               >
                 {cancelSyncMutation.isPending ? (
@@ -616,6 +623,7 @@ export default function SourceDetailPage() {
               />
               <LifecycleProgressBar
                 phase={lifecycle.phase}
+                hasUpload={source.has_upload === true}
                 detail={
                   source.latest_job?.started_at
                     ? `Started ${formatTimestamp(source.latest_job.started_at)}`
@@ -879,14 +887,15 @@ export default function SourceDetailPage() {
           <AlertDialogHeader>
             <AlertDialogTitle>Stop the in-progress sync?</AlertDialogTitle>
             <AlertDialogDescription>
-              Work completed so far will be retained. The worker will exit
-              at its next safe checkpoint — this can take a few seconds.
+              Work already completed will be kept. The sync will stop at
+              the next safe checkpoint, which can take a few seconds.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Keep syncing</AlertDialogCancel>
+            {/* U16-ux: default variant, NOT destructive. Cancellation isn't
+                a delete; the primary action button stays neutral. */}
             <AlertDialogAction
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
               disabled={cancelSyncMutation.isPending}
               data-testid="confirm-stop-sync"
               onClick={() => {
@@ -899,7 +908,11 @@ export default function SourceDetailPage() {
                   { sourceId: id, jobId },
                   {
                     onSuccess: () => {
-                      toast.success('Cancelling sync…')
+                      // U16-ux: info-level, not success. "Success" implies
+                      // the sync finished cleanly; this is acknowledging
+                      // a stop-request that will land terminally a few
+                      // seconds later.
+                      toast.info('Stopping sync at next checkpoint…')
                       setConfirmStopSync(false)
                     },
                     onError: (err: unknown) => {
@@ -1008,12 +1021,15 @@ function SyncHeaderBand({
 
   const stopButton = (
     <Button
-      variant="destructive"
+      // U16-ux: outline, NOT destructive — same reasoning as the header
+      // button. Red is reserved for delete-source.
+      variant="outline"
       size="sm"
       onClick={onStopSync}
       disabled={isCancelling || onStopSync === undefined}
       className="w-full sm:w-auto"
       aria-label={`Stop in-progress sync for ${sourceName}`}
+      aria-busy={isCancelling}
       data-testid="sync-header-stop"
     >
       {isCancelling ? (

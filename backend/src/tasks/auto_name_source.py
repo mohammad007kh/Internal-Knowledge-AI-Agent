@@ -17,6 +17,15 @@ Pipeline:
 3. Persist on the Source row, flip ``name_status`` and
    ``description_status`` to ``ai_set``, and append a row to
    ``source_description_history`` so the AI write is auditable.
+4. (FX26) Belt-and-suspenders: if NO ``SyncJob`` row exists yet for the
+   source, enqueue ``tasks.sync_source``. The create endpoint already
+   enqueues that task on the way out (sources.py), but a broker outage
+   at the exact moment of source creation would swallow the dispatch
+   silently — leaving the source stuck in ``pending_upload`` forever
+   even though the upload + AI-naming pass finished cleanly. The
+   count-guarded re-enqueue here is safe to call repeatedly (a duplicate
+   enqueue would just produce a second ``SyncJob`` row, which the second
+   trigger guards against).
 
 Idempotent: if the source's status is no longer ``pending_ai`` (admin
 typed something while we were working, or the task already ran), the
@@ -112,10 +121,18 @@ async def _run(source_id: uuid.UUID) -> dict[str, Any]:
             "ai_description_len": len(ai_description),
         },
     )
+
+    # FX26 — belt-and-suspenders initial-sync trigger. Best-effort: a failure
+    # here MUST NOT roll back the naming we just persisted. Runs in its own
+    # short-lived session so the naming commit above stays the durable
+    # outcome of this task even if the broker is unreachable.
+    sync_enqueued = await _maybe_enqueue_initial_sync(source_id)
+
     return {
         "source_id": str(source_id),
         "status": "ai_set",
         "name": ai_name,
+        "initial_sync_enqueued": sync_enqueued,
     }
 
 
@@ -219,3 +236,90 @@ async def _persist_ai_naming(
             replaced_by=None,
         )
         session.add(history_row)
+
+
+def _dispatch_sync_source(source_id: uuid.UUID) -> None:
+    """Module-level Celery dispatch shim for :func:`_maybe_enqueue_initial_sync`.
+
+    Wrapping ``celery.current_app.send_task`` in a sync function lets tests
+    monkeypatch this single symbol on the :mod:`src.tasks.auto_name_source`
+    namespace, sidestepping the ``LocalProxy`` quirks of patching
+    ``celery.current_app`` directly. Production behaviour is unchanged —
+    one ``send_task`` call against the running Celery app.
+    """
+    from celery import current_app  # noqa: PLC0415
+
+    current_app.send_task("tasks.sync_source", args=[str(source_id)])
+
+
+async def _count_sync_jobs(source_id: uuid.UUID) -> int:
+    """Return the total number of SyncJob rows for *source_id*.
+
+    Extracted from :func:`_maybe_enqueue_initial_sync` so tests can stub
+    the count without having to thread a fake session through
+    :data:`AsyncSessionLocal`. The implementation deliberately ignores
+    soft-deleted / terminal status — any row at all counts as "the create
+    endpoint already kicked this off once", which is the idempotency
+    semantics we want for the rescue.
+    """
+    from sqlalchemy import func, select  # noqa: PLC0415
+
+    from src.models.sync_job import SyncJob  # noqa: PLC0415
+
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            select(func.count())
+            .select_from(SyncJob)
+            .where(SyncJob.source_id == source_id)
+        )
+        return int(result.scalar_one() or 0)
+
+
+async def _maybe_enqueue_initial_sync(source_id: uuid.UUID) -> bool:
+    """Idempotently enqueue ``tasks.sync_source`` if no sync ever ran (FX26).
+
+    Returns ``True`` iff a fresh dispatch was attempted, ``False`` when a
+    SyncJob already exists for *source_id* (or the dispatch was skipped on
+    failure). Lives at module level so tests can monkeypatch the celery
+    dispatch without spinning up a real broker.
+
+    The guard is a single ``COUNT(*) FROM sync_jobs WHERE source_id = …``
+    — any pending/running/terminal row counts as "we've already kicked
+    this off once" and the rescue stays a no-op. The create endpoint
+    (``api/v1/sources.py``) is the primary trigger; this hook only matters
+    when that dispatch was swallowed by a transient broker outage and the
+    source would otherwise be stranded with ``name_status='ai_set'`` and
+    no sync_job row forever.
+
+    Errors are swallowed — the AI naming write that just committed in the
+    caller is the durable outcome of this task and must not be undone by
+    a transient broker hiccup here.
+    """
+    try:
+        existing_count = await _count_sync_jobs(source_id)
+        if existing_count > 0:
+            logger.info(
+                "auto_name_source: sync already ran for source %s "
+                "(count=%d) — initial-sync rescue skipped",
+                source_id,
+                existing_count,
+            )
+            return False
+
+        _dispatch_sync_source(source_id)
+        logger.info(
+            "auto_name_source: enqueued initial sync rescue",
+            extra={
+                "source_id": str(source_id),
+                "trigger": "auto_name_completed_without_sync",
+            },
+        )
+        return True
+    except Exception:  # noqa: BLE001
+        logger.warning(
+            "auto_name_source: initial-sync rescue dispatch failed — "
+            "naming preserved, source may need a manual sync",
+            extra={"source_id": str(source_id)},
+            exc_info=True,
+        )
+        return False
