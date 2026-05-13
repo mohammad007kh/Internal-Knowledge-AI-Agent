@@ -77,4 +77,22 @@ describe('ChatInputBar', () => {
     const button = screen.getByRole('button', { name: 'Send message' })
     expect(button).toBeDisabled()
   })
+
+  // FX15 — keep the three controls on the input row at the same baseline
+  // height (40px). h-7 on the source-selector trigger and min-h-[2.75rem]
+  // (44px) on the textarea both produced visibly uneven rows; this test
+  // locks the contract so a future refactor of any single control flags it.
+  it('aligns the source-selector, textarea, and send button to the same baseline height (h-10)', () => {
+    render(<ChatInputBar onSend={vi.fn()} sessionId="session-1" />, { wrapper })
+
+    const sourceTrigger = screen.getByRole('button', { name: /all sources/i })
+    const textarea = screen.getByRole('textbox', { name: 'Chat message input' })
+    const sendButton = screen.getByRole('button', { name: 'Send message' })
+
+    expect(sourceTrigger.className).toContain('h-10')
+    expect(textarea.className).toContain('min-h-10')
+    // The send button uses size="icon" which is h-10 w-10 — verify the rendered
+    // class survives so the row stays in lock-step.
+    expect(sendButton.className).toContain('h-10')
+  })
 })

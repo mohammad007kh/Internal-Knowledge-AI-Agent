@@ -137,8 +137,12 @@ export function SourceSelector({ selectedIds, onChange, disabled }: SourceSelect
       <PopoverTrigger asChild>
         <Button
           variant="outline"
-          size="sm"
-          className="h-7 gap-1.5 rounded-full text-xs"
+          // size="default" (h-10) aligns the trigger with the chat input row
+          // (textarea + send button are both 40px). Avoid size="sm" + h-10
+          // override — `sm` still emits its own `h-9` which Tailwind Merge
+          // discards, making the size prop misleading (FX15).
+          size="default"
+          className="gap-1.5 rounded-full px-3 text-xs"
           disabled={disabled}
           aria-label={
             selectedCount > 0

@@ -119,7 +119,11 @@ export function ChatInputBar({
                   ? 'Ask a question… (Enter to send)'
                   : 'Select a session first…'
           }
-          className={cn('max-h-40 min-h-[2.75rem] flex-1 resize-none rounded-xl')}
+          // min-h-10 (40px) matches the source-selector trigger and the send
+          // button so the input row has a single, consistent baseline height
+          // at rest. The textarea still grows up to max-h-40 on multi-line
+          // content via the resize-none + rows={1} contract (FX15).
+          className={cn('max-h-40 min-h-10 flex-1 resize-none rounded-xl')}
           rows={1}
           maxLength={MAX_CHARS}
           disabled={inputDisabled}
