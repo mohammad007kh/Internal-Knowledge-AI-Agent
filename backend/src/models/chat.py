@@ -38,10 +38,13 @@ class ChatSession(Base):
         nullable=False,
         index=True,
     )
-    title: Mapped[str] = mapped_column(
+    # Nullable since U15: lazy chat creation defers row insert until the
+    # user sends their first message.  The titler still fills this in on the
+    # first turn synchronously; a NULL title means "use the first user
+    # message as a preview" on the sidebar fallback.
+    title: Mapped[str | None] = mapped_column(
         Text,
-        nullable=False,
-        server_default="New conversation",
+        nullable=True,
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

@@ -214,9 +214,18 @@ async def delete_session(
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
+# Sentinel path segment used by the lazy-creation flow (U15): when the
+# frontend has not yet created a session, it POSTs to
+# ``/sessions/new/messages`` and the handler creates the row inline,
+# scoped to the caller, then emits ``event: session_created`` as the
+# very first SSE frame.  Any other non-UUID path segment is rejected
+# with 422 by the explicit format check below.
+_LAZY_SESSION_SENTINEL = "new"
+
+
 @router.post("/sessions/{session_id}/messages")
 async def send_message(
-    session_id: uuid.UUID,
+    session_id: str,
     body: ChatRequest,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
@@ -228,37 +237,93 @@ async def send_message(
     chat_session_service: Any = Depends(_get_chat_session_service),
     title_generator_service: Any = Depends(_get_title_generator),
 ) -> StreamingResponse:
-    """Stream an AI response for a user query within a chat session."""
+    """Stream an AI response for a user query within a chat session.
 
-    # Verify ownership and resolve source_ids on the request-scoped session.
-    session_obj = await chat_session_repo.get(db, session_id)
-    _assert_session_owner(session_obj, current_user)
-    source_ids = await chat_session_service.get_source_ids_for_session(
-        db,
-        session=session_obj,
-        user_id=str(current_user.id),
-        override_ids=body.source_ids,
-    )
+    ``session_id`` may be the literal sentinel ``"new"`` to trigger the
+    lazy-creation flow (U15) — the row is created inline and the response
+    leads with ``event: session_created`` so the client can swap the URL
+    before any tokens flow.  Otherwise it must be a UUID.
+    """
+
+    # --- Validate path segment: UUID or the sentinel ``"new"``. ---------
+    # FastAPI's UUID converter would 422 anything non-UUID, so we widen
+    # the param to ``str`` and validate manually to support the sentinel.
+    is_new_session = session_id == _LAZY_SESSION_SENTINEL
+    if not is_new_session:
+        try:
+            parsed_session_id = uuid.UUID(session_id)
+        except (ValueError, TypeError):
+            raise problem(
+                status=422,
+                title="Invalid session id",
+                detail=(
+                    "session_id path segment must be a UUID or the literal "
+                    f"sentinel '{_LAZY_SESSION_SENTINEL}'."
+                ),
+            )
+
+    # --- Resolve / create the session ----------------------------------
+    if is_new_session:
+        # Lazy-create the session on first message.  The service-level
+        # ``create_session`` filters ``body.source_ids`` through
+        # SourcePermissionService BEFORE the INSERT commits — so a user
+        # can't seed a brand-new session with sources they don't own.
+        # Auth (get_current_user dep) gates this branch identically to
+        # the existing-session branch.
+        session_obj = await chat_session_service.create_session(
+            db,
+            user_id=str(current_user.id),
+            title=None,
+            source_ids=body.source_ids,
+        )
+        await db.commit()
+        # Mint the real UUID we'll use everywhere downstream.  ``parsed``
+        # mirrors the non-lazy path's variable so the rest of the handler
+        # stays branchless.
+        parsed_session_id = session_obj.id
+        # ``source_ids`` is already the permission-filtered allowlist for
+        # this brand-new session — no need to re-run the resolver.  Empty
+        # list means "search every source the user can access" (the same
+        # default-fallback semantics get_source_ids_for_session applies).
+        source_ids = (
+            list(session_obj.source_ids)
+            if session_obj.source_ids
+            else await chat_session_service.get_source_ids_for_session(
+                db,
+                session=session_obj,
+                user_id=str(current_user.id),
+                override_ids=None,
+            )
+        )
+    else:
+        session_obj = await chat_session_repo.get(db, parsed_session_id)
+        _assert_session_owner(session_obj, current_user)
+        source_ids = await chat_session_service.get_source_ids_for_session(
+            db,
+            session=session_obj,
+            user_id=str(current_user.id),
+            override_ids=body.source_ids,
+        )
 
     # Decide BEFORE persisting whether this is the session's first user
     # turn — manual rename preservation hinges on the placeholder title
     # being intact at request entry.  We re-check before the LLM call so
     # a concurrent rename in another tab still wins the race.
     #
-    # Accept all three default-title sentinels that exist across the create
-    # paths in this codebase (lowercase 'New chat' from the frontend, capital
-    # 'New Chat' from ChatSessionCreate's pydantic default, 'New conversation'
-    # from the model + repo + service defaults).  Any of them indicates the
-    # user has not yet chosen / been-given a real title, so titling is fair
-    # game — but a manually-renamed title (anything else) is preserved.
+    # Accept BOTH the historical placeholder titles (back-compat for any
+    # rows created before U15: 'New chat', 'New Chat', 'New conversation')
+    # AND ``None`` (the U15 lazy-creation default).  A manually-renamed
+    # title (anything else) is preserved.
     _PLACEHOLDER_TITLES = {"New chat", "New Chat", "New conversation"}
-    should_title = session_obj.title in _PLACEHOLDER_TITLES
+    should_title = (
+        session_obj.title is None or session_obj.title in _PLACEHOLDER_TITLES
+    )
 
     # Persist the user message before the response stream begins so the
     # follow-up generator (which opens fresh sessions) sees a consistent state.
     await chat_message_repo.create(
         db,
-        chat_session_id=session_id,
+        chat_session_id=parsed_session_id,
         role=MessageRole.USER,
         content=body.query,
     )
@@ -276,7 +341,7 @@ async def send_message(
             candidate = None
         if candidate:
             try:
-                await chat_session_repo.rename(db, session_id, candidate)
+                await chat_session_repo.rename(db, parsed_session_id, candidate)
                 await db.commit()
                 generated_title = candidate
             except Exception:  # noqa: BLE001 — silent fallback on rename failure
@@ -286,13 +351,13 @@ async def send_message(
 
     # Start Langfuse trace
     trace_id: str = langfuse_tracing.start_trace(
-        session_id=str(session_id),
+        session_id=str(parsed_session_id),
         user_id=str(current_user.id),
         query=body.query,
     )
 
     async def event_generator() -> AsyncGenerator[str, None]:
-        config: dict[str, Any] = {"configurable": {"thread_id": str(session_id)}}
+        config: dict[str, Any] = {"configurable": {"thread_id": str(parsed_session_id)}}
         initial_state: dict[str, Any] = {
             # load_history populates messages from DB (the just-persisted user row
             # is included) so seeding here would double-insert and confuse the
@@ -301,7 +366,7 @@ async def send_message(
             "retrieved_chunks": [],
             "requires_clarification": False,
             "clarification_question": None,
-            "session_id": str(session_id),
+            "session_id": str(parsed_session_id),
             "user_id": str(current_user.id),
             "trace_id": trace_id,
             "query": body.query,
@@ -313,9 +378,20 @@ async def send_message(
             "total_output_tokens": 0,
         }
 
-        # Emit the auto-generated title BEFORE the first pipeline event so
-        # the frontend can repaint the sidebar entry while the LLM warms up.
+        # Emit the lazy-create handshake BEFORE the title so the frontend
+        # can swap ``/chat`` → ``/chat/<id>`` and seed its sidebar cache
+        # while the titler / LLM warm up.  Ordering:
+        #   1. session_created (only on the ``"new"`` sentinel path)
+        #   2. title           (only when the titler produced a real title)
+        #   3. delta / done    (the normal pipeline events)
         pre_yield: list[str] = []
+        if is_new_session:
+            pre_yield.append(
+                ChatStreamEvent.session_created(
+                    session_id=str(parsed_session_id),
+                    source_ids=source_ids,
+                ).to_sse()
+            )
         if generated_title:
             pre_yield.append(ChatStreamEvent.title(generated_title).to_sse())
 
@@ -335,7 +411,7 @@ async def send_message(
             async with db_session_factory() as fresh_db:
                 assistant_msg = await chat_message_repo.create(
                     fresh_db,
-                    chat_session_id=session_id,
+                    chat_session_id=parsed_session_id,
                     role=MessageRole.ASSISTANT,
                     content=final_answer,
                     is_partial=False,
@@ -349,7 +425,7 @@ async def send_message(
                 initial_state=initial_state,
                 config=config,
                 trace_id=trace_id,
-                session_id=str(session_id),
+                session_id=str(parsed_session_id),
                 langfuse_tracing=langfuse_tracing,
                 persist_assistant=True,
                 on_done=_persist_assistant,
@@ -382,7 +458,7 @@ async def send_message(
                 logger.warning(
                     "Chat stream aborted with empty final_answer for session=%s — "
                     "skipping partial persist",
-                    session_id,
+                    parsed_session_id,
                 )
                 try:
                     langfuse_tracing.end_trace(trace_id, output="[aborted]")
@@ -393,7 +469,7 @@ async def send_message(
                 try:
                     await chat_message_repo.create(
                         fresh_db,
-                        chat_session_id=session_id,
+                        chat_session_id=parsed_session_id,
                         role=MessageRole.ASSISTANT,
                         content=partial_answer,
                         is_partial=True,
@@ -401,7 +477,8 @@ async def send_message(
                     await fresh_db.commit()
                 except Exception:
                     logger.exception(
-                        "Failed to persist partial message for session=%s", session_id
+                        "Failed to persist partial message for session=%s",
+                        parsed_session_id,
                     )
             try:
                 langfuse_tracing.end_trace(trace_id, output="[aborted]")

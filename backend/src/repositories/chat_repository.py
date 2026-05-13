@@ -21,9 +21,14 @@ class ChatSessionRepository:
         session: AsyncSession,
         *,
         user_id: uuid.UUID,
-        title: str = "New conversation",
+        title: str | None = None,
     ) -> ChatSession:
-        """Insert a new chat session and return the refreshed ORM object."""
+        """Insert a new chat session and return the refreshed ORM object.
+
+        ``title`` is optional since U15 (lazy chat creation): when omitted
+        the row's title starts as NULL and the synchronous titler stage on
+        the first user turn fills it in before any tokens stream.
+        """
         obj = ChatSession(user_id=user_id, title=title)
         session.add(obj)
         await session.flush()

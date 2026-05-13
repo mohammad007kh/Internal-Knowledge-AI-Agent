@@ -70,7 +70,7 @@ def _make_user(
 def _make_session(
     session_id: uuid.UUID = SESSION_ID,
     user_id: uuid.UUID = USER_ID,
-    title: str = "Test session",
+    title: str | None = "Test session",
 ) -> MagicMock:
     _now = datetime(2024, 1, 1, 0, 0, 0, tzinfo=UTC)
     s = MagicMock()
@@ -843,3 +843,173 @@ class TestAutoTitling:
             'event: error' in resp.text or 'event: done' in resp.text
         )
         assert terminal_present
+
+
+# ---------------------------------------------------------------------------
+# Lazy session creation — POST /sessions/new/messages (U15)
+# ---------------------------------------------------------------------------
+
+
+class TestLazySessionCreation:
+    """POST /chat/sessions/new/messages — lazy-create on first message."""
+
+    @staticmethod
+    def _empty_pipeline_events() -> "Any":
+        async def _events(  # noqa: ARG001
+            state: object, *, config: object, version: object
+        ) -> AsyncGenerator[Never, None]:
+            return
+            yield
+        return _events
+
+    def test_new_sentinel_creates_session_and_persists_user_message(
+        self,
+        client: TestClient,
+        mock_message_repo: AsyncMock,
+        mock_pipeline: AsyncMock,
+        mock_chat_session_service: AsyncMock,
+    ) -> None:
+        """POST /sessions/new/messages must invoke create_session AND
+        persist the user message under the freshly-minted session id."""
+        new_session = _make_session(title=None)
+        new_session.source_ids = []
+        mock_chat_session_service.create_session.return_value = new_session
+        mock_chat_session_service.get_source_ids_for_session.return_value = []
+
+        user_msg = _make_message(role=MessageRole.USER, content="Hello")
+        assistant_msg = _make_message(role=MessageRole.ASSISTANT, content="Hi")
+        mock_message_repo.create.side_effect = [user_msg, assistant_msg]
+        mock_pipeline.astream_events = self._empty_pipeline_events()
+
+        resp = client.post("/chat/sessions/new/messages", json={"query": "Hello"})
+
+        assert resp.status_code == 200
+        # Service-level create was called with the caller's user id and a
+        # ``None`` title (lazy-creation contract).
+        mock_chat_session_service.create_session.assert_awaited_once()
+        create_kwargs = mock_chat_session_service.create_session.call_args.kwargs
+        assert create_kwargs.get("user_id") == str(USER_ID)
+        assert create_kwargs.get("title") is None
+        # User message persisted under the new session id.
+        first_create_call = mock_message_repo.create.call_args_list[0]
+        assert first_create_call.kwargs.get("role") == MessageRole.USER
+        assert first_create_call.kwargs.get("content") == "Hello"
+        assert first_create_call.kwargs.get("chat_session_id") == new_session.id
+
+    def test_new_sentinel_emits_session_created_as_first_frame(
+        self,
+        client: TestClient,
+        mock_message_repo: AsyncMock,
+        mock_pipeline: AsyncMock,
+        mock_chat_session_service: AsyncMock,
+        mock_title_generator: AsyncMock,
+    ) -> None:
+        """``event: session_created`` must precede ``event: title`` and
+        all subsequent pipeline frames."""
+        new_session = _make_session(title=None)
+        new_session.source_ids = []
+        mock_chat_session_service.create_session.return_value = new_session
+        mock_chat_session_service.get_source_ids_for_session.return_value = []
+
+        user_msg = _make_message(role=MessageRole.USER, content="Tell me about Q3")
+        assistant_msg = _make_message(role=MessageRole.ASSISTANT, content="OK")
+        mock_message_repo.create.side_effect = [user_msg, assistant_msg]
+        mock_title_generator.generate_title = AsyncMock(return_value="Q3 EMEA growth")
+        mock_pipeline.astream_events = self._empty_pipeline_events()
+
+        resp = client.post(
+            "/chat/sessions/new/messages",
+            json={"query": "Tell me about Q3"},
+        )
+
+        assert resp.status_code == 200
+        body = resp.text
+        # Both frames present.
+        assert "event: session_created" in body
+        assert f'"session_id": "{new_session.id}"' in body
+        assert "event: title" in body
+        # Strict ordering: session_created BEFORE title, both BEFORE the
+        # terminal frame (which is `error` for an empty pipeline output,
+        # same as the existing auto-titling tests).
+        sc_idx = body.index("event: session_created")
+        title_idx = body.index("event: title")
+        terminal_idx = (
+            body.index("event: error") if "event: error" in body
+            else body.index("event: done")
+        )
+        assert sc_idx < title_idx < terminal_idx
+
+    def test_new_sentinel_titler_failure_still_emits_session_created(
+        self,
+        client: TestClient,
+        mock_message_repo: AsyncMock,
+        mock_pipeline: AsyncMock,
+        mock_chat_session_service: AsyncMock,
+        mock_title_generator: AsyncMock,
+    ) -> None:
+        """If the titler raises / returns None, the lazy-create handshake
+        still fires — only the ``title`` frame is suppressed."""
+        new_session = _make_session(title=None)
+        new_session.source_ids = []
+        mock_chat_session_service.create_session.return_value = new_session
+        mock_chat_session_service.get_source_ids_for_session.return_value = []
+
+        user_msg = _make_message(role=MessageRole.USER, content="hi")
+        assistant_msg = _make_message(role=MessageRole.ASSISTANT, content="hello")
+        mock_message_repo.create.side_effect = [user_msg, assistant_msg]
+        mock_title_generator.generate_title = AsyncMock(
+            side_effect=RuntimeError("titler exploded")
+        )
+        mock_pipeline.astream_events = self._empty_pipeline_events()
+
+        resp = client.post("/chat/sessions/new/messages", json={"query": "hi"})
+
+        assert resp.status_code == 200
+        body = resp.text
+        # session_created MUST still be present.
+        assert "event: session_created" in body
+        # title MUST NOT have leaked into the stream.
+        assert "event: title" not in body
+
+    def test_new_sentinel_routes_source_ids_through_permission_filter(
+        self,
+        client: TestClient,
+        mock_message_repo: AsyncMock,
+        mock_pipeline: AsyncMock,
+        mock_chat_session_service: AsyncMock,
+    ) -> None:
+        """source_ids on the request body MUST be permission-filtered by
+        the service before the row is committed."""
+        new_session = _make_session(title=None)
+        new_session.source_ids = ["src-A"]  # filter dropped src-B
+        mock_chat_session_service.create_session.return_value = new_session
+        mock_chat_session_service.get_source_ids_for_session.return_value = []
+
+        user_msg = _make_message(role=MessageRole.USER, content="hi")
+        assistant_msg = _make_message(role=MessageRole.ASSISTANT, content="ok")
+        mock_message_repo.create.side_effect = [user_msg, assistant_msg]
+        mock_pipeline.astream_events = self._empty_pipeline_events()
+
+        resp = client.post(
+            "/chat/sessions/new/messages",
+            json={"query": "hi", "source_ids": ["src-A", "src-B"]},
+        )
+
+        assert resp.status_code == 200
+        # The service receives the caller-supplied list; it owns the
+        # permission filter internally.  We assert the wiring, not the
+        # filter logic (covered by ChatSessionService unit tests).
+        create_kwargs = mock_chat_session_service.create_session.call_args.kwargs
+        assert create_kwargs.get("source_ids") == ["src-A", "src-B"]
+
+    def test_non_uuid_non_sentinel_session_id_returns_422(
+        self,
+        client: TestClient,
+    ) -> None:
+        """Any path segment that is neither a UUID nor ``"new"`` must
+        422 before reaching the pipeline."""
+        resp = client.post(
+            "/chat/sessions/not-a-uuid/messages",
+            json={"query": "hi"},
+        )
+        assert resp.status_code == 422

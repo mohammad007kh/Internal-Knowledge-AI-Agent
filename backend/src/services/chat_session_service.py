@@ -27,7 +27,7 @@ class ChatSessionService:
         db: AsyncSession,
         *,
         user_id: str,
-        title: str = "New conversation",
+        title: str | None = None,
         source_ids: list[str] | None = None,
     ) -> ChatSession:
         permitted: list[str] = []

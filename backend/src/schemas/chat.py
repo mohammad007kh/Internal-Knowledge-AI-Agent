@@ -59,7 +59,11 @@ class ChatSessionUpdate(BaseModel):
 
 class ChatSessionResponse(BaseModel):
     id: UUID
-    title: str
+    # Nullable since U15 (lazy chat creation): until the first user message
+    # is sent and the titler runs, a session row may have no title yet.  The
+    # frontend renders a preview of the first user message as the fallback
+    # label in that window.
+    title: str | None = None
     created_at: datetime
     updated_at: datetime
     message_count: int = 0
@@ -138,6 +142,11 @@ class StreamEventType(StrEnum):
     CLARIFICATION = "clarification"
     ERROR = "error"
     TITLE = "title"
+    # Emitted as the FIRST frame on the lazy-creation path
+    # (``POST /sessions/new/messages``) so the client can swap the URL from
+    # ``/chat`` → ``/chat/<id>`` and patch the sidebar cache before any
+    # tokens flow.  Never emitted when the path already targets a real id.
+    SESSION_CREATED = "session_created"
 
 
 class ChatStreamEvent(BaseModel):
@@ -164,6 +173,10 @@ class ChatStreamEvent(BaseModel):
 
     class TitleData(BaseModel):
         title: str
+
+    class SessionCreatedData(BaseModel):
+        session_id: str
+        source_ids: list[str] = Field(default_factory=list)
 
     def to_sse(self) -> str:
         """Format as a Server-Sent Event string.
@@ -223,3 +236,24 @@ class ChatStreamEvent(BaseModel):
     def title(cls, title: str) -> ChatStreamEvent:
         """Emit the auto-generated session title as the first SSE frame."""
         return cls(event=StreamEventType.TITLE, data={"title": title})
+
+    @classmethod
+    def session_created(
+        cls,
+        *,
+        session_id: str,
+        source_ids: list[str] | None = None,
+    ) -> ChatStreamEvent:
+        """Emit the freshly-created session id as the very first SSE frame.
+
+        Used by the lazy-creation path (``POST /sessions/new/messages``) so
+        the client can swap the URL to ``/chat/<id>`` and patch the sidebar
+        cache before tokens start flowing.
+        """
+        return cls(
+            event=StreamEventType.SESSION_CREATED,
+            data={
+                "session_id": session_id,
+                "source_ids": source_ids or [],
+            },
+        )
