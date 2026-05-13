@@ -51,6 +51,15 @@ node_modules/
 out/
 frontend/dist/
 frontend/build/
+# TS incremental build cache (per-machine, churns on every type-check)
+*.tsbuildinfo
+
+# =============================================================
+# Claude Code local state (not project source)
+# =============================================================
+.claude/worktrees/
+.claude/scheduled_tasks.lock
+.claude/settings.local.json
 
 # =============================================================
 # Environment Variables (CRITICAL — never commit secrets)
