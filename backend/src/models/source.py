@@ -78,7 +78,13 @@ class Source(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
         nullable=False,
         index=True,
     )
-    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    # Default False so newly-created sources start hidden from non-admin
+    # users until an admin explicitly toggles "Available to users" on. The
+    # docstring above is the contract: is_active = TRUE means approved.
+    # Auto-approving every new source would defeat the U14 gate matrix
+    # (which assumes admins make the approval call after the studying
+    # agent finishes and the source is verified).
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
     # -- Phase 2 fields ------------------------------------------------------
     source_mode: Mapped[str] = mapped_column(String, nullable=False, default="snapshot")
