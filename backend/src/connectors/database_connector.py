@@ -174,6 +174,7 @@ class SqlDatabaseConnector(BaseConnector):
             harden_connection,
             harden_postgres_connection,
             mssql_connect_args,
+            postgres_asyncpg_connect_args,
         )
 
         conn_str: str = self._config["connection_string"]
@@ -190,6 +191,15 @@ class SqlDatabaseConnector(BaseConnector):
                     "[conn_hash=%s] — falling back to raw conn_str",
                     self._conn_str_hash,
                 )
+            # For asyncpg URLs, harden_postgres_connection is a no-op (the
+            # libpq ?options= kwarg is rejected by asyncpg with TypeError).
+            # Pass server_settings via connect_args so we still get the same
+            # `default_transaction_read_only=on` + statement_timeout on every
+            # connection. Safe to pass unconditionally — asyncpg simply
+            # forwards them to Postgres at startup; libpq URLs that aren't
+            # asyncpg won't reach this code path with a different driver.
+            if conn_str.startswith("postgresql+asyncpg"):
+                connect_args = postgres_asyncpg_connect_args()
         elif db_type == "mssql":
             connect_args = mssql_connect_args()
 
@@ -345,11 +355,19 @@ class SqlDatabaseConnector(BaseConnector):
                 await conn.execute(sa.text("SELECT 1"))
             await engine.dispose()
             return True
-        except Exception:
-            # Log WITHOUT the connection string
+        except Exception as exc:
+            # Log the exception class + message + traceback so operators can
+            # debug a failed admin "Test connection". The connection string
+            # is NEVER part of `str(exc)` for asyncpg/SQLAlchemy errors —
+            # those drivers report field-level details (host, user, dbname)
+            # but not the URI verbatim. The caller still gets a sanitised
+            # ConnectionError (see source_inspection_service.inspect_source).
             logger.warning(
-                "DatabaseConnector.test_connection failed [conn_hash=%s]",
+                "DatabaseConnector.test_connection failed [conn_hash=%s]: %s: %s",
                 self._conn_str_hash,
+                type(exc).__name__,
+                exc,
+                exc_info=True,
             )
             return False
 

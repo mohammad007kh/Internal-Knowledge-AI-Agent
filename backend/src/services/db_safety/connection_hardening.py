@@ -152,6 +152,55 @@ def _ms_to_secs_ceil(ms: int) -> int:
 # ---------------------------------------------------------------------------
 
 
+def postgres_asyncpg_connect_args(
+    statement_timeout_ms: int = DEFAULT_STATEMENT_TIMEOUT_MS,
+) -> dict[str, dict[str, str]]:
+    """Return SQLAlchemy ``connect_args`` that harden an asyncpg connection.
+
+    The libpq ``?options=-c key=value`` URL trick does NOT work with asyncpg
+    — asyncpg's ``connect()`` rejects the ``options=`` kwarg outright. The
+    correct asyncpg analogue is ``server_settings={...}``, which asyncpg
+    forwards to PostgreSQL as a startup-message parameter set, giving the
+    same effect: every transaction on this connection starts with
+    ``default_transaction_read_only=on`` and a server-side
+    ``statement_timeout``.
+
+    Callers building an asyncpg engine should pass::
+
+        create_async_engine(
+            url,
+            connect_args=postgres_asyncpg_connect_args(),
+            ...
+        )
+
+    Parameters
+    ----------
+    statement_timeout_ms:
+        Server-side ``statement_timeout`` in milliseconds.  Defaults to
+        :data:`DEFAULT_STATEMENT_TIMEOUT_MS` (30 s).  Must be a positive int.
+
+    Raises
+    ------
+    ValueError
+        If *statement_timeout_ms* is non-positive.
+    """
+    if statement_timeout_ms <= 0:
+        raise ValueError(
+            f"statement_timeout_ms must be positive; got {statement_timeout_ms!r}"
+        )
+    return {
+        "server_settings": {
+            "default_transaction_read_only": "on",
+            "statement_timeout": str(statement_timeout_ms),
+        }
+    }
+
+
+def _is_asyncpg_url(connection_string: str) -> bool:
+    """Return True iff *connection_string* uses the asyncpg dialect."""
+    return urlsplit(connection_string).scheme == "postgresql+asyncpg"
+
+
 async def harden_postgres_connection(
     connection_string: str,
     statement_timeout_ms: int = DEFAULT_STATEMENT_TIMEOUT_MS,
@@ -162,11 +211,23 @@ async def harden_postgres_connection(
     The function is **idempotent** — calling it on an already-hardened URL
     returns the same string (only the timeout is updated if it differs).
 
+    .. note::
+       For asyncpg URLs (``postgresql+asyncpg://``) this function returns
+       the URL **unchanged**: asyncpg does not understand libpq's
+       ``?options=`` parameter and raises
+       ``TypeError: connect() got an unexpected keyword argument 'options'``
+       when SQLAlchemy forwards it.  Callers must instead pass
+       :func:`postgres_asyncpg_connect_args` as ``connect_args=`` to
+       ``create_async_engine`` to get the equivalent
+       ``server_settings={'default_transaction_read_only': 'on', ...}``
+       hardening on the asyncpg side.
+
     Parameters
     ----------
     connection_string:
         A Postgres connection URL.  Both the bare ``postgresql://`` flavour
-        and the asyncpg dialect ``postgresql+asyncpg://`` are accepted.
+        and the asyncpg dialect ``postgresql+asyncpg://`` are accepted (the
+        asyncpg flavour is returned unchanged — see note above).
     statement_timeout_ms:
         Server-side ``statement_timeout`` in milliseconds.  Defaults to
         :data:`DEFAULT_STATEMENT_TIMEOUT_MS` (30 s).  Must be a positive int.
@@ -178,6 +239,9 @@ async def harden_postgres_connection(
         parameter set to::
 
             -c default_transaction_read_only=on -c statement_timeout=<N>
+
+        OR — for ``postgresql+asyncpg://`` URLs — the original URL
+        unchanged (hardening flows via ``connect_args`` instead; see note).
 
     Raises
     ------
@@ -196,6 +260,12 @@ async def harden_postgres_connection(
             f"(scheme must be one of {sorted(_POSTGRES_SCHEMES)}); got "
             f"scheme={urlsplit(connection_string).scheme!r}"
         )
+
+    # asyncpg refuses the libpq `options=` kwarg — return the URL unchanged
+    # and let the caller wire `connect_args=postgres_asyncpg_connect_args()`
+    # at engine-build time.
+    if _is_asyncpg_url(connection_string):
+        return connection_string
 
     parts = urlsplit(connection_string)
     # parse_qsl with keep_blank_values=True preserves empty values; we want

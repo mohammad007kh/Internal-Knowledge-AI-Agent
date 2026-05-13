@@ -26,6 +26,7 @@ from src.services.db_safety.connection_hardening import (
     harden_mysql_connection,
     harden_postgres_connection,
     mssql_connect_args,
+    postgres_asyncpg_connect_args,
     read_only_session,
 )
 from src.services.db_safety.sql_validator import (
@@ -42,6 +43,7 @@ __all__ = [
     "harden_postgres_connection",
     "inject_limit",
     "mssql_connect_args",
+    "postgres_asyncpg_connect_args",
     "read_only_session",
     "validate_sql",
 ]

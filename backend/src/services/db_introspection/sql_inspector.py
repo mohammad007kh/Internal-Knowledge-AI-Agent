@@ -69,6 +69,7 @@ from src.services.db_safety import (
     harden_connection,
     harden_postgres_connection,
     mssql_connect_args,
+    postgres_asyncpg_connect_args,
     validate_sql,
 )
 
@@ -279,6 +280,10 @@ async def _build_engine(connection_string: str, db_type: str) -> AsyncEngine:
                 "sql_inspector: postgres hardening rejected the URL — "
                 "falling back to raw connection string"
             )
+        # asyncpg refuses libpq `?options=`; harden via server_settings
+        # connect_args instead. See postgres_asyncpg_connect_args docstring.
+        if conn_str.startswith("postgresql+asyncpg"):
+            connect_args = postgres_asyncpg_connect_args(_STATEMENT_TIMEOUT_MS)
     elif db_type == "mssql":
         connect_args = mssql_connect_args(_STATEMENT_TIMEOUT_MS)
 

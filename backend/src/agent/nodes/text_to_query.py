@@ -150,12 +150,21 @@ async def _execute(
     ``validate_sql``. Other dialects fall back to the raw string until Phase 2
     ships their hardening helpers.
     """
+    connect_args: dict[str, Any] = {}
     if db_type == "postgresql":
         connection_string = await harden_postgres_connection(connection_string)
+        # asyncpg refuses libpq ?options=; harden via server_settings.
+        if connection_string.startswith("postgresql+asyncpg"):
+            from src.services.db_safety import (  # noqa: PLC0415
+                postgres_asyncpg_connect_args,
+            )
+
+            connect_args = postgres_asyncpg_connect_args()
     engine = create_async_engine(
         connection_string,
         pool_size=1,
         max_overflow=0,
+        connect_args=connect_args,
     )
     try:
         async with engine.connect() as conn:
