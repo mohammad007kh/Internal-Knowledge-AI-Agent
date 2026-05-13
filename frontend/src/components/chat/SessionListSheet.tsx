@@ -2,18 +2,10 @@
 
 import { Button } from '@/components/ui/button'
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from '@/components/ui/sheet'
-import { apiClient } from '@/lib/api-client'
-import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { PlusIcon } from 'lucide-react'
 import { useEffect } from 'react'
-import { toast } from 'sonner'
 import { useSelectedSession } from './SelectedSessionContext'
 import { SessionList } from './SessionList'
-
-interface CreatedSession {
-  id: string
-  title: string
-}
 
 export interface SessionListSheetProps {
   open: boolean
@@ -28,7 +20,6 @@ export interface SessionListSheetProps {
  */
 export function SessionListSheet({ open, onOpenChange }: SessionListSheetProps) {
   const { setSessionId } = useSelectedSession()
-  const queryClient = useQueryClient()
 
   useEffect(() => {
     const handler = (event: KeyboardEvent) => {
@@ -49,20 +40,14 @@ export function SessionListSheet({ open, onOpenChange }: SessionListSheetProps) 
     return () => window.removeEventListener('keydown', handler)
   }, [open, onOpenChange])
 
-  const createMutation = useMutation({
-    mutationFn: async (): Promise<CreatedSession> => {
-      const res = await apiClient.post<CreatedSession>('/api/v1/chat/sessions', {
-        title: 'New chat',
-      })
-      return res.data
-    },
-    onSuccess: (session) => {
-      queryClient.invalidateQueries({ queryKey: ['chat-sessions'] })
-      setSessionId(session.id)
-      onOpenChange(false)
-    },
-    onError: () => toast.error('Failed to create session.'),
-  })
+  // U15 lazy creation: the "New chat" CTA no longer fires POST /sessions.
+  // It just clears the active session so the URL is `/chat`, where the
+  // empty-hero composer kicks in — the row is only persisted once the
+  // user sends their first message.
+  const handleNewChat = () => {
+    setSessionId(null, { replace: true })
+    onOpenChange(false)
+  }
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
@@ -84,8 +69,7 @@ export function SessionListSheet({ open, onOpenChange }: SessionListSheetProps) 
               size="sm"
               variant="default"
               className="gap-1.5"
-              disabled={createMutation.isPending}
-              onClick={() => createMutation.mutate()}
+              onClick={handleNewChat}
             >
               <PlusIcon className="h-3.5 w-3.5" aria-hidden />
               New chat

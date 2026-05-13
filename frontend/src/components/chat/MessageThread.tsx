@@ -80,7 +80,14 @@ export function MessageThread({
     if (pinned) bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [allMessages.length, streamingToken, pinned])
 
-  if (!sessionId) {
+  // U15 lazy creation: when the user has just sent the first message but
+  // the backend hasn't yet emitted `event: session_created`, `sessionId`
+  // is still null while `extraMessages` carries the optimistic user
+  // bubble. Suppressing the thread here would flash the empty-state
+  // helper text over the just-typed message. We fall through to the
+  // normal thread render in that window so the bubble + thinking dots
+  // remain visible.
+  if (!sessionId && extraMessages.length === 0 && !isStreaming && !isPending) {
     return (
       <div className="flex flex-1 items-center justify-center">
         <p className="text-sm text-muted-foreground">

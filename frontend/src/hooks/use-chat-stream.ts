@@ -27,8 +27,28 @@ export interface StreamCitation {
  */
 export type ChatStreamMessageType = 'normal' | 'clarification' | 'guardrail_blocked' | 'error'
 
+/**
+ * Sentinel passed as the `sessionId` path segment when the caller wants the
+ * backend to lazy-create a chat session as part of the first message turn
+ * (U15). The backend responds with an `event: session_created` SSE frame
+ * carrying the real UUID before any tokens flow.
+ */
+export const NEW_SESSION_SENTINEL = 'new'
+
 export interface UseChatStreamReturn {
-  sendMessage: (sessionId: string, query: string, sourceIds?: string[]) => Promise<void>
+  /**
+   * Send a message to a chat session.
+   *
+   * `sessionId` accepts either a real UUID or the `'new'` sentinel (U15
+   * lazy-creation). On the sentinel path the backend creates the row inline
+   * and emits `event: session_created` as the first frame; the resulting id
+   * surfaces via `lastCreatedSessionId` so the consumer can swap the URL.
+   */
+  sendMessage: (
+    sessionId: string,
+    query: string,
+    sourceIds?: string[],
+  ) => Promise<void>
   abortStream: () => void
   isStreaming: boolean
   currentResponse: string
@@ -49,6 +69,12 @@ export interface UseChatStreamReturn {
    * Reset to `null` on every `sendMessage()` call.
    */
   lastTitle: string | null
+  /**
+   * Session id minted by the backend on the lazy-creation path
+   * (U15: `sendMessage('new', …)`). `null` when the caller targeted an
+   * existing session. Reset on every `sendMessage()` call.
+   */
+  lastCreatedSessionId: string | null
   /**
    * Clears local stream state — useful after the caller has persisted the
    * final assistant message into the query cache and wants a fresh buffer.
@@ -117,6 +143,7 @@ export function useChatStream(): UseChatStreamReturn {
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const [lastMessageId, setLastMessageId] = useState<string | null>(null)
   const [lastTitle, setLastTitle] = useState<string | null>(null)
+  const [lastCreatedSessionId, setLastCreatedSessionId] = useState<string | null>(null)
 
   const controllerRef = useRef<AbortController | null>(null)
 
@@ -142,6 +169,7 @@ export function useChatStream(): UseChatStreamReturn {
     setErrorMessage(null)
     setLastMessageId(null)
     setLastTitle(null)
+    setLastCreatedSessionId(null)
   }, [])
 
   const sendMessage = useCallback(
@@ -162,6 +190,7 @@ export function useChatStream(): UseChatStreamReturn {
       setErrorMessage(null)
       setLastMessageId(null)
       setLastTitle(null)
+      setLastCreatedSessionId(null)
 
       const token = getToken()
       const url = `${API_BASE}/api/v1/chat/sessions/${sessionId}/messages`
@@ -287,6 +316,17 @@ export function useChatStream(): UseChatStreamReturn {
                 }
                 break
               }
+              case 'session_created': {
+                // U15 lazy creation: backend created the chat_sessions row
+                // inline and is announcing its real UUID before any tokens
+                // flow. Consumer is expected to swap `/chat` → `/chat/<id>`
+                // and seed the sidebar cache.
+                const payload = safeJsonParse<{ session_id?: string }>(frame.data)
+                if (payload?.session_id) {
+                  setLastCreatedSessionId(payload.session_id)
+                }
+                break
+              }
               case 'done': {
                 const payload = safeJsonParse<{ message_id?: string }>(frame.data)
                 if (payload?.message_id) {
@@ -348,6 +388,7 @@ export function useChatStream(): UseChatStreamReturn {
     errorMessage,
     lastMessageId,
     lastTitle,
+    lastCreatedSessionId,
     reset,
   }
 }

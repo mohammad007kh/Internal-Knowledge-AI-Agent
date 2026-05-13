@@ -1,22 +1,14 @@
 'use client'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
-import { apiClient } from '@/lib/api-client'
-import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { MessageSquarePlusIcon, SparklesIcon } from 'lucide-react'
-import { startTransition, useCallback } from 'react'
-import { toast } from 'sonner'
+import { useCallback } from 'react'
 import { ChatInputBar } from './ChatInputBar'
 import { ClarificationCard } from './ClarificationCard'
 import { GuardrailCard } from './GuardrailCard'
 import { MessageThread } from './MessageThread'
 import { useSelectedSession } from './SelectedSessionContext'
 import { useChat } from './useChat'
-
-interface CreatedSession {
-  id: string
-  title: string
-}
 
 /**
  * Single-pane chat surface.
@@ -45,11 +37,11 @@ interface ChatLayoutProps {
 export function ChatLayout({ sessionId: propSessionId }: ChatLayoutProps = {}) {
   const { sessionId: ctxSessionId, setSessionId } = useSelectedSession()
   const sessionId = propSessionId ?? ctxSessionId
-  const queryClient = useQueryClient()
   const {
     send,
     abort,
     isPending,
+    isPendingNewSession,
     streamingToken,
     isStreaming,
     optimisticMessages,
@@ -59,67 +51,28 @@ export function ChatLayout({ sessionId: propSessionId }: ChatLayoutProps = {}) {
     dismissGuardrail,
   } = useChat({ sessionId })
 
-  const createMutation = useMutation({
-    mutationFn: async (): Promise<CreatedSession> => {
-      const res = await apiClient.post<CreatedSession>('/api/v1/chat/sessions', {
-        title: 'New chat',
-      })
-      return res.data
-    },
-    onSuccess: (session) => {
-      queryClient.invalidateQueries({ queryKey: ['chat-sessions'] })
-      // Wrap the selection swap in startTransition so React keeps the
-      // previous tree mounted until the new route segment is ready.
-      // Combined with `replace: true` (so Back doesn't return to the
-      // empty-state hero), this preserves the optimistic user bubble
-      // through the null → newId session transition on auto-create-
-      // on-send (UX fix P1-A).
-      startTransition(() => {
-        setSessionId(session.id, { replace: true })
-      })
-    },
-    onError: () => toast.error('Failed to create session.'),
-  })
-
-  // Single source of truth for "make sure a session exists, then return its
-  // id". Used by both the hero "Start a new chat" button (which triggers it
-  // directly) and the input-bar send path (which uses it to auto-create
-  // when the user types a message before any session is selected). Reuses
-  // the existing mutation — no new API call is introduced.
-  const ensureSession = useCallback(async (): Promise<string> => {
-    if (sessionId) return sessionId
-    const created = await createMutation.mutateAsync()
-    return created.id
-  }, [sessionId, createMutation])
-
-  // Send wrapper: when no session is selected, create one first and then
-  // dispatch the message into the freshly-created session in the same tick
-  // (via `useChat.send`'s `overrideSessionId` argument).  See the matching
-  // exception in useChat's session-switch abort effect — without it, the
-  // cleanup that fires on null → newId would cancel the just-started SSE
-  // stream and reset the surface to the empty state.
+  // U15 lazy creation: `send` is now safe to call with a null `sessionId`.
+  // The hook routes the request to the `'new'` sentinel, and the backend
+  // creates the row inline and announces its real UUID via
+  // `event: session_created`. The hook handles the URL swap and cache
+  // patching internally, so this component just hands off the text.
   const handleSend = useCallback(
-    async (text: string) => {
+    (text: string) => {
       if (!text.trim()) return
-      if (sessionId) {
-        send(text)
-        return
-      }
-      try {
-        const newId = await ensureSession()
-        send(text, newId)
-      } catch {
-        // The mutation's onError already surfaces a toast; swallow here so
-        // an unhandled promise rejection does not bubble out of the input.
-      }
+      send(text)
     },
-    [sessionId, send, ensureSession]
+    [send]
   )
 
+  // The hero "Start a new chat" button is now a pure navigation: the row
+  // doesn't exist until the user types and sends, so all this does is
+  // ensure the URL is `/chat` (clearing any prior session selection).
+  // Using `replace` so the empty-state surface doesn't leave a history
+  // entry between the previously-selected chat and the next one created
+  // on first send.
   const handleStartNewChat = useCallback(() => {
-    if (createMutation.isPending) return
-    createMutation.mutate()
-  }, [createMutation])
+    setSessionId(null, { replace: true })
+  }, [setSessionId])
 
   // First-time canvas: replace the muted "Select or create a session" line
   // with a centered hero + prominent primary CTA so new users have an
@@ -149,11 +102,10 @@ export function ChatLayout({ sessionId: propSessionId }: ChatLayoutProps = {}) {
               type="button"
               size="lg"
               className="mt-2 gap-2"
-              disabled={createMutation.isPending}
               onClick={handleStartNewChat}
             >
               <MessageSquarePlusIcon className="h-4 w-4" aria-hidden />
-              {createMutation.isPending ? 'Creating…' : 'Start a new chat'}
+              Start a new chat
             </Button>
           </Card>
         </div>
@@ -181,10 +133,16 @@ export function ChatLayout({ sessionId: propSessionId }: ChatLayoutProps = {}) {
       <ChatInputBar
         onSend={handleSend}
         onStop={abort}
-        disabled={(isPending && !isStreaming) || createMutation.isPending}
+        // `isPending && !isStreaming` covers the steady-state brief window
+        // between submit and the first SSE frame. `isPendingNewSession` is
+        // the U15 lazy-create gate that stays latched from a null-session
+        // submit until the `event: session_created` SSE frame lands — without
+        // it, a double-Enter during the assistant's first-token stream would
+        // re-enable the send button and fire a SECOND
+        // POST /sessions/new/messages, creating a second orphan row.
+        disabled={(isPending && !isStreaming) || isPendingNewSession}
         isStreaming={isStreaming}
         sessionId={sessionId}
-        isCreatingSession={createMutation.isPending}
         allowEmptySession
       />
     </div>

@@ -1,6 +1,6 @@
 'use client'
 
-import { useChatStream } from '@/hooks/use-chat-stream'
+import { NEW_SESSION_SENTINEL, useChatStream } from '@/hooks/use-chat-stream'
 import { useQueryClient } from '@tanstack/react-query'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useSelectedSession } from './SelectedSessionContext'
@@ -23,7 +23,9 @@ interface SessionsListSnapshot {
   // Matches ChatSessionListResponse on the wire (backend/src/schemas/chat.py)
   // — `sessions`, not `items`. Renamed from `items` in commit ebb9abd to
   // align frontend cache with the actual response shape.
-  sessions: Array<{ id: string; title: string; [key: string]: unknown }>
+  // `title` is nullable since U15 (lazy creation): the sidebar renders a
+  // first-message fallback when no title has been minted yet.
+  sessions: Array<{ id: string; title: string | null; [key: string]: unknown }>
   total: number
 }
 
@@ -44,6 +46,19 @@ export interface UseChatReturn {
   send: (text: string, overrideSessionId?: string) => void
   abort: () => void
   isPending: boolean
+  /**
+   * True only during the U15 lazy-create window: from the moment a send with
+   * a `null` session id is fired until the SSE `session_created` frame lands
+   * (or the send errors out). The consumer should OR this into the input-bar
+   * disabled expression so a double-Enter / double-click during the
+   * first-token stream cannot fire a second `POST /sessions/new/messages`
+   * (which would create a second orphan row). Distinct from `isPending`
+   * because `isPending` flips false the moment the stream's terminal frame
+   * arrives — that's fine for steady-state sends, but on the lazy-create
+   * path the real session id is announced on the FIRST frame, long before
+   * the terminal one.
+   */
+  isPendingNewSession: boolean
   streamingToken: string
   isStreaming: boolean
   optimisticMessages: OptimisticMessage[]
@@ -56,12 +71,13 @@ export interface UseChatReturn {
 export function useChat({ sessionId }: { sessionId: string | null }): UseChatReturn {
   const queryClient = useQueryClient()
   const stream = useChatStream()
-  const { registerAbortStream } = useSelectedSession()
+  const { registerAbortStream, setSessionId } = useSelectedSession()
 
   const [optimisticMessages, setOptimisticMessages] = useState<OptimisticMessage[]>([])
   const [clarification, setClarification] = useState<Clarification | null>(null)
   const [localGuardrail, setLocalGuardrail] = useState<string | null>(null)
   const [isPending, setIsPending] = useState(false)
+  const [isPendingNewSession, setIsPendingNewSession] = useState(false)
 
   const pendingOptimisticIdRef = useRef<string | null>(null)
   const lastHandledMessageIdRef = useRef<string | null>(null)
@@ -90,14 +106,24 @@ export function useChat({ sessionId }: { sessionId: string | null }): UseChatRet
 
   const send = useCallback(
     (text: string, overrideSessionId?: string) => {
-      // Prefer the explicit override so that callers which just created a
-      // session can dispatch into it before React commits the state update
-      // that propagates the new id through props.
-      const targetSessionId = overrideSessionId ?? sessionId
-      if (!targetSessionId || !text.trim()) return
+      if (!text.trim()) return
       const trimmed = text.trim()
+      // U15 lazy creation: when neither prop nor override carries a real
+      // session id, target the `'new'` sentinel. The backend will create
+      // the row inline and announce its real UUID via `event: session_created`,
+      // which we wire through `lastCreatedSessionId` below.
+      const resolvedSessionId = overrideSessionId ?? sessionId
+      const targetSessionId = resolvedSessionId ?? NEW_SESSION_SENTINEL
       lastQueryRef.current = trimmed
-      lastSessionIdRef.current = targetSessionId
+      // For lazy-create sends, `resolvedSessionId` is null. If the user
+      // hits Retry BEFORE the `event: session_created` frame lands, we
+      // fall through to undefined → the retry uses the closure's
+      // (still-null) `sessionId` and ends up targeting the sentinel
+      // again, which is exactly the "the first attempt died, try the
+      // whole turn again" semantics we want. After the SSE handler
+      // below pins the freshly-minted id into this ref, subsequent
+      // retries target the real session.
+      lastSessionIdRef.current = resolvedSessionId ?? null
 
       // Clear any stale optimistic bubble from a previous in-flight send
       // so a rapid second send does not leave a ghost bubble behind.
@@ -115,6 +141,12 @@ export function useChat({ sessionId }: { sessionId: string | null }): UseChatRet
       setClarification(null)
       setLocalGuardrail(null)
       setIsPending(true)
+      // Latch the new-session pending flag only when this send is a lazy
+      // create. Cleared by the `session_created` effect below (real session
+      // id arrived) or by the error / settle paths.
+      if (resolvedSessionId === null) {
+        setIsPendingNewSession(true)
+      }
       settledRef.current = false
 
       stream
@@ -122,6 +154,7 @@ export function useChat({ sessionId }: { sessionId: string | null }): UseChatRet
         .catch(() => {
           clearOptimistic()
           setIsPending(false)
+          setIsPendingNewSession(false)
           settledRef.current = true
           import('sonner')
             .then(({ toast }) => {
@@ -146,6 +179,7 @@ export function useChat({ sessionId }: { sessionId: string | null }): UseChatRet
             // optimistic bubble nor isPending leaks across the close.
             clearOptimistic()
             setIsPending(false)
+            setIsPendingNewSession(false)
           }
         })
     },
@@ -160,6 +194,7 @@ export function useChat({ sessionId }: { sessionId: string | null }): UseChatRet
     stream.abortStream()
     clearOptimistic()
     setIsPending(false)
+    setIsPendingNewSession(false)
     // Mark settled so the stream-end watcher (which fires on isStreaming
     // false→true→false) doesn't read this intentional abort as a "connection
     // dropped" event and toast the user a spurious "Connection lost" message.
@@ -215,6 +250,7 @@ export function useChat({ sessionId }: { sessionId: string | null }): UseChatRet
     })
     clearOptimistic()
     setIsPending(false)
+    setIsPendingNewSession(false)
     settledRef.current = true
   }, [stream.messageType, stream.clarificationQuestion, stream.lastMessageId, clearOptimistic])
 
@@ -224,6 +260,7 @@ export function useChat({ sessionId }: { sessionId: string | null }): UseChatRet
     setLocalGuardrail(stream.guardrailMessage)
     clearOptimistic()
     setIsPending(false)
+    setIsPendingNewSession(false)
     settledRef.current = true
   }, [stream.messageType, stream.guardrailMessage, clearOptimistic])
 
@@ -231,6 +268,7 @@ export function useChat({ sessionId }: { sessionId: string | null }): UseChatRet
     if (stream.messageType !== 'error') return
     clearOptimistic()
     setIsPending(false)
+    setIsPendingNewSession(false)
     settledRef.current = true
     const msg = stream.errorMessage ?? 'Stream error'
     import('sonner')
@@ -254,15 +292,21 @@ export function useChat({ sessionId }: { sessionId: string | null }): UseChatRet
 
     clearOptimistic()
     setIsPending(false)
+    setIsPendingNewSession(false)
     settledRef.current = true
 
-    if (sessionId) {
+    // Prefer the lazy-created id when the just-finished stream minted one —
+    // the `sessionId` prop won't have been re-rendered with the new value
+    // yet on the same tick, so falling back to the prop would skip the
+    // messages-cache invalidation for the brand-new session.
+    const idForCache = stream.lastCreatedSessionId ?? sessionId
+    if (idForCache) {
       queryClient.invalidateQueries({
-        queryKey: ['chat-session-messages', sessionId],
+        queryKey: ['chat-session-messages', idForCache],
       })
     }
     queryClient.invalidateQueries({ queryKey: ['chat-sessions'] })
-  }, [stream.lastMessageId, sessionId, queryClient, clearOptimistic])
+  }, [stream.lastMessageId, stream.lastCreatedSessionId, sessionId, queryClient, clearOptimistic])
 
   // Stream-end watcher: when `isStreaming` flips true→false without any
   // terminal frame having marked the send as settled, the send is a zombie
@@ -278,6 +322,7 @@ export function useChat({ sessionId }: { sessionId: string | null }): UseChatRet
     settledRef.current = true
     clearOptimistic()
     setIsPending(false)
+    setIsPendingNewSession(false)
     import('sonner')
       .then(({ toast }) => {
         toast.error('Connection lost — please retry.', {
@@ -291,6 +336,71 @@ export function useChat({ sessionId }: { sessionId: string | null }): UseChatRet
       .catch(() => {})
   }, [stream.isStreaming, clearOptimistic])
 
+  // U15 lazy creation: the backend emits `event: session_created` as the
+  // FIRST SSE frame on the `'new'` sentinel path, carrying the freshly-
+  // minted UUID. We:
+  //   1. router.replace `/chat` → `/chat/<id>` so refresh / share / back
+  //      lands on the real session.
+  //   2. Optimistically patch the `['chat-sessions']` cache with a placeholder
+  //      row (title=null) so the sidebar shows the new chat without waiting
+  //      for the next list refetch. The first-message fallback rendering
+  //      uses the optimistic user bubble (or the cached chat messages query)
+  //      to compose a preview label.
+  //
+  // The `lastSessionIdRef` mirror is critical: the SSE frame may arrive in
+  // the same tick as the optimistic-bubble teardown, so subsequent retries
+  // must target the real id, not the consumed sentinel.
+  useEffect(() => {
+    const newId = stream.lastCreatedSessionId
+    if (!newId) return
+    // 1. Swap the URL so refresh works. `replace`, not `push`, so Back
+    //    doesn't return to the intermediate `/chat` empty state.
+    setSessionId(newId, { replace: true })
+    // 2. Pin the retry target to the real id so re-sends don't hit the
+    //    sentinel a second time (which would create yet another row).
+    lastSessionIdRef.current = newId
+    // Real id has landed — release the lazy-create gate so the next Enter
+    // targets the real session via `lastSessionIdRef`, not the sentinel.
+    setIsPendingNewSession(false)
+    // 3. Seed the sidebar cache. Title stays null until either the
+    //    `event: title` frame lands (handled below) or the next list
+    //    refetch happens.
+    const now = new Date().toISOString()
+    queryClient.setQueryData<SessionsListSnapshot>(['chat-sessions'], (prev) => {
+      if (!prev) {
+        return {
+          sessions: [
+            {
+              id: newId,
+              title: null,
+              created_at: now,
+              updated_at: now,
+              message_count: 1,
+            },
+          ],
+          total: 1,
+        }
+      }
+      // De-dupe defensively — if the consumer already prepended a stub
+      // (unlikely, but cheap to guard) we don't want a doubled row.
+      if (prev.sessions.some((s) => s.id === newId)) return prev
+      return {
+        ...prev,
+        sessions: [
+          {
+            id: newId,
+            title: null,
+            created_at: now,
+            updated_at: now,
+            message_count: 1,
+          },
+          ...prev.sessions,
+        ],
+        total: prev.total + 1,
+      }
+    })
+  }, [stream.lastCreatedSessionId, queryClient, setSessionId])
+
   // Auto-titling: when the backend emits an SSE `title` frame on the first
   // user turn, optimistically patch the chat-sessions list cache so the
   // sidebar updates immediately. The backend has already PATCHed the title
@@ -300,28 +410,38 @@ export function useChat({ sessionId }: { sessionId: string | null }): UseChatRet
   // Cache shape: backend returns ChatSessionListResponse = {sessions, total}
   // (renamed from items in commit ebb9abd to match the wire). Manual-rename
   // guard accepts all 3 placeholder titles in the codebase ('New chat',
-  // 'New Chat', 'New conversation') — same set the backend's auto-title
-  // gate accepts — so a manually-renamed title in any form is preserved.
+  // 'New Chat', 'New conversation') AND `null` (the U15 lazy-creation
+  // default) — same set the backend's auto-title gate accepts — so a
+  // manually-renamed title in any form is preserved.
   useEffect(() => {
     const newTitle = stream.lastTitle
-    if (!newTitle || !sessionId) return
+    if (!newTitle) return
+    // Use the freshly-minted id when the lazy-create path produced one;
+    // otherwise stick with the active prop. Reading the ref avoids
+    // re-running this effect on the null → newId transition.
+    const targetId = stream.lastCreatedSessionId ?? sessionId
+    if (!targetId) return
     const PLACEHOLDERS = new Set(['New chat', 'New Chat', 'New conversation'])
     queryClient.setQueryData<SessionsListSnapshot>(['chat-sessions'], (prev) => {
       if (!prev) return prev
-      const cached = prev.sessions.find((s) => s.id === sessionId)
-      if (!cached || !PLACEHOLDERS.has(cached.title)) return prev
+      const cached = prev.sessions.find((s) => s.id === targetId)
+      if (!cached) return prev
+      if (cached.title !== null && !PLACEHOLDERS.has(cached.title)) return prev
       return {
         ...prev,
-        sessions: prev.sessions.map((s) => (s.id === sessionId ? { ...s, title: newTitle } : s)),
+        sessions: prev.sessions.map((s) =>
+          s.id === targetId ? { ...s, title: newTitle } : s
+        ),
       }
     })
     queryClient.invalidateQueries({ queryKey: ['chat-sessions'] })
-  }, [stream.lastTitle, sessionId, queryClient])
+  }, [stream.lastTitle, stream.lastCreatedSessionId, sessionId, queryClient])
 
   return {
     send,
     abort,
     isPending,
+    isPendingNewSession,
     streamingToken: stream.currentResponse,
     isStreaming: stream.isStreaming,
     optimisticMessages,

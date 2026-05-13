@@ -298,4 +298,62 @@ describe('useChat', () => {
     }>(['chat-sessions'])
     expect(cached?.sessions[0]?.title).toBe('My custom name')
   })
+
+  // U15 lazy creation: when `sessionId` is null and the user sends, the
+  // hook targets the `'new'` sentinel; the backend creates the row
+  // inline and emits `event: session_created` carrying the real UUID;
+  // the hook patches `['chat-sessions']` with a stub row so the sidebar
+  // updates immediately, and the URL swaps to `/chat/<id>`.
+  it('passes "new" sentinel and patches chat-sessions cache on session_created (U15)', async () => {
+    const sseBody =
+      'event: session_created\ndata: {"session_id":"new-id-1","source_ids":[]}\n\n' +
+      'event: title\ndata: {"title":"Lazy title"}\n\n' +
+      'event: done\ndata: {"message_id":"m1"}\n\n'
+
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      body: makeStream([sseBody]),
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    })
+
+    const { result } = renderHook(() => useChat({ sessionId: null }), {
+      wrapper: makeWrapperWithClient(queryClient),
+    })
+
+    await act(async () => {
+      result.current.send('Hello world')
+    })
+
+    // The fetch URL must hit the sentinel path: the backend turns this
+    // into a lazy-create.
+    const lastCall = fetchMock.mock.calls[0]
+    const url = lastCall?.[0] as string
+    expect(url).toMatch(/\/api\/v1\/chat\/sessions\/new\/messages$/)
+
+    // The cache is now seeded with the freshly-minted id; the title is
+    // either still null (race: session_created arrived but title hadn't
+    // landed yet) or 'Lazy title' (race: title landed before assertion).
+    // Either is acceptable — the row's PRESENCE is the U15 contract.
+    await waitFor(() => {
+      const cached = queryClient.getQueryData<{
+        sessions: Array<{ id: string; title: string | null }>
+      }>(['chat-sessions'])
+      expect(cached?.sessions.some((s) => s.id === 'new-id-1')).toBe(true)
+    })
+
+    // Eventual title patch — `event: title` fires AFTER `session_created`
+    // in the stream, so we wait for the seeded row's title to flip from
+    // null to the AI-minted string.
+    await waitFor(() => {
+      const cached = queryClient.getQueryData<{
+        sessions: Array<{ id: string; title: string | null }>
+      }>(['chat-sessions'])
+      const row = cached?.sessions.find((s) => s.id === 'new-id-1')
+      expect(row?.title).toBe('Lazy title')
+    })
+  })
 })

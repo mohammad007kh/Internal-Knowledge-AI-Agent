@@ -41,7 +41,10 @@ import { useSelectedSession } from './SelectedSessionContext'
 
 export interface ChatSessionLike {
   id: string
-  title: string
+  // Nullable since U15 (lazy creation): a freshly-created session may
+  // not have a title yet. The row actions code treats null as the empty
+  // string for edit-init purposes.
+  title: string | null
 }
 
 const sessionsApi = {
@@ -90,7 +93,7 @@ export function useSessionRowActions(session: ChatSessionLike): SessionRowAction
   const { sessionId, setSessionId, abortStream } = useSelectedSession()
 
   const [isEditing, setIsEditing] = useState(false)
-  const [editTitle, setEditTitle] = useState(session.title)
+  const [editTitle, setEditTitle] = useState(session.title ?? '')
   const [menuOpen, setMenuOpen] = useState(false)
   const [deleteOpen, setDeleteOpen] = useState(false)
 
@@ -121,15 +124,18 @@ export function useSessionRowActions(session: ChatSessionLike): SessionRowAction
   })
 
   const startEdit = useCallback(() => {
-    setEditTitle(session.title)
+    setEditTitle(session.title ?? '')
     setIsEditing(true)
   }, [session.title])
 
   const commitEdit = useCallback(() => {
     const trimmed = editTitle.trim()
     // Empty input → silent revert. Unchanged title → no-op (don't burn
-    // an API call for a no-op rename).
-    if (!trimmed || trimmed === session.title.trim()) {
+    // an API call for a no-op rename). A null title (U15 lazy creation
+    // before titler landed) is treated as "no current title" — any
+    // non-empty input is a real rename.
+    const currentTrimmed = (session.title ?? '').trim()
+    if (!trimmed || trimmed === currentTrimmed) {
       setIsEditing(false)
       return
     }
@@ -265,6 +271,10 @@ interface SessionRowKebabProps {
  */
 export function SessionRowKebab({ session, actions, className }: SessionRowKebabProps) {
   const { menuOpen, setMenuOpen, startEdit, setDeleteOpen } = actions
+  // U15: a freshly-created session may have a null title. Fall back to a
+  // generic label so aria attrs (and existing test selectors that match
+  // /open menu: <title>/i) still resolve to something sensible.
+  const ariaTitle = session.title ?? 'New chat'
   return (
     <div
       className={cn(
@@ -281,7 +291,7 @@ export function SessionRowKebab({ session, actions, className }: SessionRowKebab
             size="icon"
             variant="ghost"
             className="h-5 w-5"
-            aria-label={`Open menu: ${session.title}`}
+            aria-label={`Open menu: ${ariaTitle}`}
             aria-haspopup="menu"
           >
             <MoreHorizontalIcon className="h-3.5 w-3.5" />
@@ -291,7 +301,7 @@ export function SessionRowKebab({ session, actions, className }: SessionRowKebab
           <button
             type="button"
             role="menuitem"
-            aria-label={`Rename: ${session.title}`}
+            aria-label={`Rename: ${ariaTitle}`}
             onClick={() => {
               setMenuOpen(false)
               startEdit()
@@ -304,7 +314,7 @@ export function SessionRowKebab({ session, actions, className }: SessionRowKebab
           <button
             type="button"
             role="menuitem"
-            aria-label={`Delete: ${session.title}`}
+            aria-label={`Delete: ${ariaTitle}`}
             onClick={() => {
               setMenuOpen(false)
               setDeleteOpen(true)

@@ -5,7 +5,7 @@ import { useSidebar } from '@/components/dashboard/SidebarProvider'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { apiClient } from '@/lib/api-client'
 import { cn } from '@/lib/utils'
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   ChevronRightIcon,
   ListIcon,
@@ -15,7 +15,6 @@ import {
 } from 'lucide-react'
 import { usePathname } from 'next/navigation'
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { toast } from 'sonner'
 import { useSelectedSession } from './SelectedSessionContext'
 import { SessionListSheet } from './SessionListSheet'
 import {
@@ -24,13 +23,46 @@ import {
   SessionRowKebab,
   useSessionRowActions,
 } from './SessionRowActions'
+import type { Message, SessionMessagesResponse } from './types'
 
 interface ChatSession {
   id: string
-  title: string
+  // Nullable since U15 (lazy creation): a brand-new session may exist for
+  // a few hundred ms with no title yet. The sidebar falls back to a
+  // preview of the first user message in that window.
+  title: string | null
   created_at: string
   updated_at: string
   message_count: number
+}
+
+/** Characters to slice off the first user message for the fallback label. */
+const FALLBACK_TITLE_CHARS = 30
+const FALLBACK_PLACEHOLDER = 'New chat'
+
+/**
+ * Compose the label rendered for a session row. Prefers the real title;
+ * when the row was created via U15 lazy-creation and the titler hasn't yet
+ * landed, falls back to the first user message read from the cached
+ * messages query, truncated to a short preview.
+ */
+function useSessionLabel(session: ChatSession): string {
+  const queryClient = useQueryClient()
+  return useMemo(() => {
+    if (session.title) return session.title
+    const cached = queryClient.getQueryData<SessionMessagesResponse>([
+      'chat-session-messages',
+      session.id,
+    ])
+    const firstUser = cached?.messages?.find((m: Message) => m.role === 'user')
+    const preview = firstUser?.content?.trim()
+    if (preview) {
+      return preview.length > FALLBACK_TITLE_CHARS
+        ? `${preview.slice(0, FALLBACK_TITLE_CHARS).trimEnd()}…`
+        : preview
+    }
+    return FALLBACK_PLACEHOLDER
+  }, [session.id, session.title, queryClient])
 }
 
 interface SessionsResponse {
@@ -65,6 +97,7 @@ interface SidebarSessionRowProps {
  */
 function SidebarSessionRow({ session, isActive, onSelect }: SidebarSessionRowProps) {
   const actions = useSessionRowActions(session)
+  const label = useSessionLabel(session)
 
   return (
     <li>
@@ -84,7 +117,7 @@ function SidebarSessionRow({ session, isActive, onSelect }: SidebarSessionRowPro
             onKeyDown={(e) => e.stopPropagation()}
           >
             <SessionEditInput
-              initialTitle={session.title}
+              initialTitle={session.title ?? ''}
               value={actions.editTitle}
               onChange={actions.setEditTitle}
               onCommit={actions.commitEdit}
@@ -97,10 +130,10 @@ function SidebarSessionRow({ session, isActive, onSelect }: SidebarSessionRowPro
               type="button"
               onClick={onSelect}
               aria-current={isActive ? 'page' : undefined}
-              aria-label={`Chat session: ${session.title}`}
+              aria-label={`Chat session: ${label}`}
               className="min-w-0 flex-1 truncate text-left"
             >
-              {session.title}
+              {label}
             </button>
             <SessionRowKebab session={session} actions={actions} />
           </>
@@ -110,7 +143,7 @@ function SidebarSessionRow({ session, isActive, onSelect }: SidebarSessionRowPro
         open={actions.deleteOpen}
         onOpenChange={actions.setDeleteOpen}
         onConfirm={actions.confirmDelete}
-        title={session.title}
+        title={label}
       />
     </li>
   )
@@ -158,7 +191,6 @@ export function ChatSidebarGroup({ onNavigate }: ChatSidebarGroupProps) {
   const collapsed = isMobile ? false : ctxCollapsed
 
   const { sessionId, setSessionId } = useSelectedSession()
-  const queryClient = useQueryClient()
 
   const [sheetOpen, setSheetOpen] = useState(false)
   const [userExpanded, setUserExpanded] = useState<boolean>(false)
@@ -204,23 +236,14 @@ export function ChatSidebarGroup({ onNavigate }: ChatSidebarGroupProps) {
   const totalSessions = data?.total ?? 0
   const hasMore = totalSessions > MAX_INLINE_SESSIONS
 
-  const createMutation = useMutation({
-    mutationFn: async (): Promise<ChatSession> => {
-      const res = await apiClient.post<ChatSession>('/api/v1/chat/sessions', {
-        title: 'New chat',
-      })
-      return res.data
-    },
-    onSuccess: (session) => {
-      queryClient.invalidateQueries({ queryKey: ['chat-sessions'] })
-      // `setSessionId` now performs the route navigation itself
-      // (`/chat/<id>`), so the explicit `router.push('/chat')` fallback we
-      // used to need from non-chat routes is redundant.
-      setSessionId(session.id, { replace: true })
-      onNavigate?.()
-    },
-    onError: () => toast.error('Failed to create session.'),
-  })
+  // U15 lazy creation: the "+" button no longer fires `POST /sessions`.
+  // It just clears any active selection so the URL lands on `/chat`,
+  // where the empty-hero composer is ready to accept the first message.
+  // The actual session row is created server-side when the user sends.
+  const handleNewChat = useCallback(() => {
+    setSessionId(null, { replace: true })
+    onNavigate?.()
+  }, [setSessionId, onNavigate])
 
   const handleSelect = useCallback(
     (id: string) => {
@@ -304,8 +327,7 @@ export function ChatSidebarGroup({ onNavigate }: ChatSidebarGroupProps) {
         <button
           type="button"
           aria-label="New chat"
-          disabled={createMutation.isPending}
-          onClick={() => createMutation.mutate()}
+          onClick={handleNewChat}
           // 44x44 hit target on mobile per WCAG 2.5.5; condenses to 24x24
           // visually on desktop where pointer precision is higher.
           className="flex h-11 w-11 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground md:h-6 md:w-6"
