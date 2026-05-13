@@ -57,6 +57,13 @@ async def run_startup_seeding() -> None:
 
     Wraps every logical step so a single failure does not abort the rest
     of the seeding pipeline.  Safe to call on every boot.
+
+    Ends with :func:`verify_all_stages_configured` — a post-seed assertion
+    that every slot listed in :data:`STAGES` ended up with a row whose
+    ``ai_model_id`` is non-NULL.  The check logs a loud ``ERROR`` listing
+    the missing slot names (rather than raising) so a misconfigured stage
+    is visible in container logs at boot time instead of silently falling
+    through to the resolver's default-AIModel path on the first request.
     """
     try:
         async with AsyncSessionLocal() as session:
@@ -65,6 +72,10 @@ async def run_startup_seeding() -> None:
             await ensure_default_stage_configs(session)
             await _backfill_missing_api_keys(session)
             await session.commit()
+            # Verify AFTER the commit so the assertion runs against the
+            # final, durable state. Wrapped separately so a verification
+            # failure cannot roll back the seed work above.
+            await verify_all_stages_configured(session)
     except Exception:  # noqa: BLE001 — startup must not fail on seed errors
         logger.warning("startup seeding failed (continuing)", exc_info=True)
 
@@ -265,6 +276,61 @@ async def ensure_default_stage_configs(session: AsyncSession) -> None:
             relinked,
             len(STAGES),
         )
+
+
+async def verify_all_stages_configured(session: AsyncSession) -> list[str]:
+    """Assert every slot in :data:`STAGES` has a usable LLMConfiguration row.
+
+    "Usable" means:
+
+    * A row exists for the slot, **and**
+    * ``ai_model_id`` is non-NULL (the row is linked to an AIModel).
+
+    Slots that fail either gate are collected, logged at ``ERROR`` level
+    (so the operator sees a single bright "STARTUP CHECK FAILED" line in
+    container logs), and returned so callers / tests can inspect them.
+
+    This is the ARCH-A startup assertion: previously a misconfigured stage
+    would silently flow through the resolver to a default model, which
+    masked the 9-of-10 dead-rows bug for months.  After this check, any
+    such regression trips a clear error at boot.
+
+    Does NOT raise — :func:`run_startup_seeding` is supposed to be
+    non-fatal per the lifespan contract.  The caller decides whether to
+    treat the returned list as a hard failure.
+
+    Returns:
+        Sorted list of slot names that failed the check.  Empty list
+        means every stage is configured correctly.
+    """
+    rows = (await session.execute(select(LLMConfiguration))).scalars().all()
+    by_slot: dict[str, LLMConfiguration] = {r.slot_name: r for r in rows}
+    missing: list[str] = []
+    unlinked: list[str] = []
+    for stage in STAGES:
+        existing = by_slot.get(stage)
+        if existing is None:
+            missing.append(stage)
+        elif existing.ai_model_id is None:
+            unlinked.append(stage)
+
+    bad = sorted(missing + unlinked)
+    if bad:
+        logger.error(
+            "startup check FAILED: %d/%d stage slots are not usable "
+            "(missing=%r unlinked=%r). Admin overrides on these slots will "
+            "be ignored until an AI Model is linked via /admin/llm-settings.",
+            len(bad),
+            len(STAGES),
+            sorted(missing),
+            sorted(unlinked),
+        )
+    else:
+        logger.info(
+            "startup check OK: all %d stage slots are linked to an AIModel",
+            len(STAGES),
+        )
+    return bad
 
 
 async def _pick_default_ai_model(session: AsyncSession) -> AIModel | None:

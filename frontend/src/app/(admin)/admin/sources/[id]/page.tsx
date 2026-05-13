@@ -74,6 +74,7 @@ import {
 import { Textarea } from '@/components/ui/textarea'
 import {
   useDeleteSource,
+  usePhaseTransitionInvalidation,
   useSource,
   useSourceDocuments,
   useSourceStats,
@@ -82,6 +83,10 @@ import {
   useTriggerSync,
   useUpdateSource,
 } from '@/features/sources/hooks/useSources'
+import { AvailabilityToggle } from '@/features/sources/components/AvailabilityToggle'
+import { LifecycleProgressBar } from '@/features/sources/components/LifecycleProgressBar'
+import { LifecycleStepper } from '@/features/sources/components/LifecycleStepper'
+import { useLifecycle } from '@/features/sources/lifecycle'
 import {
   SourceModeBadge,
   StatusBadge,
@@ -306,6 +311,16 @@ export default function SourceDetailPage() {
   const stats = useSourceStats(id).data
   const { data: documentsData } = useSourceDocuments(id)
 
+  // U14 — derive lifecycle phase + gate matrix. The hook safely handles a
+  // null source (returns an "everything disabled" state) so we can call it
+  // unconditionally and pass undefined while loading.
+  const lifecycle = useLifecycle(source ?? null)
+
+  // U14 — when the phase changes (e.g. running → ready), invalidate sibling
+  // queries so the source list, chat session picker, and stats refresh
+  // without a manual reload.
+  usePhaseTransitionInvalidation(id, lifecycle.phase)
+
   const syncMutation = useTriggerSync()
   const testConnectionMutation = useTestConnection()
   const deleteMutation = useDeleteSource()
@@ -422,28 +437,42 @@ export default function SourceDetailPage() {
         <div className="flex flex-col items-end gap-2">
           <div className="flex flex-wrap items-center gap-2">
             <StatusBadge status={source.status} />
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() =>
-                syncMutation.mutate(id, {
-                  onSuccess: (job) => {
-                    trackSessionJob(job)
-                    toast.success('Sync started')
-                  },
-                  onError: (err) => toast.error(getErrorMessage(err)),
-                })
-              }
-              disabled={syncMutation.isPending}
-              aria-label={
-                isDbLiveSource
-                  ? `Re-study schema for ${source.name}`
-                  : `Sync source ${source.name}`
-              }
-            >
-              <RefreshCwIcon className="mr-1.5 h-4 w-4" />
-              {isDbLiveSource ? 'Re-study schema' : 'Sync now'}
-            </Button>
+            <TooltipProvider delayDuration={150}>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() =>
+                        syncMutation.mutate(id, {
+                          onSuccess: (job) => {
+                            trackSessionJob(job)
+                            toast.success('Sync started')
+                          },
+                          onError: (err) => toast.error(getErrorMessage(err)),
+                        })
+                      }
+                      disabled={syncMutation.isPending || !lifecycle.canSyncNow}
+                      aria-label={
+                        isDbLiveSource
+                          ? `Re-study schema for ${source.name}`
+                          : `Sync source ${source.name}`
+                      }
+                      data-testid="header-sync-now"
+                    >
+                      <RefreshCwIcon className="mr-1.5 h-4 w-4" />
+                      {isDbLiveSource ? 'Re-study schema' : 'Sync now'}
+                    </Button>
+                  </span>
+                </TooltipTrigger>
+                {!lifecycle.canSyncNow && lifecycle.syncNowReason ? (
+                  <TooltipContent side="bottom" className="max-w-[260px] text-xs">
+                    {lifecycle.syncNowReason}
+                  </TooltipContent>
+                ) : null}
+              </Tooltip>
+            </TooltipProvider>
             {isConnectionTestable(source.source_type) && (
               <Button
                 variant="outline"
@@ -481,7 +510,20 @@ export default function SourceDetailPage() {
       <Tabs value={activeTab} onValueChange={setActiveTab}>
         <TabsList className="w-full justify-start overflow-x-auto">
           <TabsTrigger value="overview">Overview</TabsTrigger>
-          <TabsTrigger value="test">Test</TabsTrigger>
+          {/* U14 — Test tab is gated on the lifecycle phase. We can't easily
+              wrap a TabsTrigger in a Tooltip without breaking Radix's keyboard
+              roving (TabsList expects TabsTrigger as a direct child), so we
+              surface the reason via the native `title` attribute when
+              disabled. The Sync-tab band and the header Sync-now button still
+              get the rich Tooltip treatment. */}
+          <TabsTrigger
+            value="test"
+            disabled={!lifecycle.canChat}
+            title={!lifecycle.canChat ? lifecycle.chatReason : undefined}
+            data-testid="tab-trigger-test"
+          >
+            Test
+          </TabsTrigger>
           <TabsTrigger value="schema">
             {dataTabLabelFor(source.source_type)}
             {documentsData && sourceKindOf(source.source_type) !== 'database' && (
@@ -504,6 +546,38 @@ export default function SourceDetailPage() {
 
         {/* OVERVIEW */}
         <TabsContent value="overview" className="mt-4 space-y-4">
+          {/* U14 — lifecycle stepper: surfaces every stage of the pipeline so
+              admins see "we're doing something" instead of a quiet "Pending sync"
+              pill. The companion progress bar (FX16) renders only while the
+              source is in flight; both disappear once ready/failed. */}
+          <Card data-testid="overview-lifecycle-card">
+            <CardHeader className="pb-3">
+              <CardTitle className="text-sm font-medium">Lifecycle</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <LifecycleStepper phase={lifecycle.phase} />
+              <LifecycleProgressBar
+                phase={lifecycle.phase}
+                detail={
+                  source.latest_job?.started_at
+                    ? `Started ${formatTimestamp(source.latest_job.started_at)}`
+                    : null
+                }
+              />
+              {/* U14 — surface the "Available to users" toggle on Overview
+                  too. It's the same component rendered on Settings → both
+                  reflect the same `is_active` flag and obey the same gate
+                  matrix. */}
+              <div className="border-t pt-3">
+                <AvailabilityToggle
+                  source={source}
+                  compact
+                  testIdPrefix="overview-availability-toggle"
+                />
+              </div>
+            </CardContent>
+          </Card>
+
           {/* FAILURE CALLOUTS — surface degenerate states above the fold so
               admins entering the page see "what's wrong" before "what's here". */}
           <OverviewCallouts
@@ -585,6 +659,8 @@ export default function SourceDetailPage() {
             sourceName={source.name}
             isDbLiveSource={isDbLiveSource}
             isSyncing={syncMutation.isPending}
+            canSyncNow={lifecycle.canSyncNow}
+            syncNowReason={lifecycle.syncNowReason}
             onSyncNow={() =>
               syncMutation.mutate(id, {
                 onSuccess: (job) => {
@@ -656,79 +732,16 @@ export default function SourceDetailPage() {
                 <span className="text-muted-foreground">Type</span>
                 <Badge variant="secondary">{source.source_type}</Badge>
               </div>
-              {(() => {
-                // PRD §11: "approved" means the admin has reviewed the source's
-                // name + description. Without this gate an admin can flip
-                // is_active=true on a source whose AI naming hasn't completed,
-                // surfacing "Untitled source" to chat users. Block the toggle
-                // until both prerequisites are met.
-                const namePending = source.name_status === 'pending_ai'
-                const descPending = source.description_status === 'pending_ai'
-                const descMissing =
-                  !source.description || source.description.trim().length === 0
-                const blockers: string[] = []
-                if (namePending) {
-                  blockers.push(
-                    'AI naming has not finished — wait for "Naming…" to clear, or type a name in Settings.'
-                  )
-                }
-                if (descPending) {
-                  blockers.push('AI description has not finished — wait for it to clear.')
-                }
-                if (descMissing && !descPending) {
-                  blockers.push(
-                    'Description is empty — write one in Settings, or use "Regenerate description" in the AI naming assistant.'
-                  )
-                }
-                const gateBlocked = !source.is_active && blockers.length > 0
-                return (
-                  <div className="space-y-2">
-                    <div className="flex items-center justify-between">
-                      <div className="min-w-0 flex-1 space-y-0.5">
-                        <span className="block text-muted-foreground">Available to users</span>
-                        <span className="block text-xs text-muted-foreground/80">
-                          When off, the source is hidden from the chat session source picker. New
-                          sources start off until approved by an admin.
-                        </span>
-                      </div>
-                      <Switch
-                        checked={source.is_active}
-                        disabled={updateMutation.isPending || gateBlocked}
-                        onCheckedChange={(checked) =>
-                          updateMutation.mutate(
-                            { is_active: checked },
-                            {
-                              onSuccess: () =>
-                                toast.success(
-                                  checked
-                                    ? 'Source approved — now available to users'
-                                    : 'Source hidden from users'
-                                ),
-                              onError: (err) => toast.error(getErrorMessage(err)),
-                            }
-                          )
-                        }
-                        aria-label="Toggle source availability to users"
-                        aria-describedby={gateBlocked ? 'approval-blockers' : undefined}
-                      />
-                    </div>
-                    {gateBlocked && (
-                      <div
-                        id="approval-blockers"
-                        role="status"
-                        className="rounded-md border border-amber-500/40 bg-amber-500/5 p-3 text-xs text-amber-900 dark:text-amber-200"
-                      >
-                        <p className="font-medium">Cannot approve yet:</p>
-                        <ul className="mt-1 list-disc space-y-1 pl-5">
-                          {blockers.map((b) => (
-                            <li key={b}>{b}</li>
-                          ))}
-                        </ul>
-                      </div>
-                    )}
-                  </div>
-                )
-              })()}
+              {/* U14 — shared availability toggle. The same component renders
+                  on the Overview tab; both stay in sync because they read off
+                  the same React Query cache. PRD §11 naming/description
+                  blockers + the lifecycle phase gate are folded into
+                  `AvailabilityToggle` so there's only one place that decides
+                  approvability. */}
+              <AvailabilityToggle
+                source={source}
+                testIdPrefix="settings-availability-toggle"
+              />
               <div className="flex items-center justify-between">
                 <span className="text-muted-foreground">Citations enabled</span>
                 <Switch
@@ -857,6 +870,11 @@ interface SyncHeaderBandProps {
   /** When true, the source uses live retrieval (text_to_query) — relabel
    *  "Sync now" to "Re-study schema" because there are no documents to sync. */
   isDbLiveSource?: boolean
+  /** Lifecycle gate — disable the primary button when the source is mid-
+   *  ingestion. Defaults to `true` for callers that haven't migrated. */
+  canSyncNow?: boolean
+  /** Reason the gate is closed; rendered as a tooltip. */
+  syncNowReason?: string
 }
 
 function SyncHeaderBand({
@@ -868,10 +886,39 @@ function SyncHeaderBand({
   onTestConnection,
   testConnectionResult,
   isDbLiveSource,
+  canSyncNow = true,
+  syncNowReason = '',
 }: SyncHeaderBandProps) {
   const showTestConnection = isConnectionTestable(sourceType)
   const primaryLabel = isDbLiveSource ? 'Re-study schema' : 'Sync now'
   const primaryActiveLabel = isDbLiveSource ? 'Studying…' : 'Starting…'
+
+  const syncButton = (
+    <Button
+      variant="default"
+      size="sm"
+      onClick={onSyncNow}
+      disabled={isSyncing || !canSyncNow}
+      className="w-full sm:w-auto"
+      aria-label={
+        isDbLiveSource
+          ? `Re-study schema for ${sourceName}`
+          : `Sync source ${sourceName} now`
+      }
+    >
+      {isSyncing ? (
+        <>
+          <Loader2Icon className="mr-1.5 h-4 w-4 animate-spin" aria-hidden />
+          {primaryActiveLabel}
+        </>
+      ) : (
+        <>
+          <RefreshCwIcon className="mr-1.5 h-4 w-4" aria-hidden />
+          {primaryLabel}
+        </>
+      )}
+    </Button>
+  )
 
   return (
     <div
@@ -879,30 +926,20 @@ function SyncHeaderBand({
       className="flex flex-col gap-2 rounded-md border bg-card px-3 py-2 sm:flex-row sm:items-center sm:gap-3"
     >
       <div className="flex flex-wrap items-center gap-2">
-        <Button
-          variant="default"
-          size="sm"
-          onClick={onSyncNow}
-          disabled={isSyncing}
-          className="w-full sm:w-auto"
-          aria-label={
-            isDbLiveSource
-              ? `Re-study schema for ${sourceName}`
-              : `Sync source ${sourceName} now`
-          }
-        >
-          {isSyncing ? (
-            <>
-              <Loader2Icon className="mr-1.5 h-4 w-4 animate-spin" aria-hidden />
-              {primaryActiveLabel}
-            </>
-          ) : (
-            <>
-              <RefreshCwIcon className="mr-1.5 h-4 w-4" aria-hidden />
-              {primaryLabel}
-            </>
-          )}
-        </Button>
+        {!canSyncNow && syncNowReason ? (
+          <TooltipProvider delayDuration={150}>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span className="contents">{syncButton}</span>
+              </TooltipTrigger>
+              <TooltipContent side="bottom" className="max-w-[260px] text-xs">
+                {syncNowReason}
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
+        ) : (
+          syncButton
+        )}
 
         {showTestConnection && (
           <Button

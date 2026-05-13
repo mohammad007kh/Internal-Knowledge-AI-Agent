@@ -146,3 +146,27 @@
     background-color: oklch(0 0 0 / 0.7);
   }
 }
+
+/* ----------------------------------------------------------------------------
+ * Source lifecycle progress bar (FX16)
+ *   - `lifecycle-marquee` drives the indeterminate stripe that travels left to
+ *      right on the pending_upload phase.
+ *   - `lifecycle-shimmer` adds a soft highlight that sweeps across the filled
+ *      portion of the bar while the worker is making progress.
+ * Both motions are disabled under `prefers-reduced-motion`.
+ * -------------------------------------------------------------------------- */
+@keyframes lifecycle-marquee {
+  0%   { transform: translateX(-100%); }
+  100% { transform: translateX(400%); }
+}
+
+@keyframes lifecycle-shimmer {
+  0%   { transform: translateX(-100%); }
+  100% { transform: translateX(400%); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-testid="lifecycle-progress-bar"] [aria-hidden] {
+    animation: none !important;
+  }
+}

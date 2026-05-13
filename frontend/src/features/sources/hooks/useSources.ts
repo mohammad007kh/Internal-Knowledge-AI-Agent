@@ -3,6 +3,8 @@
 import {
   type SchemaDocumentResponse,
   type SourceConnectionConfig,
+  type SourceDetail,
+  type SourceListItem,
   type UpdateSourceRequest,
   autoNameApi,
   deleteSourceApi,
@@ -21,6 +23,7 @@ import {
 import { extractApiErrorMessage } from '@/lib/api-error'
 import { getErrorMessage } from '@/lib/errors'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useEffect, useRef } from 'react'
 import { toast } from 'sonner'
 
 // ---------------------------------------------------------------------------
@@ -54,9 +57,12 @@ export interface UseListSourcesOptions {
    * When `true`, refetch every 5 seconds. Callers should set this when any
    * visible row is in the `running` phase so the verb column transitions out
    * of "Working on it…" promptly. When `false` (default), the query stays on
-   * the React Query default (no polling, refetch on focus).
+   * the React Query default (no polling, refetch on focus). `'auto'` reads
+   * the cached list and polls while ANY row is still moving through its
+   * lifecycle — sync running/pending, AI naming pending, or schema study in
+   * flight. Falls back to no polling when every row is steady-state.
    */
-  pollWhileRunning?: boolean
+  pollWhileRunning?: boolean | 'auto'
 }
 
 export function useListSources(options: UseListSourcesOptions = {}) {
@@ -64,7 +70,15 @@ export function useListSources(options: UseListSourcesOptions = {}) {
   return useQuery({
     queryKey: sourcesKeys.list(),
     queryFn: () => listSourcesApi(),
-    refetchInterval: pollWhileRunning ? 5_000 : false,
+    refetchInterval:
+      pollWhileRunning === 'auto'
+        ? (query) => {
+            const items = query.state.data?.items ?? []
+            return items.some(shouldPollSourceLifecycle) ? 5_000 : false
+          }
+        : pollWhileRunning
+          ? 5_000
+          : false,
   })
 }
 
@@ -74,10 +88,31 @@ export interface UseSourceOptions {
    * the static `true`/`false`, but the more useful pattern is to derive this
    * from the query's own data — e.g. "poll while `latest_job.status` is in
    * flight". To support that without a chicken-and-egg, the hook also accepts
-   * `'auto'`: it inspects the cached `latest_job.status` and polls when in
-   * `{pending, running}`. Defaults to `false` (no polling).
+   * `'auto'`: it inspects the cached source and polls while ANY part of the
+   * lifecycle is still moving — sync job pending/running, AI naming pending,
+   * or schema-study in flight. Defaults to `false` (no polling).
    */
   pollWhileRunning?: boolean | 'auto'
+}
+
+/**
+ * Should we be polling? Inspect every lifecycle signal — not just the sync
+ * job — so the page stays warm while AI naming or the DB study are still
+ * working. Exported for the (separate) useListSources hook that needs the
+ * same predicate run across many rows.
+ */
+export function shouldPollSourceLifecycle(
+  source: SourceListItem | SourceDetail | null | undefined
+): boolean {
+  if (!source) return false
+  const jobStatus = source.latest_job?.status
+  if (jobStatus === 'pending' || jobStatus === 'running') return true
+  if (source.name_status === 'pending_ai') return true
+  if (source.description_status === 'pending_ai') return true
+  if (source.schema_status === 'QUEUED' || source.schema_status === 'STUDYING') {
+    return true
+  }
+  return false
 }
 
 export function useSource(
@@ -91,14 +126,57 @@ export function useSource(
     enabled: Boolean(sourceId),
     refetchInterval:
       pollWhileRunning === 'auto'
-        ? (query) => {
-            const status = query.state.data?.latest_job?.status
-            return status === 'pending' || status === 'running' ? 3_000 : false
-          }
+        ? (query) => (shouldPollSourceLifecycle(query.state.data) ? 3_000 : false)
         : pollWhileRunning
           ? 3_000
           : false,
   })
+}
+
+/**
+ * Watch the cached source's lifecycle phase and invalidate sibling queries
+ * whenever it changes. Used by the source-detail page so that when ingestion
+ * flips from running → ready, the sources LIST query (used by the chat
+ * session source picker, which keys on `[...sourcesKeys.list(),
+ * { availableOnly: true }]` — same prefix) and the chat session messages
+ * query refetch immediately.
+ *
+ * The hook stores the previous phase in a ref so the invalidation only fires
+ * on the actual transition, not on every render.
+ */
+export function usePhaseTransitionInvalidation(
+  sourceId: string | undefined,
+  currentPhase: string | null | undefined
+): void {
+  const queryClient = useQueryClient()
+  // Separate refs for "have we mounted yet" and "previous phase value" so the
+  // mount-skip is explicit and survives React 18 StrictMode's double-invoke
+  // (refs are NOT reset between Strict mount/unmount/mount). Without this
+  // split, the guard had to combine `prev !== undefined && prev !== null` to
+  // catch both first-render and loading-state transitions — fragile and easy
+  // to misread.
+  const hasMountedRef = useRef(false)
+  const prevPhaseRef = useRef<string | null | undefined>(currentPhase)
+  useEffect(() => {
+    if (!sourceId) return
+    const prev = prevPhaseRef.current
+    prevPhaseRef.current = currentPhase
+    if (!hasMountedRef.current) {
+      // First effect run for this hook instance. Page already has fresh data
+      // for the current phase; transitions only matter while on-screen.
+      hasMountedRef.current = true
+      return
+    }
+    if (prev === currentPhase) return
+    // exact: false makes the prefix-match intent explicit: the chat session
+    // source picker key is `[...sourcesKeys.list(), { availableOnly: true }]`
+    // — a child of `sourcesKeys.list()`. React Query v5 prefix-matches arrays
+    // by default, but spelling it out makes the contract robust to future
+    // sourcesKeys evolution.
+    queryClient.invalidateQueries({ queryKey: sourcesKeys.list(), exact: false })
+    queryClient.invalidateQueries({ queryKey: sourcesKeys.detail(sourceId), exact: false })
+    queryClient.invalidateQueries({ queryKey: sourcesKeys.stats(sourceId), exact: false })
+  }, [sourceId, currentPhase, queryClient])
 }
 
 export function useSourceStats(sourceId: string | undefined) {

@@ -234,7 +234,13 @@ describe('TestTab — source-state warnings', () => {
     expect(amber).not.toBeNull()
   })
 
-  it('renders red banner AND disables input when DB schema_status === FAILED', async () => {
+  it('disables the Test tab when DB schema_status === FAILED (U14 lifecycle gate)', async () => {
+    // U14: when the schema study failed the source is not "ready", so the
+    // Test tab itself is disabled at the trigger level — the user can't
+    // reach the sandbox at all. The richer in-tab "Schema study failed"
+    // banner is still rendered when the tab IS reachable (e.g. on a
+    // re-study transition), but the lifecycle gate is the user-facing
+    // truth: no chat against a broken source.
     getSourceMock.mockResolvedValue(
       makeSource({
         source_type: 'postgresql',
@@ -244,11 +250,9 @@ describe('TestTab — source-state warnings', () => {
       })
     )
     renderPage()
-    await openTestTab()
-
-    const warnings = await screen.findByTestId('sandbox-warnings')
-    expect(warnings).toHaveTextContent(/Schema study failed/i)
-    expect(screen.getByTestId('sandbox-input')).toBeDisabled()
+    await waitFor(() => expect(screen.getByRole('tab', { name: 'Test' })).toBeInTheDocument())
+    const trigger = screen.getByRole('tab', { name: 'Test' })
+    expect(trigger).toBeDisabled()
   })
 
   it('renders neutral info banner when source.is_active === false', async () => {
