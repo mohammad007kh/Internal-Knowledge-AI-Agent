@@ -28,6 +28,7 @@ from langfuse import Langfuse
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from src.connectors.factory import ConnectorFactory
+from src.connectors.web_url_errors import WebUrlFetchError
 from src.core.config import settings
 from src.core.container import container
 from src.core.database import task_engine
@@ -40,10 +41,51 @@ from src.repositories.sync_job_repository import SyncJobRepository
 from src.schemas.raw_document import RawDocument
 from src.services.embedding_service_factory import EmbeddingServiceFactory
 from src.services.source_service import SourceService
+from src.services.sync_cancellation import (
+    clear_sync_cancelled,
+    is_sync_cancelled,
+)
 from src.services.sync_job_service import SyncJobService
 from src.tasks import celery_app
 
 logger = logging.getLogger(__name__)
+
+
+_CANCEL_RESULT_MARKER = "cancelled"
+
+
+async def _bail_if_cancelled(
+    *,
+    source_id: str,
+    job_id: uuid.UUID,
+    job_svc: SyncJobService,
+    stage: str,
+) -> dict[str, Any] | None:
+    """Cooperative-cancellation checkpoint helper (U16).
+
+    Returns a result dict when the cancel flag is set and the task should
+    exit cleanly; returns ``None`` to keep going. The flag is cleared once
+    a checkpoint honours it so a follow-up sync of the same source starts
+    fresh even if Redis TTL has not yet elapsed.
+    """
+    if not await is_sync_cancelled(source_id):
+        return None
+    logger.info(
+        "sync_source: cancellation observed at stage=%s for source_id=%s "
+        "job_id=%s — exiting cleanly",
+        stage,
+        source_id,
+        job_id,
+    )
+    await job_svc.mark_cancelled(
+        job_id, error_message=f"Cancelled by user during {stage}."
+    )
+    await clear_sync_cancelled(source_id)
+    return {
+        "source_id": source_id,
+        "status": _CANCEL_RESULT_MARKER,
+        "stage": stage,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -153,6 +195,21 @@ async def _run_sync_pipeline(  # noqa: C901
     # ── 1. Create SyncJob ────────────────────────────────────────────────────
     job = await job_svc.create_job(uuid.UUID(source_id))
     job_id = job.id
+
+    # U16 checkpoint: cancel requested before the task even started running.
+    # Catches the queued-job path where the API endpoint set the flag before
+    # the worker picked up the task off the broker.
+    early = await _bail_if_cancelled(
+        source_id=source_id,
+        job_id=job_id,
+        job_svc=job_svc,
+        stage="pre_start",
+    )
+    if early is not None:
+        trace.update(output=early)
+        langfuse.flush()
+        return early
+
     await job_svc.mark_running(job_id)
 
     # ── 2. Retrieve source + config ──────────────────────────────────────────
@@ -184,6 +241,21 @@ async def _run_sync_pipeline(  # noqa: C901
             "sync_source: DB source %s — skipping fetch, enqueueing studying agent",
             source_id,
         )
+        # U16 checkpoint: a DB-source sync is very fast (it only enqueues
+        # the study task) but still worth honouring if the admin pressed
+        # Stop before the worker picked the task up. Catches the queued
+        # cancellation of a re-study request.
+        db_cancel = await _bail_if_cancelled(
+            source_id=source_id,
+            job_id=job_id,
+            job_svc=job_svc,
+            stage="pre_db_dispatch",
+        )
+        if db_cancel is not None:
+            trace.update(output=db_cancel)
+            langfuse.flush()
+            return db_cancel
+
         await job_svc.mark_success(
             job_id,
             documents_synced=0,
@@ -223,6 +295,20 @@ async def _run_sync_pipeline(  # noqa: C901
         langfuse.flush()
         return result_db
 
+    # U16 checkpoint: skip the (potentially long) fetch when the admin has
+    # already pressed Stop. Cheaper than reading the whole remote index just
+    # to throw it away.
+    pre_fetch = await _bail_if_cancelled(
+        source_id=source_id,
+        job_id=job_id,
+        job_svc=job_svc,
+        stage="pre_fetch",
+    )
+    if pre_fetch is not None:
+        trace.update(output=pre_fetch)
+        langfuse.flush()
+        return pre_fetch
+
     span_fetch = trace.span(name="fetch_documents")
     try:
         connector = ConnectorFactory().build(
@@ -231,6 +317,22 @@ async def _run_sync_pipeline(  # noqa: C901
             decrypted_config=decrypted_config,
         )
         raw_docs: list[RawDocument] = await connector.fetch_documents()
+    except WebUrlFetchError as exc:
+        # FX25 — connector raises a permanent, user-actionable failure mode.
+        # The exception carries an already-sanitised, user-visible message;
+        # we stamp it onto the SyncJob verbatim and DO NOT retry — retrying
+        # a 404, an SSRF block, or a JS-only SPA shell won't help.
+        msg = exc.user_message
+        span_fetch.end(output={"error": msg, "reason": exc.reason.value})
+        trace.update(output={"status": "failed", "error": msg})
+        langfuse.flush()
+        await job_svc.mark_failed(job_id, error_message=msg)
+        return {
+            "source_id": source_id,
+            "status": "failed",
+            "error": msg,
+            "reason": exc.reason.value,
+        }
     except Exception as exc:
         sanitised = _sanitise(str(exc))
         span_fetch.end(output={"error": sanitised})
@@ -261,6 +363,68 @@ async def _run_sync_pipeline(  # noqa: C901
             chunk_repo = ChunkRepository(session)
 
             for raw_doc in raw_docs:
+                # U16 per-doc checkpoint. Placed at the TOP of the loop so a
+                # cancel observed mid-batch retains every fully-processed
+                # document on commit + bails before the next iteration's
+                # Document row is created. The session.commit() below runs
+                # only on the cancellation path's clean exit branch.
+                if await is_sync_cancelled(source_id):
+                    logger.info(
+                        "sync_source: cancellation observed mid-chunking — "
+                        "committing %d documents and exiting",
+                        documents_synced,
+                    )
+                    # Persist any chunks accumulated so far for already-
+                    # processed Documents BEFORE the cancel. Without this,
+                    # the per-doc rows would commit but their chunks would
+                    # be lost — leaving zero-chunk Documents in the DB.
+                    if all_chunk_texts:
+                        vectors_partial = await embedding_svc.embed_texts(
+                            all_chunk_texts
+                        )
+                        await chunk_repo.bulk_create(
+                            [
+                                Chunk(
+                                    document_id=doc_id,
+                                    source_id=src_id,
+                                    chunk_text=all_chunk_texts[idx],
+                                    embedding=vectors_partial[idx],
+                                    chunk_index=chunk_index,
+                                    metadata_=meta,
+                                    embedder_id=active_embedder_id,
+                                )
+                                for idx, (
+                                    doc_id,
+                                    src_id,
+                                    chunk_index,
+                                    meta,
+                                ) in enumerate(pending_chunks)
+                            ]
+                        )
+                    await session.commit()
+                    await job_svc.mark_cancelled(
+                        job_id,
+                        error_message="Cancelled by user during chunking.",
+                    )
+                    await clear_sync_cancelled(source_id)
+                    span_process.end(
+                        output={
+                            "documents_synced": documents_synced,
+                            "chunks_created": len(pending_chunks),
+                            "cancelled": True,
+                        }
+                    )
+                    result_cancelled: dict[str, Any] = {
+                        "source_id": source_id,
+                        "status": _CANCEL_RESULT_MARKER,
+                        "stage": "chunking",
+                        "documents_synced": documents_synced,
+                        "chunks_created": len(pending_chunks),
+                    }
+                    trace.update(output=result_cancelled)
+                    langfuse.flush()
+                    return result_cancelled
+
                 # Persist Document
                 doc_orm = Document(
                     source_id=source.id,
@@ -294,6 +458,47 @@ async def _run_sync_pipeline(  # noqa: C901
                     pending_chunks.append(
                         (doc_orm.id, source.id, c.chunk_index, c.metadata)
                     )
+
+            # U16 checkpoint: last chance to bail before the (potentially
+            # large) bulk-embed call. The chunking loop above has already
+            # exited, so the work-completed-so-far semantics is preserved
+            # by persisting Documents + Chunks via the same session.commit
+            # below — but if cancel arrived during the loop above, we
+            # already returned. This checkpoint catches the case where
+            # cancel lands between the loop ending and the embed starting.
+            if await is_sync_cancelled(source_id):
+                logger.info(
+                    "sync_source: cancellation observed before bulk-embed "
+                    "— skipping embedding, retaining %d documents",
+                    documents_synced,
+                )
+                # Documents are already in the session; commit them
+                # without chunks so the source has the new files even
+                # though they aren't indexed yet. The admin can re-sync to
+                # finish the embedding.
+                await session.commit()
+                await job_svc.mark_cancelled(
+                    job_id,
+                    error_message="Cancelled by user before embedding.",
+                )
+                await clear_sync_cancelled(source_id)
+                span_process.end(
+                    output={
+                        "documents_synced": documents_synced,
+                        "chunks_created": 0,
+                        "cancelled": True,
+                    }
+                )
+                result_pre_embed: dict[str, Any] = {
+                    "source_id": source_id,
+                    "status": _CANCEL_RESULT_MARKER,
+                    "stage": "pre_embed",
+                    "documents_synced": documents_synced,
+                    "chunks_created": 0,
+                }
+                trace.update(output=result_pre_embed)
+                langfuse.flush()
+                return result_pre_embed
 
             # Batch embed all chunk texts
             vectors: list[list[float]] = []
@@ -335,6 +540,25 @@ async def _run_sync_pipeline(  # noqa: C901
             "chunks_created": chunks_created,
         }
     )
+
+    # U16 final checkpoint: a cancel that lands between the embed completing
+    # and the success commit still has a clean exit path. The Documents +
+    # Chunks have already committed inside the session above, so we just
+    # flip the job row and exit. The source ends up in a fully-indexed
+    # state — admins won't see a "Cancelled" sync that actually finished,
+    # because we honour the flag deterministically here.
+    final_check = await _bail_if_cancelled(
+        source_id=source_id,
+        job_id=job_id,
+        job_svc=job_svc,
+        stage="pre_success",
+    )
+    if final_check is not None:
+        final_check["documents_synced"] = documents_synced
+        final_check["chunks_created"] = chunks_created
+        trace.update(output=final_check)
+        langfuse.flush()
+        return final_check
 
     # ── 7. Mark job success ───────────────────────────────────────────────────
     await job_svc.mark_success(

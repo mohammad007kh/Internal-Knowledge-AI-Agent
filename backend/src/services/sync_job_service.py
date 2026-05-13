@@ -104,6 +104,68 @@ class SyncJobService:
 
         return response
 
+    async def mark_cancelled(
+        self,
+        job_id: uuid.UUID,
+        *,
+        error_message: str | None = None,
+    ) -> SyncJobResponse:
+        """Flip *job_id* to ``status='cancelled'`` and stamp ``cancelled_at``.
+
+        Idempotent on terminal rows — a second call for an already-terminal
+        job is a no-op (returns the row as-is). The endpoint relies on this
+        so a queued-job cancel followed by the task's own checkpoint-driven
+        flip don't double-write.
+
+        ``error_message`` is optional and defaults to a stable sentinel so
+        the admin UI can render a uniform "Cancelled by admin" / "Cancelled
+        at checkpoint" line without each call site reinventing the copy.
+        """
+        async with self._session() as session:
+            current = await self._repo.get(session, job_id)
+            if current is None:
+                raise NotFoundError(f"SyncJob {job_id} not found.")
+            # No-op on terminal rows. Returning the existing row keeps the
+            # endpoint contract simple (always returns *some* job row) and
+            # makes the checkpoint flip safe even if the API endpoint
+            # already marked the row cancelled.
+            if current.status in {
+                SyncStatus.SUCCESS,
+                SyncStatus.FAILED,
+                SyncStatus.CANCELLED,
+            }:
+                return SyncJobResponse.model_validate(current)
+
+            now = datetime.now(UTC)
+            job = await self._repo.update_status(
+                session,
+                job_id,
+                status=SyncStatus.CANCELLED,
+                cancelled_at=now,
+                finished_at=now,
+                error_message=error_message,
+            )
+            if job is None:
+                raise NotFoundError(f"SyncJob {job_id} not found.")
+            return SyncJobResponse.model_validate(job)
+
+    async def list_non_terminal_for_source(
+        self, source_id: uuid.UUID
+    ) -> list[SyncJobResponse]:
+        """Return every ``pending`` or ``running`` job for *source_id*.
+
+        Used by the cancel endpoint: ``trigger_sync`` creates one row at the
+        API layer and the Celery task creates a second row internally; on
+        cancellation we need to flip BOTH (the API row is otherwise
+        orphaned as ``pending`` forever and the task row is what the admin
+        sees moving).
+        """
+        async with self._session() as session:
+            jobs = await self._repo.list_non_terminal_by_source(
+                session, source_id
+            )
+            return [SyncJobResponse.model_validate(j) for j in jobs]
+
     async def mark_failed(
         self,
         job_id: uuid.UUID,

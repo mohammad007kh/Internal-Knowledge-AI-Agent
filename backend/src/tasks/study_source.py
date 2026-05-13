@@ -48,9 +48,45 @@ from src.repositories.schema_study_repository import SchemaStudyRepository
 from src.repositories.source_repository import SourceRepository
 from src.services.db_introspection.fingerprint import compute_fingerprint
 from src.services.db_introspection.schema_doc import SchemaDocument
+from src.services.sync_cancellation import (
+    clear_sync_cancelled,
+    is_sync_cancelled,
+)
 from src.tasks import celery_app
 
 logger = logging.getLogger(__name__)
+
+
+async def _study_cancelled_response(
+    source_id: uuid.UUID, study_id: uuid.UUID | None, stage: str
+) -> dict[str, Any]:
+    """Persist the study-cancellation terminal state and return the result dict.
+
+    Flips the source's ``schema_status`` to ``failed`` so the UI surfaces a
+    retryable phase, and marks any in-flight :class:`SchemaStudy` row as
+    ``<phase>_FAILED`` with a stable "Cancelled by user." message. This
+    intentionally reuses the existing failure plumbing rather than adding a
+    new ``CANCELLED`` state to the study state machine — the studying agent
+    keeps its current vocabulary; only the SyncJob gets a new state.
+    """
+    async with AsyncSessionLocal() as session:
+        await SourceRepository(session).set_schema_status(source_id, "failed")
+        if study_id is not None:
+            await SchemaStudyRepository(session).mark_failed(
+                study_id, phase=stage, message="Cancelled by user."
+            )
+        await session.commit()
+    await clear_sync_cancelled(source_id)
+    logger.info(
+        "study_source: cancellation honoured at stage=%s for source_id=%s",
+        stage,
+        source_id,
+    )
+    return {
+        "source_id": str(source_id),
+        "status": "cancelled",
+        "stage": stage,
+    }
 
 
 # Same agent version stamp persisted on every SchemaStudy row. Bump when the
@@ -157,6 +193,14 @@ async def _run(source_id: uuid.UUID) -> dict[str, Any]:
             study_id = study.id
             await session.commit()
 
+        # U16 checkpoint: cancel arrived between the API row commit and the
+        # connector work starting. Cheap to honour here — we've only written
+        # bookkeeping rows so far.
+        if await is_sync_cancelled(source_id):
+            return await _study_cancelled_response(
+                source_id, study_id, stage="CONNECT"
+            )
+
         # ---- Phase work happens outside the original transaction so a
         # ---- connector failure doesn't roll back the "studying" status.
         try:
@@ -184,6 +228,16 @@ async def _run(source_id: uuid.UUID) -> dict[str, Any]:
                 "phase": phase,
                 "error": sanitised,
             }
+
+        # U16 checkpoint: cancel arrived during the (potentially long) schema
+        # study — we have the document in hand, but the admin asked us to
+        # stop. Honour the request rather than persist a document the user
+        # said they didn't want. Leaves the source in 'failed' so the UI
+        # surfaces a retryable phase.
+        if await is_sync_cancelled(source_id):
+            return await _study_cancelled_response(
+                source_id, study_id, stage="DESCRIBING"
+            )
 
         # ---- Persist success in a fresh session.
         async with AsyncSessionLocal() as success_session:

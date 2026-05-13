@@ -44,6 +44,7 @@ class SyncJobRepository:
         status: SyncStatus,
         started_at: datetime | None = None,
         finished_at: datetime | None = None,
+        cancelled_at: datetime | None = None,
         error_message: str | None = None,
         documents_synced: int | None = None,
         chunks_created: int | None = None,
@@ -53,6 +54,8 @@ class SyncJobRepository:
             values["started_at"] = started_at
         if finished_at is not None:
             values["finished_at"] = finished_at
+        if cancelled_at is not None:
+            values["cancelled_at"] = cancelled_at
         if error_message is not None:
             values["error_message"] = error_message
         if documents_synced is not None:
@@ -102,5 +105,26 @@ class SyncJobRepository:
     async def list_running(self, session: AsyncSession) -> list[SyncJob]:
         result = await session.execute(
             sa.select(SyncJob).where(SyncJob.status == SyncStatus.RUNNING)
+        )
+        return list(result.scalars().all())
+
+    async def list_non_terminal_by_source(
+        self, session: AsyncSession, source_id: uuid.UUID
+    ) -> list[SyncJob]:
+        """Return ``pending`` + ``running`` jobs for *source_id*, oldest first.
+
+        U16 — the cancel endpoint flips every in-flight row so neither the
+        API-created row nor the task-created row is left dangling in a
+        non-terminal state after cancellation.
+        """
+        result = await session.execute(
+            sa.select(SyncJob)
+            .where(
+                SyncJob.source_id == source_id,
+                SyncJob.status.in_(
+                    [SyncStatus.PENDING, SyncStatus.RUNNING]
+                ),
+            )
+            .order_by(SyncJob.created_at.asc())
         )
         return list(result.scalars().all())

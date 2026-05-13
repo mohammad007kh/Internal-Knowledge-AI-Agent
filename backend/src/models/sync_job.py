@@ -65,6 +65,13 @@ class SyncJob(UUIDMixin, TimestampMixin, Base):
         sa.TIMESTAMP(timezone=True),
         nullable=True,
     )
+    # U16 — stamped when a cooperative cancellation lands. Distinct from
+    # ``finished_at`` because the task did not complete its work; a separate
+    # column avoids overloading the success/failure timestamp.
+    cancelled_at: Mapped[sa.DateTime | None] = mapped_column(
+        sa.TIMESTAMP(timezone=True),
+        nullable=True,
+    )
     error_message: Mapped[str | None] = mapped_column(
         sa.Text,
         nullable=True,
