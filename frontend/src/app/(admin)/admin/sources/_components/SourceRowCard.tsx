@@ -71,15 +71,12 @@ export function SourceRowCard({
             <Link
               href={`/admin/sources/${source.id}`}
               className="block truncate font-medium text-foreground hover:underline"
+              title={source.name}
             >
               {source.name}
             </Link>
           )}
-          <p className="truncate text-xs text-muted-foreground">
-            {source.description_status === 'pending_ai'
-              ? '—'
-              : (source.description ?? meta.label)}
-          </p>
+          <p className="truncate text-xs text-muted-foreground">{meta.label}</p>
         </div>
         <Popover open={menuOpen} onOpenChange={setMenuOpen}>
           <PopoverTrigger asChild>

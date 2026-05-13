@@ -1,11 +1,13 @@
 /**
- * F9 — "Naming…" shimmer in the sources list.
+ * F9 + FX14 — list-row name/description rendering.
  *
- * Asserts that the desktop table and the mobile card both branch on
- * `name_status` / `description_status` and render the muted shimmer pill
- * (with em-dash for description) when the AI-naming pipeline is still
- * working. Once the pipeline flips status to `ai_set`, the row renders
- * normally — admins should not have to know AI authored the name.
+ * F9: the desktop table and the mobile card both branch on `name_status`
+ * and render the muted "Naming…" shimmer pill while the AI naming pipeline
+ * is still running. Once status flips to `ai_set`, the row renders normally.
+ *
+ * FX14: the AI description is NEVER rendered in the list row (regardless of
+ * `description_status`), and the title `<Link>` carries `title={source.name}`
+ * so the full name remains discoverable when truncated.
  */
 
 import type { SourceListItem } from '@/lib/api/sources'
@@ -127,35 +129,49 @@ describe('SourcesTable / SourceRowCard — F9 naming shimmer', () => {
     expect(screen.getAllByText('Legacy Source').length).toBeGreaterThan(0)
   })
 
-  it('renders an em-dash when description_status === "pending_ai"', () => {
+  it('FX14: never renders the AI description in the list row, regardless of description_status', () => {
+    const longDesc =
+      'This is a very long AI-generated description that would otherwise consume the whole row and push every other column off-screen, exactly the bug FX14 fixes.'
     const source = makeSource({
-      id: 'src-desc-pending',
+      id: 'src-desc-long',
       name: 'Acme Wiki',
-      description: 'placeholder description from server',
-      description_status: 'pending_ai',
-      // Keep name_status off so we isolate the description branch.
+      description: longDesc,
+      description_status: 'ai_set',
+      name_status: 'user_set',
+      // Pin source_mode so SourceModeBadge doesn't fall back to its own '—'.
+      source_mode: 'snapshot',
+    })
+    renderTable([source])
+
+    // The full description must not leak into the list row.
+    expect(screen.queryByText(longDesc)).toBeNull()
+    // And neither does the legacy "—" placeholder we used to show while pending.
+    expect(screen.queryAllByText('—')).toHaveLength(0)
+  })
+
+  it('FX14: exposes the full name via the `title` attribute when truncated', () => {
+    const longName =
+      'Extremely Long Source Name That Will Be Truncated In The List Row But Discoverable On Hover'
+    const source = makeSource({
+      id: 'src-long-name',
+      name: longName,
       name_status: 'user_set',
     })
     renderTable([source])
 
-    // Ensure the placeholder description does not leak.
-    expect(screen.queryByText('placeholder description from server')).toBeNull()
-
-    // Both the desktop row and the mobile card render an em-dash subtitle.
-    const dashes = screen.getAllByText('—')
-    expect(dashes.length).toBeGreaterThan(0)
+    // The truncated <Link> exposes the full name via title=… for hover discovery.
+    const link = screen.getAllByTitle(longName)[0]
+    expect(link).toBeDefined()
+    expect(link.tagName).toBe('A')
   })
 
-  it('mobile SourceRowCard renders the pill when name_status === "pending_ai"', () => {
+  it('mobile SourceRowCard renders the pill when name_status === "pending_ai" (no description leak)', () => {
     const source = makeSource({
       id: 'src-card-pending',
       name: 'placeholder-name',
       name_status: 'pending_ai',
       description: 'placeholder description',
       description_status: 'pending_ai',
-      // Pin source_mode so SourceModeBadge renders the "snapshot" pill instead
-      // of its missing-mode em-dash fallback — keeps `getByText('—')` below
-      // unambiguous and isolated to the description position.
       source_mode: 'snapshot',
     })
     const { container } = renderCard(source)
@@ -163,7 +179,9 @@ describe('SourcesTable / SourceRowCard — F9 naming shimmer', () => {
     const pill = within(container).getByTestId('pending-name-pill')
     expect(pill.textContent).toMatch(/Naming…/i)
 
+    // Neither the placeholder name nor the placeholder description leaks.
     expect(within(container).queryByText('placeholder-name')).toBeNull()
-    expect(within(container).getByText('—')).toBeInTheDocument()
+    expect(within(container).queryByText('placeholder description')).toBeNull()
+    expect(within(container).queryByText('—')).toBeNull()
   })
 })

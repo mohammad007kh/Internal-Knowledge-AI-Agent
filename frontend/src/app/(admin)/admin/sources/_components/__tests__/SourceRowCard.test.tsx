@@ -76,4 +76,40 @@ describe('SourceRowCard — DB-source strip selection (FX8)', () => {
     expect(screen.getByTestId('ingestion-strip-stub')).toBeInTheDocument()
     expect(screen.queryByTestId('db-study-strip-stub')).toBeNull()
   })
+
+  it('FX14: never renders the AI description, regardless of description_status', () => {
+    const longDesc =
+      'This is a very long AI-generated description that would otherwise consume the whole card and ruin the layout — FX14.'
+    render(
+      <SourceRowCard
+        source={makeSource({
+          source_type: 'file_upload',
+          name: 'Acme Wiki',
+          description: longDesc,
+          description_status: 'ai_set',
+          name_status: 'user_set',
+        })}
+        onDelete={() => {}}
+      />
+    )
+    expect(screen.queryByText(longDesc)).toBeNull()
+    expect(screen.queryByText('—')).toBeNull()
+  })
+
+  it('FX14: exposes the full name via the `title` attribute on the truncated title link', () => {
+    const longName =
+      'Extremely Long Source Name That Will Be Truncated On The Card But Discoverable On Hover'
+    render(
+      <SourceRowCard
+        source={makeSource({
+          source_type: 'file_upload',
+          name: longName,
+          name_status: 'user_set',
+        })}
+        onDelete={() => {}}
+      />
+    )
+    const link = screen.getByTitle(longName)
+    expect(link.tagName).toBe('A')
+  })
 })

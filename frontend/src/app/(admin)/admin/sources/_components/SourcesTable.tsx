@@ -452,7 +452,17 @@ export function SourcesTable({ demoSources }: SourcesTableProps = {}) {
                           >
                             <meta.icon className="h-3.5 w-3.5" />
                           </span>
-                          <div className="min-w-0">
+                          {/* Title clamp: in `table-layout: auto`, a nowrap
+                              link inside a <td> sets the cell's min content
+                              width to the unwrapped string. The wrapper's
+                              max-w + the link's max-w + truncate keep the
+                              Name column from pushing the other columns
+                              off-screen on a long source name. The full
+                              name surfaces via `title=` and on the detail
+                              page; the description lives only on the detail
+                              page now (it was unbounded here and ate the
+                              whole row — see FX14). */}
+                          <div className="min-w-0 max-w-[260px]">
                             {source.name_status === 'pending_ai' ? (
                               <Link
                                 href={`/admin/sources/${source.id}`}
@@ -465,24 +475,11 @@ export function SourcesTable({ demoSources }: SourcesTableProps = {}) {
                               <Link
                                 href={`/admin/sources/${source.id}`}
                                 className="block truncate font-medium hover:underline"
+                                title={source.name}
                               >
                                 {source.name}
                               </Link>
                             )}
-                            <p
-                              className="truncate text-xs text-muted-foreground"
-                              title={
-                                source.description?.trim()
-                                  ? source.description
-                                  : undefined
-                              }
-                            >
-                              {source.description_status === 'pending_ai'
-                                ? '—'
-                                : source.description?.trim()
-                                  ? source.description
-                                  : meta.label}
-                            </p>
                           </div>
                         </div>
                       </TableCell>
