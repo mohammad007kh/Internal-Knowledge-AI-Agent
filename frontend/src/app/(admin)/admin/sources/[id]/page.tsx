@@ -43,6 +43,7 @@ import {
 } from '@/components/ui/table'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { PermissionsManager } from '@/app/(admin)/admin/sources/[id]/permissions/_components/PermissionsManager'
+import { PendingDescriptionPill } from '@/app/(admin)/admin/sources/_components/PendingDescriptionPill'
 import { AINamingCard } from '@/app/(admin)/admin/sources/[id]/_components/AINamingCard'
 import { EditCredentialsDialog } from '@/app/(admin)/admin/sources/[id]/_components/EditCredentialsDialog'
 import { SchemaViewer } from '@/app/(admin)/admin/sources/[id]/_components/SchemaViewer'
@@ -73,6 +74,7 @@ import {
 } from '@/components/ui/tooltip'
 import { Textarea } from '@/components/ui/textarea'
 import {
+  useCancelSync,
   useDeleteSource,
   usePhaseTransitionInvalidation,
   useSource,
@@ -86,7 +88,7 @@ import {
 import { AvailabilityToggle } from '@/features/sources/components/AvailabilityToggle'
 import { LifecycleProgressBar } from '@/features/sources/components/LifecycleProgressBar'
 import { LifecycleStepper } from '@/features/sources/components/LifecycleStepper'
-import { useLifecycle } from '@/features/sources/lifecycle'
+import { stopSyncTargetJobId, useLifecycle } from '@/features/sources/lifecycle'
 import {
   SourceModeBadge,
   StatusBadge,
@@ -114,6 +116,7 @@ import {
   LockIcon,
   PlugIcon,
   RefreshCwIcon,
+  StopCircleIcon,
   Trash2Icon,
   XCircleIcon,
 } from 'lucide-react'
@@ -322,11 +325,14 @@ export default function SourceDetailPage() {
   usePhaseTransitionInvalidation(id, lifecycle.phase)
 
   const syncMutation = useTriggerSync()
+  const cancelSyncMutation = useCancelSync()
   const testConnectionMutation = useTestConnection()
   const deleteMutation = useDeleteSource()
   const updateMutation = useUpdateSource(id)
 
   const [confirmDelete, setConfirmDelete] = useState(false)
+  // U16 — separate confirm dialog for Stop sync, gated on `canStopSync`.
+  const [confirmStopSync, setConfirmStopSync] = useState(false)
 
   // Session-scoped set of job IDs the admin started in this tab. Beat-driven
   // jobs that arrive on the wire are NOT in this set, so the toast hook stays
@@ -430,9 +436,29 @@ export default function SourceDetailPage() {
             </Badge>
             <SyncStatusPill source={source} isDbLiveSource={isDbLiveSource} />
           </div>
-          {source.description && (
-            <p className="text-sm text-muted-foreground">{source.description}</p>
-          )}
+          {/* FX27 — clamp the AI/admin-authored description in the header to
+              a 2-line preview (≈160-200 chars visible at desktop width). The
+              full description remains editable on the Settings tab, and is
+              exposed on hover via `title=`. For screen readers we render the
+              full text in a visually-hidden span and mark the truncated visual
+              `<p>` as `aria-hidden` so SRs always read the complete description
+              rather than the truncated version. When the AI is still drafting
+              and no description exists yet, swap in a shimmer pill instead. */}
+          {source.description_status === 'pending_ai' && !source.description ? (
+            <PendingDescriptionPill />
+          ) : source.description ? (
+            <>
+              <p
+                className="line-clamp-2 max-w-[640px] text-sm text-muted-foreground"
+                title={source.description}
+                aria-hidden="true"
+                data-testid="header-description"
+              >
+                {source.description}
+              </p>
+              <span className="sr-only">{source.description}</span>
+            </>
+          ) : null}
         </div>
         <div className="flex flex-col items-end gap-2">
           <div className="flex flex-wrap items-center gap-2">
@@ -586,6 +612,7 @@ export default function SourceDetailPage() {
               <LifecycleStepper
                 phase={lifecycle.phase}
                 sourceKind={sourceKindOf(source.source_type)}
+                hasUpload={source.has_upload === true}
               />
               <LifecycleProgressBar
                 phase={lifecycle.phase}
@@ -839,6 +866,51 @@ export default function SourceDetailPage() {
               }
             >
               {deleteMutation.isPending ? 'Deleting…' : 'Delete'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* U16 — Stop sync confirmation. Targets the latest non-terminal job
+          off the cached source detail. The dialog spells out the
+          work-retention guarantee so admins aren't afraid to click. */}
+      <AlertDialog open={confirmStopSync} onOpenChange={setConfirmStopSync}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Stop the in-progress sync?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Work completed so far will be retained. The worker will exit
+              at its next safe checkpoint — this can take a few seconds.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Keep syncing</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              disabled={cancelSyncMutation.isPending}
+              data-testid="confirm-stop-sync"
+              onClick={() => {
+                const jobId = stopSyncTargetJobId(source)
+                if (!jobId) {
+                  setConfirmStopSync(false)
+                  return
+                }
+                cancelSyncMutation.mutate(
+                  { sourceId: id, jobId },
+                  {
+                    onSuccess: () => {
+                      toast.success('Cancelling sync…')
+                      setConfirmStopSync(false)
+                    },
+                    onError: (err: unknown) => {
+                      toast.error(getErrorMessage(err))
+                      setConfirmStopSync(false)
+                    },
+                  }
+                )
+              }}
+            >
+              {cancelSyncMutation.isPending ? 'Cancelling…' : 'Stop sync'}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

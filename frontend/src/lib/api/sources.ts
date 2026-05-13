@@ -91,10 +91,23 @@ export type StudyState =
 export interface SyncJob {
   id: string
   source_id: string
-  status: 'pending' | 'running' | 'completed' | 'failed' | 'success'
+  /**
+   * Lifecycle state. `cancelled` was added in U16 for cooperative
+   * cancellation — a task that observed the Stop-sync signal at a safe
+   * checkpoint, committed whatever was stable, and exited.
+   */
+  status:
+    | 'pending'
+    | 'running'
+    | 'completed'
+    | 'failed'
+    | 'success'
+    | 'cancelled'
   started_at: string | null
   finished_at: string | null
   completed_at: string | null
+  /** U16 — populated only when status='cancelled'. */
+  cancelled_at?: string | null
   error_message: string | null
   documents_synced: number
   documents_indexed: number
@@ -320,6 +333,25 @@ export async function listSyncJobsApi(
 
 export async function triggerSyncApi(sourceId: string): Promise<SyncJob> {
   const { data } = await apiClient.post<SyncJob>(`/api/v1/sources/${sourceId}/sync`)
+  return data
+}
+
+/**
+ * U16 — cooperative cancellation of an in-flight sync.
+ *
+ * The backend sets a Redis flag the running task observes at its next safe
+ * checkpoint; work completed up to that point is retained. Returns the
+ * updated SyncJob row — for queued jobs this is already `cancelled`; for
+ * running jobs the row may still read `running` until the task's next
+ * checkpoint (the source-detail polling picks up the transition).
+ */
+export async function cancelSyncJobApi(
+  sourceId: string,
+  jobId: string
+): Promise<SyncJob> {
+  const { data } = await apiClient.post<SyncJob>(
+    `/api/v1/sources/${sourceId}/sync-jobs/${jobId}/cancel`
+  )
   return data
 }
 

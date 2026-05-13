@@ -487,6 +487,58 @@ describe('lifecycleGatesFor — gate matrix', () => {
     expect(g.canEditConfig).toBe(true)
   })
 
+  // U16 — canStopSync from the phase-only matrix is always false; the real
+  // source-aware answer lives on useLifecycle / stopSyncTargetJobId.
+  it('canStopSync defaults to false for every phase from the matrix', () => {
+    for (const p of phases) {
+      expect(lifecycleGatesFor(p).canStopSync).toBe(false)
+    }
+  })
+})
+
+describe('U16 — stop sync gate (useLifecycle + stopSyncTargetJobId)', () => {
+  it('canStopSync is true when latest_job is pending', async () => {
+    const { useLifecycle, stopSyncTargetJobId } = await import('../lifecycle')
+    const s = makeDetail({
+      latest_job: makeJob({ id: 'job-77', status: 'pending' }),
+    })
+    expect(useLifecycle(s).canStopSync).toBe(true)
+    expect(stopSyncTargetJobId(s)).toBe('job-77')
+  })
+
+  it('canStopSync is true when latest_job is running', async () => {
+    const { useLifecycle, stopSyncTargetJobId } = await import('../lifecycle')
+    const s = makeDetail({
+      latest_job: makeJob({ id: 'job-88', status: 'running' }),
+    })
+    expect(useLifecycle(s).canStopSync).toBe(true)
+    expect(stopSyncTargetJobId(s)).toBe('job-88')
+  })
+
+  it('canStopSync is false when latest_job is terminal', async () => {
+    const { useLifecycle, stopSyncTargetJobId } = await import('../lifecycle')
+    for (const status of ['success', 'failed', 'completed', 'cancelled'] as const) {
+      const s = makeDetail({
+        latest_job: makeJob({ status }),
+      })
+      expect(useLifecycle(s).canStopSync).toBe(false)
+      expect(stopSyncTargetJobId(s)).toBe(null)
+    }
+  })
+
+  it('canStopSync is false when there is no latest_job at all', async () => {
+    const { useLifecycle, stopSyncTargetJobId } = await import('../lifecycle')
+    const s = makeDetail({ latest_job: null })
+    expect(useLifecycle(s).canStopSync).toBe(false)
+    expect(stopSyncTargetJobId(s)).toBe(null)
+  })
+
+  it('a cancelled latest_job is rendered as the failed phase (gate-matrix collapse)', () => {
+    const s = makeDetail({
+      latest_job: makeJob({ status: 'cancelled' }),
+    })
+    expect(derivePhase(s)).toBe('failed')
+  })
 })
 
 describe('shouldPollSourceLifecycle', () => {

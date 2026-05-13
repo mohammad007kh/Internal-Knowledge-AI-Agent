@@ -184,8 +184,32 @@ const HINTS_BY_KIND: Record<SourceKind, HintTable> = {
  * The `kind` parameter defaults to `'file'` so older call sites that haven't
  * been migrated (eg LifecycleProgressBar, which U16 still owns) keep the
  * existing file-centric labels — no behavioural change for them.
+ *
+ * FX26: `opts.hasUpload` retunes the file-source `pending_upload` label.
+ * Once the upload is on object storage the "Waiting for upload" copy is
+ * actively misleading — the upload IS done, we're just queued for the
+ * worker to pick it up. Switch to "Queued for indexing" so the user reads
+ * the actual state. Same `Phase` enum + same gate matrix — only the
+ * display string changes, so existing tests and the rest of the state
+ * machine are untouched.
  */
-export function phaseLabel(phase: Phase, kind: SourceKind = 'file'): string {
+export interface PhaseLabelOptions {
+  /** True when a file-typed source has bytes in object storage. */
+  hasUpload?: boolean
+}
+
+export function phaseLabel(
+  phase: Phase,
+  kind: SourceKind = 'file',
+  opts: PhaseLabelOptions = {}
+): string {
+  if (
+    phase === 'pending_upload' &&
+    kind === 'file' &&
+    opts.hasUpload === true
+  ) {
+    return 'Queued for indexing'
+  }
   return LABELS_BY_KIND[kind][phase]
 }
 
@@ -196,11 +220,25 @@ export function phaseLabel(phase: Phase, kind: SourceKind = 'file'): string {
  * {label}" string at render time, so this table only covers in-flight + ready
  * phases. Defaults to `'file'` for the same back-compat reason as
  * `phaseLabel`.
+ *
+ * FX26: mirrors the file-source `pending_upload` label switch — once the
+ * upload is on object storage the "Files are landing…" copy is misleading,
+ * so we surface "Files uploaded — queued for the indexing worker." instead.
+ * Same signature as `phaseLabel`'s opts so call sites can pass the
+ * has_upload flag through identically.
  */
 export function phaseHint(
   phase: Exclude<Phase, 'failed'>,
-  kind: SourceKind = 'file'
+  kind: SourceKind = 'file',
+  opts: PhaseLabelOptions = {}
 ): string {
+  if (
+    phase === 'pending_upload' &&
+    kind === 'file' &&
+    opts.hasUpload === true
+  ) {
+    return 'Files uploaded — queued for the indexing worker.'
+  }
   return HINTS_BY_KIND[kind][phase]
 }
 
@@ -286,6 +324,13 @@ export function derivePhase(source: SourceLike): Phase {
   // 1. Terminal failure on the last run beats everything else. A `failed` job
   //    plus a still-pending name is still "failed" from the user's POV.
   if (jobStatus === 'failed') return 'failed'
+  // U16 — `cancelled` is a fifth SyncJob terminal state; collapse into
+  // `failed` for phase-derivation purposes. The gate matrix's `failed` row
+  // already says "retry sync before testing this source", which is exactly
+  // the right copy after a stop. We deliberately do NOT add a separate
+  // `cancelled` Phase: every gate decision would be identical, and a sixth
+  // phase would just double the test surface.
+  if (jobStatus === 'cancelled') return 'failed'
   if (source.schema_status === 'FAILED') return 'failed'
 
   // 2. DB-source studying agent is its own ingestion path. When the studying
@@ -368,6 +413,18 @@ export interface LifecycleGates {
   /** Reason the sync action is disabled (for tooltips). Empty when enabled. */
   syncNowReason: string
 
+  /**
+   * U16 — Can the admin stop an in-flight sync? True iff the source has a
+   * non-terminal `latest_job` (pending or running). Mutually exclusive with
+   * `canSyncNow` in normal flows: while the source is mid-ingestion the
+   * "Sync now" affordance is replaced by "Stop sync".
+   *
+   * Computed from the SOURCE rather than the Phase enum because `naming`
+   * can exist without a job. `lifecycleGatesFor(phase)` returns `false` —
+   * the `useLifecycle` hook fills in the real value from `latest_job`.
+   */
+  canStopSync: boolean
+
   /** Can the admin send messages in the Test (sandbox) tab? */
   canChat: boolean
   /** Reason chat is disabled. */
@@ -402,6 +459,7 @@ export function lifecycleGatesFor(phase: Phase): LifecycleGates {
     return {
       canSyncNow: true,
       syncNowReason: '',
+      canStopSync: false,
       canChat: false,
       chatReason: "Last run failed — retry sync before testing this source.",
       canMakeAvailableToUsers: false,
@@ -423,6 +481,10 @@ export function lifecycleGatesFor(phase: Phase): LifecycleGates {
     return {
       canSyncNow: false,
       syncNowReason: `Wait for the worker to ${verb}.`,
+      // Phase-only callers can't know whether there's a real in-flight
+      // SyncJob to stop (naming can exist without a job). `useLifecycle`
+      // upgrades this to the real answer from `latest_job.status`.
+      canStopSync: false,
       canChat: false,
       chatReason: `Wait for the worker to ${verb}. Chat is available once the source is ready.`,
       canMakeAvailableToUsers: false,
@@ -435,12 +497,33 @@ export function lifecycleGatesFor(phase: Phase): LifecycleGates {
   return {
     canSyncNow: true,
     syncNowReason: '',
+    canStopSync: false,
     canChat: true,
     chatReason: '',
     canMakeAvailableToUsers: true,
     availabilityReason: '',
     canEditConfig: true,
   }
+}
+
+// ---------------------------------------------------------------------------
+// U16 — stop-sync target. What job_id should the cancel mutation POST against?
+// ---------------------------------------------------------------------------
+
+/**
+ * Returns the latest job iff it's non-terminal (`pending` or `running`),
+ * otherwise `null`. Callers gate the Stop button on this returning truthy
+ * AND on `canStopSync` from the gate matrix — both must agree.
+ */
+export function stopSyncTargetJobId(
+  source: SourceLike | null | undefined
+): string | null {
+  const job = source?.latest_job ?? null
+  if (!job) return null
+  if (job.status === 'pending' || job.status === 'running') {
+    return job.id
+  }
+  return null
 }
 
 // ---------------------------------------------------------------------------
@@ -514,9 +597,15 @@ export function useLifecycle(source: SourceLike | null | undefined): UseLifecycl
   const phase = derivePhase(source)
   const gates = lifecycleGatesFor(phase)
   const approvalBlockers = availabilityBlockers(source)
+  // U16 — upgrade the phase-only `canStopSync` to the source-aware answer.
+  // The Stop button is only safe to show when there is a real non-terminal
+  // job for the backend to cancel; the gate matrix's default `false` is
+  // the safe baseline.
+  const canStopSync = stopSyncTargetJobId(source) !== null
   return {
     phase,
     ...gates,
+    canStopSync,
     approvalBlockers,
     canApproveNow:
       gates.canMakeAvailableToUsers && approvalBlockers.length === 0,

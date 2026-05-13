@@ -7,6 +7,7 @@ import {
   type SourceListItem,
   type UpdateSourceRequest,
   autoNameApi,
+  cancelSyncJobApi,
   deleteSourceApi,
   getSchemaDocumentApi,
   getSourceApi,
@@ -360,6 +361,32 @@ export function useTriggerSync() {
   return useMutation({
     mutationFn: (sourceId: string) => triggerSyncApi(sourceId),
     onSuccess: (_data, sourceId) => {
+      queryClient.invalidateQueries({ queryKey: sourcesKeys.list() })
+      queryClient.invalidateQueries({ queryKey: sourcesKeys.detail(sourceId) })
+      queryClient.invalidateQueries({ queryKey: sourcesKeys.syncJobs(sourceId) })
+      queryClient.invalidateQueries({ queryKey: sourcesKeys.stats(sourceId) })
+    },
+  })
+}
+
+/**
+ * U16 — Stop an in-flight sync. Mutation keyed on `{ sourceId, jobId }`.
+ * On success, invalidates the detail + sync-jobs caches so the
+ * source-detail page re-fetches and reflects the new `cancelled` status
+ * (or the cooperatively-pending `running` row that will flip on its next
+ * checkpoint).
+ */
+export interface CancelSyncVariables {
+  sourceId: string
+  jobId: string
+}
+
+export function useCancelSync() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ sourceId, jobId }: CancelSyncVariables) =>
+      cancelSyncJobApi(sourceId, jobId),
+    onSuccess: (_data, { sourceId }) => {
       queryClient.invalidateQueries({ queryKey: sourcesKeys.list() })
       queryClient.invalidateQueries({ queryKey: sourcesKeys.detail(sourceId) })
       queryClient.invalidateQueries({ queryKey: sourcesKeys.syncJobs(sourceId) })
