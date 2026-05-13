@@ -190,6 +190,20 @@ function Connector({ filled }: { filled: boolean }) {
   )
 }
 
+/**
+ * Trim the failure message to a single line of ~60 chars for the sub-line
+ * surfaced under the pip row.  The Source detail page still shows the full
+ * message verbatim — this is only the at-a-glance preview on /admin/sources.
+ */
+const FAILURE_PREVIEW_MAX = 60
+
+function summariseFailure(message: string | null): string | null {
+  if (!message) return null
+  const oneLine = message.replace(/\s+/g, ' ').trim()
+  if (oneLine.length <= FAILURE_PREVIEW_MAX) return oneLine
+  return `${oneLine.slice(0, FAILURE_PREVIEW_MAX - 1).trimEnd()}…`
+}
+
 export function IngestionStrip({ source, className }: IngestionStripProps) {
   const stages = buildStages(source)
   const jobStatus = source.latest_job?.status ?? null
@@ -197,6 +211,7 @@ export function IngestionStrip({ source, className }: IngestionStripProps) {
     jobStatus !== null && (RUNNING_STATUSES as readonly string[]).includes(jobStatus)
   const isFailed = jobStatus === 'failed'
   const failureMessage = source.latest_job?.error_message ?? null
+  const failurePreview = isFailed ? summariseFailure(failureMessage) : null
   const inFlightStage = isRunning || isFailed ? findInFlightStage(stages) : null
 
   // Build a label list for the parent role="status" so screen-readers get a
@@ -210,26 +225,37 @@ export function IngestionStrip({ source, className }: IngestionStripProps) {
         aria-label={`Ingestion progress for ${source.name}: ${summary}${
           isFailed ? '; sync failed' : isRunning ? '; sync in progress' : ''
         }`}
-        className={cn('inline-flex flex-wrap items-center gap-x-2 gap-y-1', className)}
+        className={cn('flex flex-col gap-1', className)}
       >
-        {stages.map((stage, idx) => {
-          const isStageRunning = isRunning && inFlightStage === stage.id
-          const isStageFailed = isFailed && inFlightStage === stage.id
-          return (
-            <span key={stage.id} className="inline-flex items-center gap-2">
-              <IngestionPip
-                stage={stage}
-                isRunning={isStageRunning}
-                isFailed={isStageFailed}
-                failureMessage={failureMessage}
-                sourceName={source.name}
-              />
-              {idx < STAGE_ORDER.length - 1 ? (
-                <Connector filled={stage.active && stages[idx + 1].active} />
-              ) : null}
-            </span>
-          )
-        })}
+        <div className="inline-flex flex-wrap items-center gap-x-2 gap-y-1">
+          {stages.map((stage, idx) => {
+            const isStageRunning = isRunning && inFlightStage === stage.id
+            const isStageFailed = isFailed && inFlightStage === stage.id
+            return (
+              <span key={stage.id} className="inline-flex items-center gap-2">
+                <IngestionPip
+                  stage={stage}
+                  isRunning={isStageRunning}
+                  isFailed={isStageFailed}
+                  failureMessage={failureMessage}
+                  sourceName={source.name}
+                />
+                {idx < STAGE_ORDER.length - 1 ? (
+                  <Connector filled={stage.active && stages[idx + 1].active} />
+                ) : null}
+              </span>
+            )
+          })}
+        </div>
+        {failurePreview ? (
+          <p
+            className="text-[11px] leading-tight text-red-700 dark:text-red-300"
+            data-testid="ingestion-strip-failure-preview"
+            title={failureMessage ?? undefined}
+          >
+            {failurePreview}
+          </p>
+        ) : null}
       </div>
     </TooltipProvider>
   )

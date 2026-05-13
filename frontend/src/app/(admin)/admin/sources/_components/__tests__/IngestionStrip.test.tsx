@@ -145,6 +145,58 @@ describe('IngestionStrip', () => {
     expect(screen.getByRole('status').getAttribute('aria-label')).toContain('sync in progress')
   })
 
+  it('surfaces the first ~60 chars of the failure reason under the pip row', () => {
+    const longMessage =
+      'The page rendered but no readable text could be extracted — common for JavaScript-only sites, login walls, or paywalls.'
+    const source = buildSource({
+      has_upload: true,
+      document_count: 0,
+      chunk_count: 0,
+      is_active: false,
+      latest_job: buildJob({ status: 'failed', error_message: longMessage }),
+    })
+
+    render(<IngestionStrip source={source} />)
+
+    const preview = screen.getByTestId('ingestion-strip-failure-preview')
+    expect(preview).toBeInTheDocument()
+    // Single-line + ellipsis when over 60 chars.
+    expect(preview.textContent?.length).toBeLessThanOrEqual(60)
+    expect(preview.textContent ?? '').toMatch(/…$/)
+    // Full message is preserved as a title attribute so hover still reveals it.
+    expect(preview.getAttribute('title')).toBe(longMessage)
+  })
+
+  it('renders the full failure message inline when it is short enough', () => {
+    const shortMessage = 'The URL returned 404 Not Found.'
+    const source = buildSource({
+      has_upload: true,
+      document_count: 0,
+      chunk_count: 0,
+      is_active: false,
+      latest_job: buildJob({ status: 'failed', error_message: shortMessage }),
+    })
+
+    render(<IngestionStrip source={source} />)
+
+    const preview = screen.getByTestId('ingestion-strip-failure-preview')
+    expect(preview.textContent).toBe(shortMessage)
+  })
+
+  it('hides the failure preview row when the latest job did not fail', () => {
+    const source = buildSource({
+      has_upload: true,
+      document_count: 3,
+      chunk_count: 0,
+      is_active: false,
+      latest_job: buildJob({ status: 'completed' }),
+    })
+
+    render(<IngestionStrip source={source} />)
+
+    expect(screen.queryByTestId('ingestion-strip-failure-preview')).toBeNull()
+  })
+
   it('falls back gracefully when ingestion fields are absent (legacy rows)', () => {
     // No has_upload / document_count / chunk_count / latest_job — server may
     // omit them on older rows. Component must still render four pips.
