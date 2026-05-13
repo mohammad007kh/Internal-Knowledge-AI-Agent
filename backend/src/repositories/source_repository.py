@@ -311,13 +311,20 @@ class SourceRepository(BaseRepository[Source]):
 
         On ``status == "completed"`` we additionally stamp
         ``last_studied_at = now()`` so the admin sources list can render
-        "studied 4 min ago" without joining ``schema_studies``. We do
-        NOT touch ``last_studied_at`` on failure so admins still see the
-        previous successful study time after a transient breakage.
+        "studied 4 min ago" without joining ``schema_studies``, and reset
+        ``drift_signal_count = 0`` — a fresh study has just rebuilt the
+        fingerprint and any prior drift was rolled into the new shape. We
+        do NOT touch either of these on failure so admins still see the
+        previous successful study time + drift count after a transient
+        breakage.
         """
         values: dict[str, Any] = {"schema_status": status}
         if status == "completed":
             values["last_studied_at"] = func.now()
+            # A re-study replaces the previous fingerprint outright; any
+            # accumulated drift signals against the *old* fingerprint are
+            # no longer meaningful.
+            values["drift_signal_count"] = 0
         stmt = (
             update(Source)
             .where(Source.id == source_id)

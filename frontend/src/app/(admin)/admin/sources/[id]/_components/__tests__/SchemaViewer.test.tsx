@@ -683,3 +683,78 @@ describe('SchemaViewer — partial coverage banner', () => {
     expect(screen.queryByTestId('schema-partial-banner')).not.toBeInTheDocument()
   })
 })
+
+describe('SchemaViewer — FX24 partial-coverage edge cases', () => {
+  it('truncated_at — surfaces a banner when the source is bigger than the cap', async () => {
+    const doc = makeDoc({
+      partial: false,
+      truncated_at: 250,
+    })
+    getSchemaDocumentMock.mockResolvedValue(makeResponse(doc))
+
+    renderViewer()
+    await screen.findByTestId('schema-viewer')
+
+    const banner = screen.getByTestId('schema-truncation-banner')
+    expect(banner).toHaveTextContent(/Large schema/i)
+    expect(banner).toHaveTextContent(/showing 2 of 250/i)
+  })
+
+  it('skipped_tables — surfaces an amber list of permission-denied tables', async () => {
+    const doc = makeDoc({
+      partial: true,
+      partial_coverage: true,
+      skipped_tables: ['public.secrets', 'public.audit_priv'],
+      phase_errors: [
+        {
+          phase: 'SAMPLING',
+          error_key: 'SAMPLE_DENIED',
+          message: 'Not permitted to read public.secrets',
+        },
+      ],
+    })
+    getSchemaDocumentMock.mockResolvedValue(makeResponse(doc))
+
+    renderViewer()
+    await screen.findByTestId('schema-viewer')
+
+    const banner = screen.getByTestId('schema-skipped-tables-banner')
+    expect(banner).toHaveTextContent(/2 tables skipped/i)
+    expect(banner).toHaveTextContent(/public\.secrets/)
+    expect(banner).toHaveTextContent(/public\.audit_priv/)
+  })
+
+  it('llm_descriptions_available=false — surfaces the AI-blurb-missing banner', async () => {
+    const doc = makeDoc({
+      partial: true,
+      llm_descriptions_available: false,
+      phase_errors: [
+        {
+          phase: 'DESCRIBING',
+          error_key: 'LLM_ERROR',
+          message: 'Upstream timeout.',
+        },
+      ],
+    })
+    getSchemaDocumentMock.mockResolvedValue(makeResponse(doc))
+
+    renderViewer()
+    await screen.findByTestId('schema-viewer')
+
+    const banner = screen.getByTestId('schema-llm-unavailable-banner')
+    expect(banner).toHaveTextContent(/AI descriptions unavailable/i)
+  })
+
+  it('does NOT render the new banners when none of the flags are set', async () => {
+    getSchemaDocumentMock.mockResolvedValue(makeResponse(makeDoc()))
+    renderViewer()
+    await screen.findByTestId('schema-viewer')
+    expect(screen.queryByTestId('schema-truncation-banner')).not.toBeInTheDocument()
+    expect(
+      screen.queryByTestId('schema-skipped-tables-banner'),
+    ).not.toBeInTheDocument()
+    expect(
+      screen.queryByTestId('schema-llm-unavailable-banner'),
+    ).not.toBeInTheDocument()
+  })
+})

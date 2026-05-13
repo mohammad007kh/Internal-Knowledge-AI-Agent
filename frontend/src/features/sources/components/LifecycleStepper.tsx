@@ -4,50 +4,79 @@
  * LifecycleStepper — horizontal chip strip showing where in the ingestion
  * pipeline the source is.
  *
- * Renders one chip per stage from `PHASE_ORDER`. The current step pulses; all
- * preceding steps are filled emerald; the active "failed" tone is applied to
- * whichever step the worker died on (anchored to the first incomplete step).
+ * Renders one chip per stage from `phaseOrderFor(sourceKind)`. The current
+ * step pulses; all preceding steps are filled emerald; the "failed" tone is
+ * applied to whichever step the worker died on (anchored on `analyzing` —
+ * the last in-flight phase before `ready` in every per-kind order).
  *
- * Pure presentational — receives the phase, no fetching of its own.
+ * FX23: labels + hints + phase order are now source-kind aware. DB sources
+ * skip the `chunking` chip and read "Studying schema" for analyzing; web
+ * sources show "Crawling content" for the chunking step. File sources keep
+ * the existing copy. Connectors mirror web.
+ *
+ * Pure presentational — receives the phase + kind, no fetching of its own.
  */
 
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
-import { type Phase, PHASE_ORDER, phaseLabel } from '@/features/sources/lifecycle'
+import {
+  type Phase,
+  type SourceKind,
+  phaseHint,
+  phaseLabel,
+  phaseOrderFor,
+} from '@/features/sources/lifecycle'
 import { cn } from '@/lib/utils'
 import { CheckIcon, CircleAlertIcon, Loader2Icon } from 'lucide-react'
 
 interface LifecycleStepperProps {
   phase: Phase
-  /** When `true`, swap the "Waiting for upload" copy for an upload-source-
-   *  agnostic phrase. Defaults to `false`. */
-  hideFirstStepLabel?: boolean
+  /**
+   * Coarse "kind" of the source, used to pick the right per-step labels and
+   * the right ordered list of chips. Defaults to `'file'` so the few callers
+   * that haven't been migrated render exactly the previous behaviour.
+   */
+  sourceKind?: SourceKind
   className?: string
 }
 
-const STEP_HINTS: Record<(typeof PHASE_ORDER)[number], string> = {
-  pending_upload: 'Files are landing in object storage.',
-  naming: 'The AI is drafting a name and description.',
-  chunking: 'Splitting the content into retrieval-friendly chunks.',
-  analyzing: 'Embedding chunks and finalizing the index.',
-  ready: 'This source is ready to query.',
+/**
+ * Anchor for the `failed` tone. In every per-kind order the last in-flight
+ * step before `ready` is `analyzing`, so we anchor `failed` there: the chip
+ * reads "Failed during {analyzing label}" which surfaces the right verb for
+ * each source kind ("Failed during studying schema" for DB, "Failed during
+ * analyzing & indexing" for file/web).
+ *
+ * If the chosen kind doesn't include `analyzing` (it always does today —
+ * defensive only), we fall back to the last non-`ready` step in the order.
+ */
+function failedAnchorIndex(
+  order: ReadonlyArray<Exclude<Phase, 'failed'>>
+): number {
+  const idx = order.indexOf('analyzing')
+  if (idx >= 0) return idx
+  // Fallback: the step immediately before `ready`, or 0 if even that fails.
+  const readyIdx = order.indexOf('ready')
+  return readyIdx > 0 ? readyIdx - 1 : 0
 }
 
-function stepIndex(phase: Phase): number {
-  // failed renders inside whichever step we were last on; default to chunking.
-  if (phase === 'failed') return PHASE_ORDER.indexOf('chunking')
-  return PHASE_ORDER.indexOf(phase)
+function stepIndex(
+  phase: Phase,
+  order: ReadonlyArray<Exclude<Phase, 'failed'>>
+): number {
+  if (phase === 'failed') return failedAnchorIndex(order)
+  return order.indexOf(phase as Exclude<Phase, 'failed'>)
 }
 
 interface StepChipProps {
   index: number
   currentIndex: number
-  phase: Phase
+  stepPhase: Exclude<Phase, 'failed'>
   isFailed: boolean
   label: string
   hint: string
 }
 
-function StepChip({ index, currentIndex, phase, isFailed, label, hint }: StepChipProps) {
+function StepChip({ index, currentIndex, stepPhase, isFailed, label, hint }: StepChipProps) {
   const isDone = index < currentIndex
   const isActive = index === currentIndex
   const isActiveFailed = isActive && isFailed
@@ -70,7 +99,7 @@ function StepChip({ index, currentIndex, phase, isFailed, label, hint }: StepChi
       <TooltipTrigger asChild>
         <span
           data-testid="lifecycle-step"
-          data-phase={PHASE_ORDER[index]}
+          data-phase={stepPhase}
           data-state={
             isActiveFailed
               ? 'failed'
@@ -123,8 +152,13 @@ function Connector({ done }: { done: boolean }) {
   )
 }
 
-export function LifecycleStepper({ phase, hideFirstStepLabel = false, className }: LifecycleStepperProps) {
-  const currentIndex = stepIndex(phase)
+export function LifecycleStepper({
+  phase,
+  sourceKind = 'file',
+  className,
+}: LifecycleStepperProps) {
+  const order = phaseOrderFor(sourceKind)
+  const currentIndex = stepIndex(phase, order)
   const isFailed = phase === 'failed'
 
   return (
@@ -132,31 +166,26 @@ export function LifecycleStepper({ phase, hideFirstStepLabel = false, className 
       <div
         data-testid="lifecycle-stepper"
         data-phase={phase}
+        data-source-kind={sourceKind}
         role="list"
         aria-label="Source lifecycle progress"
         className={cn('inline-flex flex-wrap items-center gap-y-2', className)}
       >
-        {PHASE_ORDER.map((stepPhase, idx) => {
-          const label =
-            hideFirstStepLabel && stepPhase === 'pending_upload'
-              ? 'Queued'
-              : phaseLabel(stepPhase)
-          return (
-            <span key={stepPhase} role="listitem" className="inline-flex items-center">
-              <StepChip
-                index={idx}
-                currentIndex={currentIndex}
-                phase={phase}
-                isFailed={isFailed}
-                label={label}
-                hint={STEP_HINTS[stepPhase]}
-              />
-              {idx < PHASE_ORDER.length - 1 ? (
-                <Connector done={idx < currentIndex} />
-              ) : null}
-            </span>
-          )
-        })}
+        {order.map((stepPhase, idx) => (
+          <span key={stepPhase} role="listitem" className="inline-flex items-center">
+            <StepChip
+              index={idx}
+              currentIndex={currentIndex}
+              stepPhase={stepPhase}
+              isFailed={isFailed}
+              label={phaseLabel(stepPhase, sourceKind)}
+              hint={phaseHint(stepPhase, sourceKind)}
+            />
+            {idx < order.length - 1 ? (
+              <Connector done={idx < currentIndex} />
+            ) : null}
+          </span>
+        ))}
       </div>
     </TooltipProvider>
   )

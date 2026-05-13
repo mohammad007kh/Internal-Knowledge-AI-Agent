@@ -239,6 +239,20 @@ export function SchemaViewer({ sourceId, source }: SchemaViewerProps) {
             </Button>
           </div>
 
+          {doc.truncated_at != null && doc.truncated_at > doc.tables.length ? (
+            <TruncationBanner
+              totalSeen={doc.truncated_at}
+              shown={doc.tables.length}
+            />
+          ) : null}
+          {doc.partial_coverage &&
+          doc.skipped_tables &&
+          doc.skipped_tables.length > 0 ? (
+            <SkippedTablesBanner skippedTables={doc.skipped_tables} />
+          ) : null}
+          {doc.llm_descriptions_available === false ? (
+            <LlmDescriptionsUnavailableBanner />
+          ) : null}
           {doc.partial ? (
             <PartialCoverageBanner phaseErrors={doc.phase_errors} />
           ) : null}
@@ -516,6 +530,104 @@ function SchemaEmptyDatabase({
         restudying={restudying}
         label="Re-study schema"
       />
+    </div>
+  )
+}
+
+interface TruncationBannerProps {
+  totalSeen: number
+  shown: number
+}
+
+/**
+ * Surfaced when the source reported more relations than the per-source
+ * cap. Distinct from {@link PartialCoverageBanner} (per-phase errors) and
+ * {@link SkippedTablesBanner} (named tables we couldn't include) — this is
+ * "we deliberately stopped at N because the source is huge".
+ */
+function TruncationBanner({ totalSeen, shown }: TruncationBannerProps) {
+  return (
+    <div
+      className="flex gap-2 rounded-md border border-amber-300 bg-amber-50 p-3 text-xs text-amber-900 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-100"
+      data-testid="schema-truncation-banner"
+      role="status"
+    >
+      <AlertTriangleIcon className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
+      <div className="space-y-1">
+        <p className="font-medium">
+          Large schema — showing {shown} of {totalSeen} tables
+        </p>
+        <p>
+          The studying agent capped the study at {shown} tables. The remaining{' '}
+          {totalSeen - shown} are not in the schema document — narrow the
+          source (e.g. limit the schema search path) and re-study to cover
+          them.
+        </p>
+      </div>
+    </div>
+  )
+}
+
+interface SkippedTablesBannerProps {
+  skippedTables: ReadonlyArray<string>
+}
+
+/**
+ * Surfaced when the studying agent skipped one or more named tables
+ * (typically permission-denied — admin credentials can list the table but
+ * not read its columns or rows). Layered ON TOP of READY: the doc itself
+ * is fine; this just enumerates what's missing.
+ */
+function SkippedTablesBanner({ skippedTables }: SkippedTablesBannerProps) {
+  return (
+    <div
+      className="flex gap-2 rounded-md border border-amber-300 bg-amber-50 p-3 text-xs text-amber-900 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-100"
+      data-testid="schema-skipped-tables-banner"
+      role="status"
+    >
+      <AlertTriangleIcon className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
+      <div className="space-y-1">
+        <p className="font-medium">
+          Partial coverage — {skippedTables.length} table
+          {skippedTables.length === 1 ? '' : 's'} skipped
+        </p>
+        <p>
+          The studying agent could not include these tables (usually because
+          the connection user lacks SELECT on them). Grant the missing
+          permissions and re-study to cover them.
+        </p>
+        <ul className="list-disc space-y-0.5 pl-4 font-mono">
+          {skippedTables.map((name) => (
+            <li key={name}>{name}</li>
+          ))}
+        </ul>
+      </div>
+    </div>
+  )
+}
+
+/**
+ * Surfaced when the LLM stage produced no usable descriptions for any
+ * table. The schema metadata is the load-bearing part — descriptions are
+ * gravy — but admins should know AI blurbs are missing so they don't
+ * assume the agent forgot.
+ */
+function LlmDescriptionsUnavailableBanner() {
+  return (
+    <div
+      className="flex gap-2 rounded-md border border-amber-300 bg-amber-50 p-3 text-xs text-amber-900 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-100"
+      data-testid="schema-llm-unavailable-banner"
+      role="status"
+    >
+      <AlertTriangleIcon className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
+      <div className="space-y-1">
+        <p className="font-medium">AI descriptions unavailable</p>
+        <p>
+          The schema is complete, but the studying agent could not generate
+          per-table descriptions (typically a temporary LLM outage). Schema
+          metadata is unaffected. Re-study later to fill in the blurbs.
+        </p>
+      </div>
     </div>
   )
 }

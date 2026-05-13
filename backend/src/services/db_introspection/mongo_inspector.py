@@ -292,12 +292,20 @@ async def _phase_connecting(client: Any, database: str) -> None:
 
 async def _phase_inventory(
     client: Any, database: str, collection_filter: str | None
-) -> list[str]:
-    """Return the (capped) list of collection names to inspect.
+) -> tuple[list[str], int]:
+    """Return ``(collection_names, total_seen)``.
 
     *collection_filter* — when set, restrict to that single collection (the
-    source config's ``collection`` key).  Raises a fatal INVENTORY error if
-    the listing itself fails or there's nothing to inspect.
+    source config's ``collection`` key).
+
+    ``total_seen`` is the full count of non-system collections the source
+    reported (before the :data:`_MAX_COLLECTIONS` cap is applied) so the
+    orchestrator can populate :attr:`SchemaDocument.truncated_at`. An empty
+    inventory is NOT fatal — the database may simply have no collections yet
+    and the admin viewer surfaces a distinct empty-database state.
+
+    Raises :class:`SchemaStudyPhaseError` only when the listing itself
+    fails (a fatal INVENTORY error).
     """
     try:
         names = await client[database].list_collection_names()
@@ -319,21 +327,15 @@ async def _phase_inventory(
         collections = [n for n in collections if n == collection_filter]
     collections.sort()
 
-    if not collections:
-        raise SchemaStudyPhaseError(
-            phase="INVENTORY",
-            error_key="NO_COLLECTIONS",
-            message="The MongoDB source exposes no collections to study.",
-        )
-
-    if len(collections) > _MAX_COLLECTIONS:
+    total_seen = len(collections)
+    if total_seen > _MAX_COLLECTIONS:
         logger.warning(
             "mongo_inspector: source has %d collections; truncating to %d",
-            len(collections),
+            total_seen,
             _MAX_COLLECTIONS,
         )
         collections = collections[:_MAX_COLLECTIONS]
-    return collections
+    return collections, total_seen
 
 
 async def _sample_docs(client: Any, database: str, collection: str) -> list[dict[str, Any]]:
@@ -425,6 +427,20 @@ def _fill_samples_from_docs(
 # ---------------------------------------------------------------------------
 
 _AUDIT_NAME_RE = re.compile(r"(_log|_logs|_audit|_history|_events?)$|^audit|^event_log")
+
+
+def _is_signal_free_for_llm(table: TableDoc) -> bool:
+    """True iff the collection provides no useful signal for the LLM.
+
+    Schema-on-read flavour: if COLUMNS sampled docs but found no fields and
+    every column we *do* have has zero sample values, asking the LLM to
+    describe the collection invites hallucination. ``row_count_estimate``
+    is always ``None`` for Mongo (we never run ``count()``), so this is a
+    pure "no columns and no values" check.
+    """
+    if not table.columns:
+        return True
+    return all(not c.sample_values for c in table.columns)
 
 
 def _heuristic_tags(table: TableDoc) -> list[str]:
@@ -629,6 +645,7 @@ async def study_mongo_schema(
     """
     start = time.monotonic()
     phase_errors: list[PhaseError] = []
+    skipped_tables: list[str] = []
 
     client_factory = _client_factory
     if client_factory is None:
@@ -650,7 +667,12 @@ async def study_mongo_schema(
         await _phase_connecting(client, database)
 
         # --- Phase 2: INVENTORY --------------------------------------------
-        coll_names = await _phase_inventory(client, database, collection_filter)
+        coll_names, total_seen = await _phase_inventory(
+            client, database, collection_filter
+        )
+        truncated_at: int | None = (
+            total_seen if total_seen > len(coll_names) else None
+        )
         tables: list[TableDoc] = [
             TableDoc(
                 name=f"{database}.{name}",
@@ -683,6 +705,7 @@ async def study_mongo_schema(
                         ),
                     )
                 )
+                skipped_tables.append(table.name)
                 logger.warning(
                     "mongo_inspector: COLUMNS failed for %s — skipping collection",
                     table.name,
@@ -724,9 +747,11 @@ async def study_mongo_schema(
 
         # --- Phase 5: DESCRIBING ------------------------------------------
         summary = ""
+        llm_descriptions_available = True
         if ai_model_resolver is not None and tables:
             describing_deadline = time.monotonic() + describing_budget_seconds
             budget_exhausted = False
+            described_any = False
             for table in tables:
                 if time.monotonic() >= describing_deadline:
                     if not budget_exhausted:
@@ -747,8 +772,23 @@ async def study_mongo_schema(
                     if not table.tags:
                         table.tags = _heuristic_tags(table)
                     continue
+                if _is_signal_free_for_llm(table):
+                    if not table.tags:
+                        table.tags = _heuristic_tags(table)
+                    phase_errors.append(
+                        PhaseError(
+                            phase="DESCRIBING",
+                            error_key="NO_SIGNAL",
+                            message=(
+                                f"No fields or sample values for {table.name}; "
+                                "skipping AI description."
+                            ),
+                        )
+                    )
+                    continue
                 try:
                     await _describe_collection(table, ai_model_resolver)
+                    described_any = True
                 except Exception as exc:  # noqa: BLE001 - never fatal
                     if not table.tags:
                         table.tags = _heuristic_tags(table)
@@ -772,11 +812,15 @@ async def study_mongo_schema(
                         message=f"LLM could not summarise the corpus: {_sanitise(exc)}",
                     )
                 )
+            if tables and not described_any:
+                llm_descriptions_available = False
         else:
+            # No resolver — heuristic tags only. We DON'T flag LLM_UNAVAILABLE
+            # when there are no collections to describe.
             for table in tables:
                 if not table.tags:
                     table.tags = _heuristic_tags(table)
-            if ai_model_resolver is None:
+            if ai_model_resolver is None and tables:
                 phase_errors.append(
                     PhaseError(
                         phase="DESCRIBING",
@@ -784,18 +828,26 @@ async def study_mongo_schema(
                         message="No LLM resolver available; descriptions skipped.",
                     )
                 )
+                llm_descriptions_available = False
 
         # --- Phase 6: INDEXING — not done; vector_index_ref=None.
 
         tables.sort(key=lambda t: t.name)
         duration_ms = max(0, int((time.monotonic() - start) * 1000))
+        partial = bool(phase_errors)
+        partial_coverage = bool(skipped_tables) or truncated_at is not None
+        skipped_tables_sorted = sorted(set(skipped_tables))
         doc = SchemaDocument(
             dialect="mongodb",
             fingerprint="0" * 64,  # placeholder, replaced below
             generated_at=datetime.now(tz=timezone.utc),
             agent_version=AGENT_VERSION,
             study_duration_ms=duration_ms,
-            partial=bool(phase_errors),
+            partial=partial,
+            partial_coverage=partial_coverage,
+            skipped_tables=skipped_tables_sorted,
+            truncated_at=truncated_at,
+            llm_descriptions_available=llm_descriptions_available,
             phase_errors=phase_errors,
             tables=tables,
             summary=summary,

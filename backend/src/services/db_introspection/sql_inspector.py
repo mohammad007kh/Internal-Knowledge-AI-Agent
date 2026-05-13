@@ -357,11 +357,18 @@ async def _phase_connecting(engine: AsyncEngine) -> None:
 # ---------------------------------------------------------------------------
 
 
-async def _phase_inventory(engine: AsyncEngine) -> list[tuple[str, str, str]]:
-    """Return ``[(schema, table_name, kind)]`` for all non-system relations.
+async def _phase_inventory(
+    engine: AsyncEngine,
+) -> tuple[list[tuple[str, str, str]], int]:
+    """Return ``([(schema, table_name, kind)], total_seen)``.
 
-    Raises :class:`SchemaStudyPhaseError` if reflection of the schema list
-    itself fails (a fatal INVENTORY error).
+    ``total_seen`` is the *full* count of non-system relations the source
+    reported, before the :data:`_MAX_TABLES` cap is applied. The orchestrator
+    uses it to populate :attr:`SchemaDocument.truncated_at` when the cap
+    fires. An empty inventory is NOT fatal — the source may simply be empty.
+
+    Raises :class:`SchemaStudyPhaseError` only if reflection of the schema
+    list itself fails (a fatal INVENTORY error).
     """
 
     def _collect(inspector: Inspector) -> list[tuple[str, str, str]]:
@@ -410,21 +417,19 @@ async def _phase_inventory(engine: AsyncEngine) -> list[tuple[str, str, str]]:
             message=f"Could not reflect the source schema: {_sanitise(str(exc))}",
         ) from None
 
-    if not relations:
-        raise SchemaStudyPhaseError(
-            phase="INVENTORY",
-            error_key="NO_TABLES",
-            message="The source database exposes no tables or views to study.",
-        )
-
-    if len(relations) > _MAX_TABLES:
+    # An empty inventory is NOT fatal — the database may simply have no
+    # user tables yet. Return an empty list and let the orchestrator land
+    # READY (with zero tables); the admin viewer surfaces a distinct
+    # "empty database" state so they can populate the DB and re-study.
+    total_seen = len(relations)
+    if total_seen > _MAX_TABLES:
         logger.warning(
             "sql_inspector: source has %d relations; truncating to %d",
-            len(relations),
+            total_seen,
             _MAX_TABLES,
         )
         relations = relations[:_MAX_TABLES]
-    return relations
+    return relations, total_seen
 
 
 async def _row_count_estimate(
@@ -713,6 +718,33 @@ async def _phase_sampling_for_table(
 # ---------------------------------------------------------------------------
 
 _AUDIT_NAME_RE = re.compile(r"(_log|_logs|_audit|_history|_events?)$|^audit_|^event_log")
+
+
+def _is_signal_free_for_llm(table: TableDoc) -> bool:
+    """True iff the table provides no useful signal for the LLM to describe.
+
+    Empty-table heuristic: the SAMPLING phase pulls ``LIMIT 3`` and only
+    falls back to ``sample_values=[]`` for a column when the SELECT
+    returned zero rows (or every value was NULL/binary). If *every*
+    column ends up with no samples AND the table either has zero rows
+    (per the cheap estimate) or we couldn't measure rows at all, the
+    LLM has no signal beyond the column names — asking it to "describe
+    what this table likely stores" is an invitation to hallucinate.
+
+    Exception: when the row-count estimate is positive but samples are
+    empty (e.g. all binary columns, all NULL), we still call the LLM —
+    the column names + the fact that the table is populated is usually
+    enough for a good blurb.
+    """
+    has_any_samples = any(c.sample_values for c in table.columns)
+    if has_any_samples:
+        return False
+    if table.row_count_estimate is None:
+        # We don't know if it's empty — but we DO know SAMPLING got
+        # zero usable rows back from a `LIMIT 3` query. Treat that
+        # as no-signal.
+        return True
+    return table.row_count_estimate == 0
 _LOOKUP_COLUMN_SETS: tuple[frozenset[str], ...] = (
     frozenset({"id", "name"}),
     frozenset({"id", "code"}),
@@ -948,13 +980,15 @@ async def study_sql_schema(
 
     start = time.monotonic()
     phase_errors: list[PhaseError] = []
+    skipped_tables: list[str] = []
     engine = await _build_engine(connection_string, db_type)
     try:
         # --- Phase 1: CONNECTING -------------------------------------------
         await _phase_connecting(engine)
 
         # --- Phase 2: INVENTORY --------------------------------------------
-        relations = await _phase_inventory(engine)
+        relations, total_seen = await _phase_inventory(engine)
+        truncated_at: int | None = total_seen if total_seen > len(relations) else None
         tables: list[TableDoc] = []
         for schema, name, kind in relations:
             estimate = await _row_count_estimate(engine, schema, name, db_type)
@@ -990,6 +1024,7 @@ async def study_sql_schema(
                         ),
                     )
                 )
+                skipped_tables.append(table.name)
                 logger.warning(
                     "sql_inspector: COLUMNS failed for %s — skipping table",
                     table.name,
@@ -1030,6 +1065,13 @@ async def study_sql_schema(
                         message=exc.message,
                     )
                 )
+                # SAMPLE_DENIED → admin's credentials let us reflect the
+                # table's metadata but not read its rows. The table stays
+                # in the doc (columns are valuable on their own) but the
+                # source advertises partial coverage so the admin can
+                # decide whether to widen the grant.
+                if exc.error_key == "SAMPLE_DENIED" and table.name not in skipped_tables:
+                    skipped_tables.append(table.name)
             except Exception as exc:  # noqa: BLE001 - never fatal
                 phase_errors.append(
                     PhaseError(
@@ -1043,9 +1085,11 @@ async def study_sql_schema(
 
         # --- Phase 5: DESCRIBING -------------------------------------------
         summary = ""
+        llm_descriptions_available = True
         if ai_model_resolver is not None and tables:
             describing_deadline = time.monotonic() + describing_budget_seconds
             budget_exhausted = False
+            described_any = False
             for table in tables:
                 if time.monotonic() >= describing_deadline:
                     if not budget_exhausted:
@@ -1068,8 +1112,28 @@ async def study_sql_schema(
                     if not table.tags:
                         table.tags = _heuristic_tags(table)
                     continue
+                # Skip the LLM call for tables where every column has zero
+                # samples AND the row-count estimate is zero — an empty
+                # table is just metadata; asking the LLM to "describe what
+                # this table likely stores" with no signal invites
+                # hallucination. Heuristic tags still apply.
+                if _is_signal_free_for_llm(table):
+                    if not table.tags:
+                        table.tags = _heuristic_tags(table)
+                    phase_errors.append(
+                        PhaseError(
+                            phase="DESCRIBING",
+                            error_key="NO_SIGNAL",
+                            message=(
+                                f"No rows or sample values for {table.name}; "
+                                "skipping AI description."
+                            ),
+                        )
+                    )
+                    continue
                 try:
                     await _describe_table(table, ai_model_resolver)
+                    described_any = True
                 except Exception as exc:  # noqa: BLE001 - never fatal
                     if not table.tags:
                         table.tags = _heuristic_tags(table)
@@ -1098,12 +1162,20 @@ async def study_sql_schema(
                         ),
                     )
                 )
+            # If we have tables but couldn't get a single per-table
+            # description through the LLM, flag the doc so the admin sees
+            # "AI descriptions unavailable" rather than "the agent forgot".
+            if tables and not described_any:
+                llm_descriptions_available = False
         else:
             # No resolver — fall back to heuristic tags only, mark partial.
+            # An empty `tables` list (empty source) is the one case where
+            # we DON'T flag LLM_UNAVAILABLE: there's nothing to describe,
+            # so the absence of descriptions is expected, not degraded.
             for table in tables:
                 if not table.tags:
                     table.tags = _heuristic_tags(table)
-            if ai_model_resolver is None:
+            if ai_model_resolver is None and tables:
                 phase_errors.append(
                     PhaseError(
                         phase="DESCRIBING",
@@ -1111,12 +1183,15 @@ async def study_sql_schema(
                         message="No LLM resolver available; descriptions skipped.",
                     )
                 )
+                llm_descriptions_available = False
 
         # --- Phase 6: INDEXING — not done this slice; vector_index_ref=None.
 
         tables.sort(key=lambda t: t.name)
         duration_ms = max(0, int((time.monotonic() - start) * 1000))
         partial = bool(phase_errors)
+        partial_coverage = bool(skipped_tables) or truncated_at is not None
+        skipped_tables_sorted = sorted(set(skipped_tables))
         doc = SchemaDocument(
             dialect=dialect,
             fingerprint="0" * 64,  # placeholder, replaced below
@@ -1124,6 +1199,10 @@ async def study_sql_schema(
             agent_version=AGENT_VERSION,
             study_duration_ms=duration_ms,
             partial=partial,
+            partial_coverage=partial_coverage,
+            skipped_tables=skipped_tables_sorted,
+            truncated_at=truncated_at,
+            llm_descriptions_available=llm_descriptions_available,
             phase_errors=phase_errors,
             tables=tables,
             summary=summary,

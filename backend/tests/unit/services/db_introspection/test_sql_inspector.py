@@ -493,3 +493,314 @@ def test_sanitise_strips_url_credentials_and_host_port():
     assert "hunter2" not in out
     assert "svc:hunter2" not in out
     assert "db.internal:5432" not in out
+
+
+# ---------------------------------------------------------------------------
+# FX24 — edge-case hardening
+#
+# Every test below covers a specific "non-happy-path" the admin can throw at
+# the studying agent. The cases mirror the audit list in FX24 verbatim.
+# ---------------------------------------------------------------------------
+
+
+def _make_empty_sqlite_engine() -> sa.Engine:
+    """An in-memory SQLite DB with no user tables at all."""
+    return create_engine(
+        "sqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+
+
+def _make_zero_row_sqlite_engine() -> sa.Engine:
+    """A table that exists but holds no rows — sampling yields nothing."""
+    engine = create_engine(
+        "sqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    with engine.begin() as conn:
+        conn.execute(
+            sa.text(
+                "CREATE TABLE empty_things ("
+                "  id INTEGER PRIMARY KEY,"
+                "  label TEXT NOT NULL"
+                ")"
+            )
+        )
+    return engine
+
+
+async def test_empty_database_lands_ready_with_zero_tables():
+    """EC1 — an empty source must land READY (not INVENTORY_FAILED).
+
+    Previously the inspector raised ``NO_TABLES`` as a fatal phase error,
+    which left the source stuck in ``INVENTORY_FAILED`` even though
+    nothing was wrong — there were just no tables yet. After FX24 the
+    inspector returns a valid SchemaDocument with ``tables=[]`` so the
+    admin viewer can render the empty-DB hint.
+    """
+    from src.services.db_introspection.sql_inspector import study_sql_schema
+
+    engine = _make_empty_sqlite_engine()
+
+    with _patch_engine(engine):
+        doc = await study_sql_schema(
+            connection_string="postgresql+asyncpg://ignored/ignored",
+            db_type="postgresql",
+            ai_model_resolver=None,
+        )
+
+    assert doc.tables == []
+    assert doc.summary == ""
+    assert doc.partial_coverage is False
+    assert doc.skipped_tables == []
+    assert doc.truncated_at is None
+    # No tables ⇒ no LLM was ever needed, so don't claim descriptions
+    # are unavailable (the doc has nothing to describe).
+    assert doc.llm_descriptions_available is True
+    # The DESCRIBING phase produced no signal-of-no-resolver error because
+    # the loop never iterated over any tables.
+    assert all(e.error_key != "LLM_UNAVAILABLE" for e in doc.phase_errors)
+    # Fingerprint is computed even for an empty doc.
+    assert len(doc.fingerprint) == 64
+
+
+async def test_empty_tables_skip_llm_for_no_signal_tables():
+    """EC2 — a table with zero rows must not be fed to the LLM.
+
+    The studying agent samples ``LIMIT 3`` and gets no rows back; the
+    sample_values stay ``[]`` and the row-count estimate is 0. Calling the
+    LLM with "describe what this empty table likely stores" is an
+    invitation to hallucinate, so the inspector now skips the LLM call
+    and records a ``NO_SIGNAL`` phase error.
+    """
+    from src.services.db_introspection.sql_inspector import study_sql_schema
+
+    engine = _make_zero_row_sqlite_engine()
+    resolver, create_mock = _stub_resolver()
+
+    with _patch_engine(engine):
+        doc = await study_sql_schema(
+            connection_string="postgresql+asyncpg://ignored/ignored",
+            db_type="postgresql",
+            ai_model_resolver=resolver,
+        )
+
+    # The table is in the doc; only the LLM call was skipped.
+    by_short = {t.name.split(".")[-1]: t for t in doc.tables}
+    assert "empty_things" in by_short
+    table = by_short["empty_things"]
+    assert all(not c.sample_values for c in table.columns)
+    # No description was attempted — the LLM mock must NOT have been
+    # called for this table. The summary call may still fire (1 total).
+    assert create_mock.await_count <= 1
+    assert table.description == ""
+    # The NO_SIGNAL phase error is recorded so the admin knows why.
+    no_signal = [e for e in doc.phase_errors if e.error_key == "NO_SIGNAL"]
+    assert no_signal
+
+
+async def test_permission_denied_sampling_flags_partial_coverage_and_skipped_tables():
+    """EC3 — a permission-denied table lands a partial-coverage signal.
+
+    SAMPLE_DENIED (admin can list metadata but lacks SELECT on rows) is
+    surfaced both via a phase_error AND via the explicit ``skipped_tables``
+    list + ``partial_coverage=True`` so the admin UI can render a named
+    list without parsing error messages.
+    """
+    from src.services.db_introspection import sql_inspector as si
+    from src.services.db_introspection.sql_inspector import study_sql_schema
+
+    engine = _make_sqlite_engine_with_fixtures()
+    resolver, _ = _stub_resolver()
+
+    async def _flaky_sampling(eng, schema, table, columns, db_type):  # noqa: ANN001
+        if table == "orders":
+            raise si.SchemaStudyPhaseError(
+                phase="SAMPLING",
+                error_key="SAMPLE_DENIED",
+                message=f"Not permitted to read {schema}.{table} for sampling.",
+            )
+        # customers samples normally
+        return None
+
+    with _patch_engine(engine), patch.object(
+        si, "_phase_sampling_for_table", _flaky_sampling
+    ):
+        doc = await study_sql_schema(
+            connection_string="postgresql+asyncpg://ignored/ignored",
+            db_type="postgresql",
+            ai_model_resolver=resolver,
+        )
+
+    assert doc.partial_coverage is True
+    assert any(name.endswith("orders") for name in doc.skipped_tables)
+    # The orders table is still in the doc (we got its columns) — just
+    # without sample values.
+    by_short = {t.name.split(".")[-1]: t for t in doc.tables}
+    assert "orders" in by_short
+    # The phase-error message must not leak credentials.
+    for e in doc.phase_errors:
+        assert "ignored:ignored" not in e.message
+
+
+async def test_permission_denied_columns_phase_marks_table_skipped():
+    """EC3 — a COLUMNS-phase permission denial enrolls the table in skipped_tables."""
+    from src.services.db_introspection import sql_inspector as si
+    from src.services.db_introspection.sql_inspector import study_sql_schema
+
+    engine = _make_sqlite_engine_with_fixtures()
+    resolver, _ = _stub_resolver()
+
+    real_columns = si._phase_columns_for_table
+
+    async def _flaky_columns(eng, schema, table):  # noqa: ANN001
+        if table == "orders":
+            raise PermissionError("permission denied for table orders")
+        return await real_columns(eng, schema, table)
+
+    with _patch_engine(engine), patch.object(
+        si, "_phase_columns_for_table", _flaky_columns
+    ):
+        doc = await study_sql_schema(
+            connection_string="postgresql+asyncpg://ignored/ignored",
+            db_type="postgresql",
+            ai_model_resolver=resolver,
+        )
+
+    assert doc.partial_coverage is True
+    assert any(name.endswith("orders") for name in doc.skipped_tables)
+    # The orders table itself was dropped from the doc (no columns
+    # available); customers remains.
+    remaining = {t.name.split(".")[-1] for t in doc.tables}
+    assert "customers" in remaining
+    assert "orders" not in remaining
+
+
+async def test_truncated_at_set_when_inventory_exceeds_max_tables():
+    """EC4 — a huge schema records ``truncated_at`` + ``partial_coverage``.
+
+    Drops the per-source cap to a small number so the existing fixture
+    (two tables) trips the truncation path.
+    """
+    from src.services.db_introspection import sql_inspector as si
+    from src.services.db_introspection.sql_inspector import study_sql_schema
+
+    engine = _make_sqlite_engine_with_fixtures()
+    resolver, _ = _stub_resolver()
+
+    # Cap = 1: keep one of the two tables; surface the truncation signal.
+    with _patch_engine(engine), patch.object(si, "_MAX_TABLES", 1):
+        doc = await study_sql_schema(
+            connection_string="postgresql+asyncpg://ignored/ignored",
+            db_type="postgresql",
+            ai_model_resolver=resolver,
+        )
+
+    assert doc.truncated_at == 2  # 2 user tables in the fixture
+    assert len(doc.tables) == 1
+    assert doc.partial_coverage is True
+
+
+async def test_llm_total_failure_flags_descriptions_unavailable():
+    """EC8 — when every per-table LLM call fails, flag descriptions unavailable.
+
+    The schema metadata is the load-bearing part; descriptions are gravy.
+    The study should land READY_PARTIAL (the orchestrator) with
+    ``llm_descriptions_available=False`` so the admin sees a banner
+    explaining the absence of blurbs rather than thinking the agent
+    forgot.
+    """
+    from src.services.db_introspection.sql_inspector import study_sql_schema
+
+    engine = _make_sqlite_engine_with_fixtures()
+    resolver, create_mock = _stub_resolver()
+
+    async def _always_fail(**_kwargs):  # noqa: ANN003
+        raise RuntimeError("upstream 503 from LLM provider")
+
+    create_mock.side_effect = _always_fail
+
+    with _patch_engine(engine):
+        doc = await study_sql_schema(
+            connection_string="postgresql+asyncpg://ignored/ignored",
+            db_type="postgresql",
+            ai_model_resolver=resolver,
+        )
+
+    assert doc.llm_descriptions_available is False
+    assert doc.partial is True  # phase errors recorded
+    # Every table has no description but still has heuristic tags.
+    for t in doc.tables:
+        assert t.description == ""
+        assert isinstance(t.tags, list)
+    # The sanitised LLM error must not leak the model's exception type.
+    llm_errors = [e for e in doc.phase_errors if e.error_key == "LLM_ERROR"]
+    assert llm_errors
+
+
+async def test_no_resolver_keeps_doc_loadable_and_flags_descriptions_unavailable():
+    """EC8 — a missing resolver also flags ``llm_descriptions_available=False``."""
+    from src.services.db_introspection.sql_inspector import study_sql_schema
+
+    engine = _make_sqlite_engine_with_fixtures()
+    with _patch_engine(engine):
+        doc = await study_sql_schema(
+            connection_string="postgresql+asyncpg://ignored/ignored",
+            db_type="postgresql",
+            ai_model_resolver=None,
+        )
+    assert doc.llm_descriptions_available is False
+    assert any(e.error_key == "LLM_UNAVAILABLE" for e in doc.phase_errors)
+
+
+async def test_signal_free_helper_skips_zero_row_zero_sample_tables():
+    """Helper unit test — ``_is_signal_free_for_llm`` answers the right question."""
+    from src.services.db_introspection.schema_doc import ColumnDoc, TableDoc
+    from src.services.db_introspection.sql_inspector import _is_signal_free_for_llm
+
+    def _col(name: str, samples: list[str]) -> ColumnDoc:
+        return ColumnDoc(
+            name=name,
+            type="text",
+            native_type="TEXT",
+            nullable=True,
+            default=None,
+            sample_values=samples,
+            is_pii_candidate=False,
+            inferred=False,
+        )
+
+    empty = TableDoc(
+        name="s.t",
+        kind="table",
+        row_count_estimate=0,
+        primary_key=[],
+        indexes=[],
+        columns=[_col("id", []), _col("label", [])],
+        relationships=[],
+        description="",
+        tags=[],
+    )
+    # Empty table, zero rows, zero samples ⇒ no signal for the LLM.
+    assert _is_signal_free_for_llm(empty) is True
+
+    # row_count_estimate=None: SAMPLING got nothing back from `LIMIT 3`,
+    # which is itself strong evidence of "no rows", so also no-signal.
+    unknown = empty.model_copy(update={"row_count_estimate": None})
+    assert _is_signal_free_for_llm(unknown) is True
+
+    # Any column with a sample value ⇒ we have signal; call the LLM.
+    with_samples = empty.model_copy(
+        update={"columns": [_col("id", []), _col("label", ["foo"])]}
+    )
+    assert _is_signal_free_for_llm(with_samples) is False
+
+    # Positive row count but all columns happen to have empty samples
+    # (e.g. all binary, all NULL) — we still have *some* signal (the
+    # table is populated), so call the LLM.
+    populated_but_no_samples = empty.model_copy(
+        update={"row_count_estimate": 5}
+    )
+    assert _is_signal_free_for_llm(populated_but_no_samples) is False

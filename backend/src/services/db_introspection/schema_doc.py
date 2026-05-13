@@ -214,6 +214,44 @@ class SchemaDocument(_StrictModel):
         default=False,
         description="True if any phase failed but READY_PARTIAL still emitted.",
     )
+    partial_coverage: bool = Field(
+        default=False,
+        description=(
+            "True iff at least one table was skipped or truncated during the "
+            "study (permission-denied tables, identifier rejected for sampling, "
+            "truncated by the per-source cap). Distinct from ``partial`` — the "
+            "study can be ``partial=True`` (e.g. LLM described all tables but "
+            "the corpus summary call failed) without losing coverage. The "
+            "admin viewer surfaces this with a dedicated banner."
+        ),
+    )
+    skipped_tables: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Qualified names (``schema.table`` / ``db.collection``) of tables "
+            "the inspector could not include — typically permission-denied. "
+            "Mirrors the relevant ``phase_errors`` entries but explicit so "
+            "the admin viewer can render a list without parsing messages."
+        ),
+    )
+    truncated_at: int | None = Field(
+        default=None,
+        description=(
+            "When set, the source advertised more relations than the "
+            "per-source cap allowed; the document carries the first N "
+            "(stable order) and ``truncated_at`` records the *full* count "
+            "the source reported."
+        ),
+    )
+    llm_descriptions_available: bool = Field(
+        default=True,
+        description=(
+            "False iff the DESCRIBING phase produced no usable descriptions "
+            "(no resolver wired, or every per-table LLM call failed). The "
+            "admin viewer surfaces this so the absence of descriptions isn't "
+            "confused with a bug."
+        ),
+    )
     phase_errors: list[PhaseError] = Field(default_factory=list)
     tables: list[TableDoc] = Field(default_factory=list)
     summary: str = Field(

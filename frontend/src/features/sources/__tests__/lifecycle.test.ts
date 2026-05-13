@@ -17,12 +17,15 @@ import { describe, expect, it } from 'vitest'
 import {
   PHASE_ORDER,
   type Phase,
+  type SourceKind,
   availabilityBlockers,
   derivePhase,
   isInFlightPhase,
   isPollingPhase,
   lifecycleGatesFor,
+  phaseHint,
   phaseLabel,
+  phaseOrderFor,
   phaseProgress,
 } from '../lifecycle'
 
@@ -255,17 +258,147 @@ describe('derivePhase', () => {
 })
 
 describe('phaseLabel', () => {
-  it('returns a non-empty string for every phase', () => {
-    const phases: Phase[] = [
+  const allPhases: Phase[] = [
+    'pending_upload',
+    'naming',
+    'chunking',
+    'analyzing',
+    'ready',
+    'failed',
+  ]
+
+  it('returns a non-empty string for every phase (default kind = file)', () => {
+    for (const phase of allPhases) {
+      expect(phaseLabel(phase).length).toBeGreaterThan(0)
+    }
+  })
+
+  it.each<SourceKind>(['file', 'database', 'web', 'connector'])(
+    'returns a non-empty string for every phase when kind=%s',
+    (kind) => {
+      for (const phase of allPhases) {
+        expect(phaseLabel(phase, kind).length).toBeGreaterThan(0)
+      }
+    }
+  )
+
+  it('FX23: file source keeps the original upload-centric labels', () => {
+    expect(phaseLabel('pending_upload', 'file')).toBe('Waiting for upload')
+    expect(phaseLabel('naming', 'file')).toBe('Naming with AI')
+    expect(phaseLabel('chunking', 'file')).toBe('Chunking content')
+    expect(phaseLabel('analyzing', 'file')).toBe('Analyzing & indexing')
+    expect(phaseLabel('ready', 'file')).toBe('Ready')
+    expect(phaseLabel('failed', 'file')).toBe('Failed')
+  })
+
+  it('FX23: database source reads "Queued" for pending and "Studying schema" for analyzing', () => {
+    expect(phaseLabel('pending_upload', 'database')).toBe('Queued')
+    expect(phaseLabel('naming', 'database')).toBe('Naming with AI')
+    expect(phaseLabel('analyzing', 'database')).toBe('Studying schema')
+    expect(phaseLabel('ready', 'database')).toBe('Ready')
+    expect(phaseLabel('failed', 'database')).toBe('Failed')
+  })
+
+  it('FX23: web source reads "Crawling content" instead of "Chunking content"', () => {
+    expect(phaseLabel('pending_upload', 'web')).toBe('Queued')
+    expect(phaseLabel('naming', 'web')).toBe('Naming with AI')
+    expect(phaseLabel('chunking', 'web')).toBe('Crawling content')
+    expect(phaseLabel('analyzing', 'web')).toBe('Analyzing & indexing')
+    expect(phaseLabel('ready', 'web')).toBe('Ready')
+    expect(phaseLabel('failed', 'web')).toBe('Failed')
+  })
+
+  it('FX23: connector source mirrors the web labels', () => {
+    // SaaS connectors (Confluence, Notion, etc.) behave like crawlers from
+    // the user's POV — same chips, same copy.
+    for (const phase of allPhases) {
+      expect(phaseLabel(phase, 'connector')).toBe(phaseLabel(phase, 'web'))
+    }
+  })
+
+  it('defaults to the file labels when no kind is passed', () => {
+    for (const phase of allPhases) {
+      expect(phaseLabel(phase)).toBe(phaseLabel(phase, 'file'))
+    }
+  })
+})
+
+describe('phaseHint', () => {
+  const inFlightPhases: ReadonlyArray<Exclude<Phase, 'failed'>> = [
+    'pending_upload',
+    'naming',
+    'chunking',
+    'analyzing',
+    'ready',
+  ]
+
+  it.each<SourceKind>(['file', 'database', 'web', 'connector'])(
+    'returns a non-empty hint for every step phase when kind=%s',
+    (kind) => {
+      for (const phase of inFlightPhases) {
+        expect(phaseHint(phase, kind).length).toBeGreaterThan(0)
+      }
+    }
+  )
+
+  it('database analyzing hint mentions the studying agent', () => {
+    expect(phaseHint('analyzing', 'database')).toMatch(/studying agent/i)
+  })
+
+  it('web chunking hint mentions crawling', () => {
+    expect(phaseHint('chunking', 'web')).toMatch(/crawl/i)
+  })
+
+  it('file pending_upload hint mentions object storage', () => {
+    expect(phaseHint('pending_upload', 'file')).toMatch(/object storage/i)
+  })
+
+  it('defaults to the file hints when no kind is passed', () => {
+    for (const phase of inFlightPhases) {
+      expect(phaseHint(phase)).toBe(phaseHint(phase, 'file'))
+    }
+  })
+})
+
+describe('phaseOrderFor', () => {
+  it('file source walks all five chips including chunking', () => {
+    expect(phaseOrderFor('file')).toEqual([
       'pending_upload',
       'naming',
       'chunking',
       'analyzing',
       'ready',
-      'failed',
-    ]
-    for (const phase of phases) {
-      expect(phaseLabel(phase).length).toBeGreaterThan(0)
+    ])
+  })
+
+  it('web source walks all five chips including chunking', () => {
+    expect(phaseOrderFor('web')).toEqual([
+      'pending_upload',
+      'naming',
+      'chunking',
+      'analyzing',
+      'ready',
+    ])
+  })
+
+  it('connector source walks the same five chips as web', () => {
+    expect(phaseOrderFor('connector')).toEqual(phaseOrderFor('web'))
+  })
+
+  it('database source drops the chunking chip — derivePhase never produces it', () => {
+    expect(phaseOrderFor('database')).toEqual([
+      'pending_upload',
+      'naming',
+      'analyzing',
+      'ready',
+    ])
+    expect(phaseOrderFor('database')).not.toContain('chunking')
+  })
+
+  it('every kind ends at "ready"', () => {
+    for (const kind of ['file', 'database', 'web', 'connector'] as const) {
+      const order = phaseOrderFor(kind)
+      expect(order[order.length - 1]).toBe('ready')
     }
   })
 })
@@ -353,6 +486,7 @@ describe('lifecycleGatesFor — gate matrix', () => {
     expect(g.canMakeAvailableToUsers).toBe(false)
     expect(g.canEditConfig).toBe(true)
   })
+
 })
 
 describe('shouldPollSourceLifecycle', () => {

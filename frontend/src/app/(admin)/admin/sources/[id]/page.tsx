@@ -437,42 +437,70 @@ export default function SourceDetailPage() {
         <div className="flex flex-col items-end gap-2">
           <div className="flex flex-wrap items-center gap-2">
             <StatusBadge status={source.status} />
-            <TooltipProvider delayDuration={150}>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <span>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() =>
-                        syncMutation.mutate(id, {
-                          onSuccess: (job) => {
-                            trackSessionJob(job)
-                            toast.success('Sync started')
-                          },
-                          onError: (err) => toast.error(getErrorMessage(err)),
-                        })
-                      }
-                      disabled={syncMutation.isPending || !lifecycle.canSyncNow}
-                      aria-label={
-                        isDbLiveSource
-                          ? `Re-study schema for ${source.name}`
-                          : `Sync source ${source.name}`
-                      }
-                      data-testid="header-sync-now"
-                    >
-                      <RefreshCwIcon className="mr-1.5 h-4 w-4" />
-                      {isDbLiveSource ? 'Re-study schema' : 'Sync now'}
-                    </Button>
-                  </span>
-                </TooltipTrigger>
-                {!lifecycle.canSyncNow && lifecycle.syncNowReason ? (
-                  <TooltipContent side="bottom" className="max-w-[260px] text-xs">
-                    {lifecycle.syncNowReason}
-                  </TooltipContent>
-                ) : null}
-              </Tooltip>
-            </TooltipProvider>
+            {/* U16 — When a sync is in flight, render "Stop sync" in place
+                of the disabled primary button. The previous behaviour (a
+                disabled button with a tooltip explaining "wait for the
+                worker") was a dead end; turning it into an action restores
+                admin agency. The confirm dialog protects against misclicks. */}
+            {lifecycle.canStopSync ? (
+              <Button
+                variant="destructive"
+                size="sm"
+                onClick={() => setConfirmStopSync(true)}
+                disabled={cancelSyncMutation.isPending}
+                aria-label={`Stop in-progress sync for ${source.name}`}
+                data-testid="header-stop-sync"
+              >
+                {cancelSyncMutation.isPending ? (
+                  <>
+                    <Loader2Icon className="mr-1.5 h-4 w-4 animate-spin" aria-hidden />
+                    Cancelling…
+                  </>
+                ) : (
+                  <>
+                    <StopCircleIcon className="mr-1.5 h-4 w-4" />
+                    Stop sync
+                  </>
+                )}
+              </Button>
+            ) : (
+              <TooltipProvider delayDuration={150}>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <span>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() =>
+                          syncMutation.mutate(id, {
+                            onSuccess: (job) => {
+                              trackSessionJob(job)
+                              toast.success('Sync started')
+                            },
+                            onError: (err) => toast.error(getErrorMessage(err)),
+                          })
+                        }
+                        disabled={syncMutation.isPending || !lifecycle.canSyncNow}
+                        aria-label={
+                          isDbLiveSource
+                            ? `Re-study schema for ${source.name}`
+                            : `Sync source ${source.name}`
+                        }
+                        data-testid="header-sync-now"
+                      >
+                        <RefreshCwIcon className="mr-1.5 h-4 w-4" />
+                        {isDbLiveSource ? 'Re-study schema' : 'Sync now'}
+                      </Button>
+                    </span>
+                  </TooltipTrigger>
+                  {!lifecycle.canSyncNow && lifecycle.syncNowReason ? (
+                    <TooltipContent side="bottom" className="max-w-[260px] text-xs">
+                      {lifecycle.syncNowReason}
+                    </TooltipContent>
+                  ) : null}
+                </Tooltip>
+              </TooltipProvider>
+            )}
             {isConnectionTestable(source.source_type) && (
               <Button
                 variant="outline"
@@ -555,7 +583,10 @@ export default function SourceDetailPage() {
               <CardTitle className="text-sm font-medium">Lifecycle</CardTitle>
             </CardHeader>
             <CardContent className="space-y-3">
-              <LifecycleStepper phase={lifecycle.phase} />
+              <LifecycleStepper
+                phase={lifecycle.phase}
+                sourceKind={sourceKindOf(source.source_type)}
+              />
               <LifecycleProgressBar
                 phase={lifecycle.phase}
                 detail={
@@ -672,6 +703,9 @@ export default function SourceDetailPage() {
                 onError: (err) => toast.error(getErrorMessage(err)),
               })
             }
+            canStopSync={lifecycle.canStopSync}
+            isCancelling={cancelSyncMutation.isPending}
+            onStopSync={() => setConfirmStopSync(true)}
             isTestingConnection={testConnectionMutation.isPending}
             onTestConnection={() => testConnectionMutation.mutate(id)}
             testConnectionResult={
@@ -875,6 +909,10 @@ interface SyncHeaderBandProps {
   canSyncNow?: boolean
   /** Reason the gate is closed; rendered as a tooltip. */
   syncNowReason?: string
+  /** U16 — when true, render "Stop sync" in place of the primary button. */
+  canStopSync?: boolean
+  isCancelling?: boolean
+  onStopSync?: () => void
 }
 
 function SyncHeaderBand({
@@ -888,10 +926,37 @@ function SyncHeaderBand({
   isDbLiveSource,
   canSyncNow = true,
   syncNowReason = '',
+  canStopSync = false,
+  isCancelling = false,
+  onStopSync,
 }: SyncHeaderBandProps) {
   const showTestConnection = isConnectionTestable(sourceType)
   const primaryLabel = isDbLiveSource ? 'Re-study schema' : 'Sync now'
   const primaryActiveLabel = isDbLiveSource ? 'Studying…' : 'Starting…'
+
+  const stopButton = (
+    <Button
+      variant="destructive"
+      size="sm"
+      onClick={onStopSync}
+      disabled={isCancelling || onStopSync === undefined}
+      className="w-full sm:w-auto"
+      aria-label={`Stop in-progress sync for ${sourceName}`}
+      data-testid="sync-header-stop"
+    >
+      {isCancelling ? (
+        <>
+          <Loader2Icon className="mr-1.5 h-4 w-4 animate-spin" aria-hidden />
+          Cancelling…
+        </>
+      ) : (
+        <>
+          <StopCircleIcon className="mr-1.5 h-4 w-4" aria-hidden />
+          Stop sync
+        </>
+      )}
+    </Button>
+  )
 
   const syncButton = (
     <Button
@@ -926,7 +991,9 @@ function SyncHeaderBand({
       className="flex flex-col gap-2 rounded-md border bg-card px-3 py-2 sm:flex-row sm:items-center sm:gap-3"
     >
       <div className="flex flex-wrap items-center gap-2">
-        {!canSyncNow && syncNowReason ? (
+        {canStopSync ? (
+          stopButton
+        ) : !canSyncNow && syncNowReason ? (
           <TooltipProvider delayDuration={150}>
             <Tooltip>
               <TooltipTrigger asChild>

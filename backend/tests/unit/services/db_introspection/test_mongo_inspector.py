@@ -446,20 +446,24 @@ async def test_no_resolver_skips_describing_and_marks_partial() -> None:
     assert all(isinstance(t.tags, list) and t.tags for t in doc.tables)
 
 
-async def test_no_collections_raises_phase_error() -> None:
-    from src.services.db_introspection import SchemaStudyPhaseError
+async def test_only_system_collections_lands_ready_empty() -> None:
+    """Inventory full of ``system.*`` filters down to zero — still READY (empty).
+
+    Pre-FX24 this raised ``NO_COLLECTIONS`` as a fatal phase error; after
+    FX24 an empty database (or one that only exposes system collections)
+    lands a valid empty SchemaDocument so the admin viewer can offer a
+    re-study CTA without bouncing the source into INVENTORY_FAILED.
+    """
     from src.services.db_introspection.mongo_inspector import study_mongo_schema
 
     factory, _ = _factory_for(_FakeDatabase({"system.indexes": []}))
-    with pytest.raises(SchemaStudyPhaseError) as excinfo:
-        await study_mongo_schema(
-            uri="mongodb://localhost:27017",
-            database="app",
-            ai_model_resolver=None,
-            _client_factory=factory,
-        )
-    assert excinfo.value.phase == "INVENTORY"
-    assert excinfo.value.error_key == "NO_COLLECTIONS"
+    doc = await study_mongo_schema(
+        uri="mongodb://localhost:27017",
+        database="app",
+        ai_model_resolver=None,
+        _client_factory=factory,
+    )
+    assert doc.tables == []
 
 
 async def test_ping_failure_raises_connecting_phase_error() -> None:
@@ -544,6 +548,186 @@ def test_coalesce_field_type_handles_mixed_and_missing() -> None:
     assert _coalesce_field_type([None, None]) == "unknown"
     assert _coalesce_field_type([1, "x"]) == "unknown"  # disagreement
     assert _coalesce_field_type([[1], ["x"]]) == "array<unknown>"  # all arrays
+
+
+# ---------------------------------------------------------------------------
+# FX24 — edge-case hardening
+# ---------------------------------------------------------------------------
+
+
+async def test_empty_database_lands_ready_with_zero_collections() -> None:
+    """EC1 — a Mongo database with no user collections must land READY.
+
+    Previously the inspector raised ``NO_COLLECTIONS`` as a fatal phase
+    error. After FX24 the inspector returns a valid SchemaDocument with
+    ``tables=[]`` so the admin viewer can render the empty-DB hint.
+    """
+    from src.services.db_introspection.mongo_inspector import study_mongo_schema
+
+    factory, _ = _factory_for(_FakeDatabase({}))
+    doc = await study_mongo_schema(
+        uri="mongodb://localhost:27017",
+        database="app",
+        ai_model_resolver=None,
+        _client_factory=factory,
+    )
+    assert doc.dialect == "mongodb"
+    assert doc.tables == []
+    assert doc.partial_coverage is False
+    assert doc.skipped_tables == []
+    assert doc.truncated_at is None
+    assert doc.llm_descriptions_available is True
+    assert len(doc.fingerprint) == 64
+
+
+async def test_truncated_at_set_when_inventory_exceeds_cap(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """EC4 — too many Mongo collections records truncated_at + partial_coverage."""
+    from src.services.db_introspection import mongo_inspector as mi
+    from src.services.db_introspection.mongo_inspector import study_mongo_schema
+
+    # Cap at 1 so the two-collection sample DB trips the truncation path.
+    monkeypatch.setattr(mi, "_MAX_COLLECTIONS", 1)
+    factory, _ = _factory_for(_sample_db())
+    doc = await study_mongo_schema(
+        uri="mongodb://localhost:27017",
+        database="app",
+        ai_model_resolver=None,
+        _client_factory=factory,
+    )
+    # Both user collections satisfied the system.* filter, so total_seen=2.
+    assert doc.truncated_at == 2
+    assert len(doc.tables) == 1
+    assert doc.partial_coverage is True
+
+
+async def test_permission_denied_columns_flags_skipped_tables() -> None:
+    """EC3 — a per-collection failure adds the collection to skipped_tables."""
+    from src.services.db_introspection.mongo_inspector import study_mongo_schema
+
+    db = _FakeDatabase(
+        {"users": [{"_id": _FakeObjectId(), "email": "x@y.com"}], "secret": []},
+        find_errors={"secret": PermissionError("not authorized on app.secret")},
+    )
+    factory, _ = _factory_for(db)
+    resolver, _ = _stub_resolver()
+
+    doc = await study_mongo_schema(
+        uri="mongodb://localhost:27017",
+        database="app",
+        ai_model_resolver=resolver,
+        _client_factory=factory,
+    )
+
+    assert doc.partial_coverage is True
+    assert any(name.endswith("secret") for name in doc.skipped_tables)
+    # The collection is dropped; users survives.
+    remaining = {t.name.split(".", 1)[1] for t in doc.tables}
+    assert "users" in remaining
+    assert "secret" not in remaining
+
+
+async def test_llm_total_failure_flags_descriptions_unavailable() -> None:
+    """EC8 — when every per-collection LLM call fails, flag descriptions unavailable."""
+    from src.services.db_introspection.mongo_inspector import study_mongo_schema
+
+    factory, _ = _factory_for(_sample_db())
+    resolver, create_mock = _stub_resolver()
+
+    async def _always_fail(**_kwargs: Any) -> Any:
+        raise RuntimeError("LLM upstream timeout")
+
+    create_mock.side_effect = _always_fail
+
+    doc = await study_mongo_schema(
+        uri="mongodb://localhost:27017",
+        database="app",
+        ai_model_resolver=resolver,
+        _client_factory=factory,
+    )
+
+    assert doc.llm_descriptions_available is False
+    assert doc.partial is True
+    for t in doc.tables:
+        assert t.description == ""
+        assert isinstance(t.tags, list)
+
+
+async def test_no_resolver_flags_descriptions_unavailable() -> None:
+    """EC8 — no resolver wired ⇒ llm_descriptions_available=False (with tables)."""
+    from src.services.db_introspection.mongo_inspector import study_mongo_schema
+
+    factory, _ = _factory_for(_sample_db())
+    doc = await study_mongo_schema(
+        uri="mongodb://localhost:27017",
+        database="app",
+        ai_model_resolver=None,
+        _client_factory=factory,
+    )
+    assert doc.llm_descriptions_available is False
+    assert any(e.error_key == "LLM_UNAVAILABLE" for e in doc.phase_errors)
+
+
+async def test_signal_free_helper_skips_empty_collections() -> None:
+    """Helper unit test — Mongo's ``_is_signal_free_for_llm`` answers right."""
+    from src.services.db_introspection.mongo_inspector import _is_signal_free_for_llm
+    from src.services.db_introspection.schema_doc import ColumnDoc, TableDoc
+
+    def _col(name: str, samples: list[str]) -> ColumnDoc:
+        return ColumnDoc(
+            name=name,
+            type="text",
+            native_type="string",
+            nullable=True,
+            default=None,
+            sample_values=samples,
+            is_pii_candidate=False,
+            inferred=True,
+        )
+
+    no_cols = TableDoc(
+        name="app.empty",
+        kind="collection",
+        row_count_estimate=None,
+        primary_key=[],
+        indexes=[],
+        columns=[],
+        relationships=[],
+        description="",
+        tags=[],
+    )
+    assert _is_signal_free_for_llm(no_cols) is True
+
+    with_samples = no_cols.model_copy(
+        update={"columns": [_col("x", ["a"])]}
+    )
+    assert _is_signal_free_for_llm(with_samples) is False
+
+
+async def test_empty_collections_skip_llm_for_no_signal() -> None:
+    """EC2 — a collection that COLUMNS sampled but found no docs in is skipped."""
+    from src.services.db_introspection.mongo_inspector import study_mongo_schema
+
+    # Both collections have zero documents — COLUMNS phase gets nothing
+    # back and produces no fields.
+    db = _FakeDatabase({"empty_a": [], "empty_b": []})
+    factory, _ = _factory_for(db)
+    resolver, create_mock = _stub_resolver()
+
+    doc = await study_mongo_schema(
+        uri="mongodb://localhost:27017",
+        database="app",
+        ai_model_resolver=resolver,
+        _client_factory=factory,
+    )
+
+    # Each empty collection produced a NO_SIGNAL phase error and skipped
+    # the per-collection LLM call. The summary call may still fire.
+    no_signal = [e for e in doc.phase_errors if e.error_key == "NO_SIGNAL"]
+    assert len(no_signal) == 2
+    # Per-collection LLM calls: 0. Summary call: at most 1.
+    assert create_mock.await_count <= 1
 
 
 async def test_mongodb_connector_study_schema_delegates(monkeypatch: pytest.MonkeyPatch) -> None:

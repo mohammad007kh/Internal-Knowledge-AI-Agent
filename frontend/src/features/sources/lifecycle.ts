@@ -24,6 +24,7 @@
  * matrix in `lifecycleGatesFor`.
  */
 
+import type { SourceKind } from '@/app/(admin)/admin/sources/[id]/_components/sourceTypeMatrix'
 import type { SourceDetail, SourceListItem } from '@/lib/api/sources'
 
 // ---------------------------------------------------------------------------
@@ -38,8 +39,18 @@ export type Phase =
   | 'ready'
   | 'failed'
 
-/** Stable order used by the Stepper component. `failed` is rendered as a tone
- * on the otherwise-active step, not as a separate cell. */
+/** Re-exported so callers can write `import { SourceKind } from
+ * '@/features/sources/lifecycle'` without dipping into the route-private
+ * `_components/sourceTypeMatrix` path. The canonical definition lives in
+ * sourceTypeMatrix — this is just a passthrough. */
+export type { SourceKind } from '@/app/(admin)/admin/sources/[id]/_components/sourceTypeMatrix'
+
+/** Stable order used by the Stepper component for file/web/connector sources.
+ * `failed` is rendered as a tone on the otherwise-active step, not as a
+ * separate cell. DB sources omit `chunking` entirely — they have no documents
+ * to chunk; see `phaseOrderFor`. Kept exported for back-compat with the few
+ * call sites (LifecycleProgressBar, lifecycle tests) that walk every phase
+ * regardless of source kind. */
 export const PHASE_ORDER: ReadonlyArray<Exclude<Phase, 'failed'>> = [
   'pending_upload',
   'naming',
@@ -48,22 +59,149 @@ export const PHASE_ORDER: ReadonlyArray<Exclude<Phase, 'failed'>> = [
   'ready',
 ] as const
 
-/** Display label used in chips and progress bars. */
-export function phaseLabel(phase: Phase): string {
-  switch (phase) {
-    case 'pending_upload':
-      return 'Waiting for upload'
-    case 'naming':
-      return 'Naming with AI'
-    case 'chunking':
-      return 'Chunking content'
-    case 'analyzing':
-      return 'Analyzing & indexing'
-    case 'ready':
-      return 'Ready'
-    case 'failed':
-      return 'Failed'
-  }
+/** Phase order for the DB stepper. DB sources never enter `chunking` per
+ * `derivePhase`'s rule 2 (schema_status STUDYING → analyzing directly), so
+ * showing the chunking chip would be a dead step the worker can never reach. */
+const PHASE_ORDER_DATABASE: ReadonlyArray<Exclude<Phase, 'failed'>> = [
+  'pending_upload',
+  'naming',
+  'analyzing',
+  'ready',
+] as const
+
+/**
+ * Per-source-kind phase order for the Stepper. File / web / connector all
+ * share the same 5-chip strip; databases drop the chunking chip.
+ */
+export function phaseOrderFor(
+  kind: SourceKind
+): ReadonlyArray<Exclude<Phase, 'failed'>> {
+  if (kind === 'database') return PHASE_ORDER_DATABASE
+  // file, web, connector — all five chips.
+  return PHASE_ORDER
+}
+
+// ---------------------------------------------------------------------------
+// Per-source-kind label + hint tables
+//
+// FX23: the original phaseLabel was source-agnostic ("Waiting for upload" for
+// every source) which is nonsense for DB and web sources. We index labels by
+// `(phase, kind)` so the stepper shows what the worker is actually doing for
+// each kind:
+//
+//   • file       — upload → naming → chunking → analyzing → ready
+//   • database   — queued → naming → studying schema → ready
+//   • web        — queued → naming → crawling → analyzing → ready
+//   • connector  — same shape as web
+//
+// connectors mirror the web labels because SaaS connectors (Confluence,
+// Notion, etc.) all behave like crawlers from the user's POV.
+// ---------------------------------------------------------------------------
+
+type LabelTable = Record<Phase, string>
+
+const FILE_LABELS: LabelTable = {
+  pending_upload: 'Waiting for upload',
+  naming: 'Naming with AI',
+  chunking: 'Chunking content',
+  analyzing: 'Analyzing & indexing',
+  ready: 'Ready',
+  failed: 'Failed',
+}
+
+const DATABASE_LABELS: LabelTable = {
+  pending_upload: 'Queued',
+  naming: 'Naming with AI',
+  // `chunking` is dropped from the DB stepper but the label has to exist for
+  // type completeness. If we ever did land in `chunking` for a DB source it
+  // would be a bug — surface a neutral label so we don't crash, but never
+  // show this label in the normal stepper render.
+  chunking: 'Chunking content',
+  analyzing: 'Studying schema',
+  ready: 'Ready',
+  failed: 'Failed',
+}
+
+const WEB_LABELS: LabelTable = {
+  pending_upload: 'Queued',
+  naming: 'Naming with AI',
+  chunking: 'Crawling content',
+  analyzing: 'Analyzing & indexing',
+  ready: 'Ready',
+  failed: 'Failed',
+}
+
+// Connectors share the web labels — SaaS connectors are crawler-style.
+const CONNECTOR_LABELS: LabelTable = WEB_LABELS
+
+const LABELS_BY_KIND: Record<SourceKind, LabelTable> = {
+  file: FILE_LABELS,
+  database: DATABASE_LABELS,
+  web: WEB_LABELS,
+  connector: CONNECTOR_LABELS,
+}
+
+type HintTable = Record<Exclude<Phase, 'failed'>, string>
+
+const FILE_HINTS: HintTable = {
+  pending_upload: 'Files are landing in object storage.',
+  naming: 'The AI is drafting a name and description.',
+  chunking: 'Splitting the content into retrieval-friendly chunks.',
+  analyzing: 'Embedding chunks and finalizing the index.',
+  ready: 'This source is ready to query.',
+}
+
+const DATABASE_HINTS: HintTable = {
+  pending_upload: 'Sync queued — waiting for a worker.',
+  naming: 'The AI is drafting a name and description.',
+  // See note on DATABASE_LABELS.chunking — never rendered in normal flow.
+  chunking: 'Splitting the content into retrieval-friendly chunks.',
+  analyzing:
+    'The studying agent is cataloguing tables + sampling columns.',
+  ready: 'This source is ready to query.',
+}
+
+const WEB_HINTS: HintTable = {
+  pending_upload: 'Sync queued — waiting for a worker.',
+  naming: 'The AI is drafting a name and description.',
+  chunking: 'Crawling pages from the URL.',
+  analyzing: 'Embedding chunks and finalizing the index.',
+  ready: 'This source is ready to query.',
+}
+
+const CONNECTOR_HINTS: HintTable = WEB_HINTS
+
+const HINTS_BY_KIND: Record<SourceKind, HintTable> = {
+  file: FILE_HINTS,
+  database: DATABASE_HINTS,
+  web: WEB_HINTS,
+  connector: CONNECTOR_HINTS,
+}
+
+/**
+ * Display label used in chips and progress bars.
+ *
+ * The `kind` parameter defaults to `'file'` so older call sites that haven't
+ * been migrated (eg LifecycleProgressBar, which U16 still owns) keep the
+ * existing file-centric labels — no behavioural change for them.
+ */
+export function phaseLabel(phase: Phase, kind: SourceKind = 'file'): string {
+  return LABELS_BY_KIND[kind][phase]
+}
+
+/**
+ * Hint string shown in the Stepper tooltip while a step is active.
+ *
+ * `failed` has no hint of its own — the StepChip composes a "Failed during
+ * {label}" string at render time, so this table only covers in-flight + ready
+ * phases. Defaults to `'file'` for the same back-compat reason as
+ * `phaseLabel`.
+ */
+export function phaseHint(
+  phase: Exclude<Phase, 'failed'>,
+  kind: SourceKind = 'file'
+): string {
+  return HINTS_BY_KIND[kind][phase]
 }
 
 /**

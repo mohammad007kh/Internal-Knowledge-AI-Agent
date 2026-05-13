@@ -566,6 +566,35 @@ export interface SchemaDocument {
   agent_version: string
   study_duration_ms: number
   partial: boolean
+  /**
+   * True iff at least one table was skipped or truncated during the study
+   * (permission-denied tables, unsafe identifier, source bigger than the
+   * per-source cap). Distinct from `partial`: a study can be `partial=true`
+   * (e.g. LLM corpus summary failed) without losing coverage.
+   *
+   * Optional on the wire: documents stored before FX24 default this to
+   * `false` on the backend; components must degrade gracefully if it's
+   * missing from a stale fixture.
+   */
+  partial_coverage?: boolean
+  /**
+   * Qualified names (`schema.table` / `db.collection`) of tables the
+   * inspector could not include. Mirrors `phase_errors` but enumerated so
+   * the viewer can render a list without parsing messages.
+   */
+  skipped_tables?: string[]
+  /**
+   * When set, the source advertised more relations than the per-source
+   * cap. The document carries the first N (stable order); `truncated_at`
+   * is the full count the source reported.
+   */
+  truncated_at?: number | null
+  /**
+   * False iff the DESCRIBING phase produced no usable descriptions (no
+   * resolver wired, or every per-table LLM call failed). The viewer
+   * surfaces this so missing descriptions aren't confused with a bug.
+   */
+  llm_descriptions_available?: boolean
   phase_errors: PhaseError[]
   tables: TableDoc[]
   summary: string
