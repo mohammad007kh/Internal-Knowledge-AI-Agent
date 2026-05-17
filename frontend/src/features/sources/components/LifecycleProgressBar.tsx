@@ -14,7 +14,13 @@
  * `derivePhase(source)`.
  */
 
-import { type Phase, isInFlightPhase, phaseLabel, phaseProgress } from '@/features/sources/lifecycle'
+import {
+  type Phase,
+  type SourceKind,
+  isInFlightPhase,
+  phaseLabel,
+  phaseProgress,
+} from '@/features/sources/lifecycle'
 import { cn } from '@/lib/utils'
 
 interface LifecycleProgressBarProps {
@@ -28,6 +34,13 @@ interface LifecycleProgressBarProps {
    * stepper. Default `false` keeps the existing copy for legacy callers.
    */
   hasUpload?: boolean
+  /**
+   * FX29b — the source's coarse kind (file / web / database / connector).
+   * Drives `phaseLabel` so a web_url source in `pending_upload` reads
+   * "Queued" instead of the file-pipeline "Waiting for upload". Defaults
+   * to `'file'` so older call sites keep the legacy file-centric copy.
+   */
+  sourceKind?: SourceKind
 }
 
 export function LifecycleProgressBar({
@@ -35,13 +48,14 @@ export function LifecycleProgressBar({
   className,
   detail,
   hasUpload = false,
+  sourceKind = 'file',
 }: LifecycleProgressBarProps) {
   // FX16 contract: progress bar disappears when the process is done.
   if (!isInFlightPhase(phase)) return null
 
   const percent = phaseProgress(phase)
   const indeterminate = phase === 'pending_upload'
-  const label = phaseLabel(phase, 'file', { hasUpload })
+  const label = phaseLabel(phase, sourceKind, { hasUpload })
 
   return (
     <div

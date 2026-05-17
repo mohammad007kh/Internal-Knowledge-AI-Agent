@@ -24,7 +24,10 @@
  * matrix in `lifecycleGatesFor`.
  */
 
-import type { SourceKind } from '@/app/(admin)/admin/sources/[id]/_components/sourceTypeMatrix'
+import {
+  type SourceKind,
+  sourceKindOf,
+} from '@/app/(admin)/admin/sources/[id]/_components/sourceTypeMatrix'
 import type { SourceDetail, SourceListItem } from '@/lib/api/sources'
 
 // ---------------------------------------------------------------------------
@@ -440,15 +443,77 @@ export interface LifecycleGates {
 }
 
 /**
- * Static gate matrix from `Phase` only. Most controls collapse to the same
- * "is the source quiet?" question. We expose them as separate booleans so
- * callers don't have to remember which one to use.
+ * Per-source-kind in-flight verb table for the gate-matrix copy (FX29b).
+ *
+ * Before FX29b the gate matrix hard-coded file-pipeline language ("finish
+ * uploading the files", "finish chunking the content") for every source
+ * type. A web_url source in `pending_upload` would surface "Wait for the
+ * worker to finish uploading the files" — confusing because there is no
+ * upload, the worker is queueing the initial crawl.
+ *
+ * The `file` row preserves the U14/FX16 strings byte-for-byte so the
+ * existing tests stay green; web / connector / database get verbs that
+ * match what the worker is actually doing:
+ *
+ *   • file       — upload → chunking → indexing
+ *   • web/connector — queueing crawl → crawling → indexing
+ *   • database   — queueing schema study → studying schema (chunking
+ *     is defensive only; DB sources skip the chunking phase in
+ *     derivePhase but the table needs the slot for type completeness).
+ */
+type InFlightPhase = Exclude<Phase, 'failed' | 'ready'>
+
+const IN_FLIGHT_VERBS: Record<SourceKind, Record<InFlightPhase, string>> = {
+  file: {
+    pending_upload: 'finish uploading the files',
+    naming: 'finish drafting the name',
+    chunking: 'finish chunking the content',
+    analyzing: 'finish indexing',
+  },
+  web: {
+    pending_upload: 'finish queueing the initial crawl',
+    naming: 'finish drafting the name',
+    chunking: 'finish crawling the pages',
+    analyzing: 'finish indexing',
+  },
+  connector: {
+    // SaaS connectors (Confluence, SharePoint, Notion, …) are crawler-style
+    // from the user's POV — mirror the web verbs.
+    pending_upload: 'finish queueing the initial crawl',
+    naming: 'finish drafting the name',
+    chunking: 'finish crawling the pages',
+    analyzing: 'finish indexing',
+  },
+  database: {
+    pending_upload: 'finish queueing the schema study',
+    naming: 'finish drafting the name',
+    // Defensive — derivePhase routes DB sources straight from `naming`
+    // (or `pending_upload`) to `analyzing`, so `chunking` should never
+    // be observed for a DB source. The verb only exists for type
+    // completeness; if it ever surfaces it should still read like
+    // schema-study language rather than file/crawler copy.
+    chunking: 'finish studying the schema',
+    analyzing: 'finish studying the schema',
+  },
+}
+
+/**
+ * Static gate matrix from `Phase` (+ optional source `kind`). Most controls
+ * collapse to the same "is the source quiet?" question. We expose them as
+ * separate booleans so callers don't have to remember which one to use.
+ *
+ * The `kind` parameter defaults to `'file'` so older call sites that
+ * haven't been migrated keep the existing file-centric copy — no
+ * behavioural change for them (FX29b).
  *
  * Note: the AVAILABILITY gate is the AND of `phase === 'ready'` AND the
  * existing naming/description guards on the Settings page. The naming guard
  * lives in `availabilityBlockers` below.
  */
-export function lifecycleGatesFor(phase: Phase): LifecycleGates {
+export function lifecycleGatesFor(
+  phase: Phase,
+  kind: SourceKind = 'file'
+): LifecycleGates {
   const inFlight =
     phase === 'pending_upload' ||
     phase === 'naming' ||
@@ -470,14 +535,7 @@ export function lifecycleGatesFor(phase: Phase): LifecycleGates {
   }
 
   if (inFlight) {
-    const verb =
-      phase === 'pending_upload'
-        ? 'finish uploading the files'
-        : phase === 'naming'
-          ? 'finish drafting the name'
-          : phase === 'chunking'
-            ? 'finish chunking the content'
-            : 'finish indexing'
+    const verb = IN_FLIGHT_VERBS[kind][phase as InFlightPhase]
     return {
       canSyncNow: false,
       syncNowReason: `Wait for the worker to ${verb}.`,
@@ -583,7 +641,9 @@ export function useLifecycle(source: SourceLike | null | undefined): UseLifecycl
   // Safe fallback for the loading state — surface "naming" so every gate
   // stays disabled. Callers should still gate on `isLoading` from the query,
   // but this prevents a flash of enabled controls if the data is briefly
-  // undefined.
+  // undefined. `kind` is unknown here; the default 'file' keeps the legacy
+  // copy ("finish drafting the name") — fine because we don't know the
+  // kind yet.
   if (!source) {
     const phase: Phase = 'naming'
     const gates = lifecycleGatesFor(phase)
@@ -595,7 +655,11 @@ export function useLifecycle(source: SourceLike | null | undefined): UseLifecycl
     }
   }
   const phase = derivePhase(source)
-  const gates = lifecycleGatesFor(phase)
+  // FX29b — derive the kind from the wire source_type so the gate-matrix
+  // copy ("Wait for the worker to …") matches the actual pipeline (web →
+  // crawl verbs, database → schema-study verbs).
+  const kind = sourceKindOf(source.source_type)
+  const gates = lifecycleGatesFor(phase, kind)
   const approvalBlockers = availabilityBlockers(source)
   // U16 — upgrade the phase-only `canStopSync` to the source-aware answer.
   // The Stop button is only safe to show when there is a real non-terminal

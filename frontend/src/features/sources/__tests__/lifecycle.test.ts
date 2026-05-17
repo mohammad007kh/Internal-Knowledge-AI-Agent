@@ -544,6 +544,107 @@ describe('lifecycleGatesFor — gate matrix', () => {
   })
 })
 
+describe('lifecycleGatesFor — FX29b per-kind verbs', () => {
+  // Before FX29b every non-`ready`/non-`failed` phase surfaced
+  // file-pipeline copy ("finish uploading the files", "finish chunking
+  // the content") regardless of source_type. A web_url source mid-crawl
+  // would read "Wait for the worker to finish uploading the files",
+  // which is wrong and confusing.
+
+  it('web source in pending_upload says queueing the initial crawl, not uploading', () => {
+    const g = lifecycleGatesFor('pending_upload', 'web')
+    expect(g.availabilityReason).toContain('queueing the initial crawl')
+    expect(g.syncNowReason).toContain('queueing the initial crawl')
+    expect(g.chatReason).toContain('queueing the initial crawl')
+    expect(g.availabilityReason).not.toMatch(/uploading the files/i)
+  })
+
+  it('web source in chunking talks about crawling, not chunking', () => {
+    const g = lifecycleGatesFor('chunking', 'web')
+    expect(g.availabilityReason).toContain('crawling the pages')
+    expect(g.availabilityReason).not.toMatch(/chunking the content/i)
+  })
+
+  it('connector source mirrors the web verbs across every in-flight phase', () => {
+    for (const phase of ['pending_upload', 'naming', 'chunking', 'analyzing'] as const) {
+      expect(lifecycleGatesFor(phase, 'connector')).toEqual(
+        lifecycleGatesFor(phase, 'web')
+      )
+    }
+  })
+
+  it('database source in analyzing says studying the schema (all three copies)', () => {
+    const g = lifecycleGatesFor('analyzing', 'database')
+    expect(g.availabilityReason).toContain('studying the schema')
+    expect(g.chatReason).toContain('studying the schema')
+    expect(g.syncNowReason).toContain('studying the schema')
+    expect(g.availabilityReason).not.toMatch(/indexing/i)
+  })
+
+  it('database source in pending_upload says queueing the schema study', () => {
+    const g = lifecycleGatesFor('pending_upload', 'database')
+    expect(g.availabilityReason).toContain('queueing the schema study')
+    expect(g.availabilityReason).not.toMatch(/uploading the files/i)
+  })
+
+  it('file kind is the default and preserves the legacy file verbs', () => {
+    // Back-compat: any pre-FX29b call site without a kind argument must
+    // observe identical strings to the explicit `'file'` call.
+    expect(lifecycleGatesFor('pending_upload')).toEqual(
+      lifecycleGatesFor('pending_upload', 'file')
+    )
+    expect(
+      lifecycleGatesFor('pending_upload', 'file').availabilityReason
+    ).toContain('uploading the files')
+    expect(
+      lifecycleGatesFor('chunking', 'file').availabilityReason
+    ).toContain('chunking the content')
+  })
+
+  it('failed and ready rows are kind-independent (no inFlight verb used)', () => {
+    // The `failed` and `ready` branches don't touch IN_FLIGHT_VERBS, so
+    // varying `kind` must produce identical gate objects. Catches a
+    // regression where someone wires `kind` into the wrong branch.
+    for (const phase of ['failed', 'ready'] as const) {
+      const file = lifecycleGatesFor(phase, 'file')
+      const web = lifecycleGatesFor(phase, 'web')
+      const db = lifecycleGatesFor(phase, 'database')
+      expect(file).toEqual(web)
+      expect(file).toEqual(db)
+    }
+  })
+})
+
+describe('useLifecycle — FX29b threads kind through to gate copy', () => {
+  // Smoke-check that the React hook wrapper actually plumbs the wire
+  // source_type → sourceKindOf → lifecycleGatesFor(kind). Without this
+  // test the per-kind verbs would only fire from direct callers.
+  it('web_url source mid-crawl surfaces the web-pipeline verb', async () => {
+    const { useLifecycle } = await import('../lifecycle')
+    const s = makeDetail({
+      source_type: 'web_url',
+      has_upload: false,
+      latest_job: makeJob({ status: 'running', chunks_created: 0 }),
+      chunk_count: 0,
+    })
+    const result = useLifecycle(s)
+    // running + zero chunks → chunking; web verb is "crawling the pages".
+    expect(result.phase).toBe('chunking')
+    expect(result.availabilityReason).toContain('crawling the pages')
+  })
+
+  it('database source in STUDYING surfaces the schema-study verb', async () => {
+    const { useLifecycle } = await import('../lifecycle')
+    const s = makeDetail({
+      source_type: 'database',
+      schema_status: 'STUDYING' as SchemaStatus,
+    })
+    const result = useLifecycle(s)
+    expect(result.phase).toBe('analyzing')
+    expect(result.availabilityReason).toContain('studying the schema')
+  })
+})
+
 describe('U16 — stop sync gate (useLifecycle + stopSyncTargetJobId)', () => {
   it('canStopSync is true when latest_job is pending', async () => {
     const { useLifecycle, stopSyncTargetJobId } = await import('../lifecycle')

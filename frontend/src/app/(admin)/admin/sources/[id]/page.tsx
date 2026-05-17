@@ -623,6 +623,7 @@ export default function SourceDetailPage() {
               />
               <LifecycleProgressBar
                 phase={lifecycle.phase}
+                sourceKind={sourceKindOf(source.source_type)}
                 hasUpload={source.has_upload === true}
                 detail={
                   source.latest_job?.started_at

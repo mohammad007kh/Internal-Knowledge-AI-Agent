@@ -67,4 +67,29 @@ describe('LifecycleProgressBar', () => {
     const pb = screen.getByRole('progressbar')
     expect(pb).not.toHaveAttribute('aria-valuenow')
   })
+
+  // FX29b — the label was hard-coded to the file labels before. A web
+  // source in `pending_upload` would read "Waiting for upload" which is
+  // wrong copy. Now the component takes a `sourceKind` prop and threads
+  // it into `phaseLabel`.
+  describe('FX29b: sourceKind drives the label', () => {
+    it('web source in pending_upload reads "Queued", not "Waiting for upload"', () => {
+      render(<LifecycleProgressBar phase="pending_upload" sourceKind="web" />)
+      const bar = screen.getByTestId('lifecycle-progress-bar')
+      expect(bar.textContent).toMatch(/Queued/)
+      expect(bar.textContent).not.toMatch(/Waiting for upload/)
+    })
+
+    it('database source in analyzing reads "Studying schema"', () => {
+      render(<LifecycleProgressBar phase="analyzing" sourceKind="database" />)
+      const bar = screen.getByTestId('lifecycle-progress-bar')
+      expect(bar.textContent).toMatch(/Studying schema/)
+    })
+
+    it('default (no sourceKind prop) keeps the legacy file-centric copy', () => {
+      render(<LifecycleProgressBar phase="pending_upload" />)
+      const bar = screen.getByTestId('lifecycle-progress-bar')
+      expect(bar.textContent).toMatch(/Waiting for upload/)
+    })
+  })
 })
