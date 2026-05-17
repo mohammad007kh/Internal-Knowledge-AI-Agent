@@ -1,195 +1,136 @@
 'use client'
 
 /**
- * DatabaseStudyStrip — five-pip horizontal row that surfaces the studying
- * agent's progress on a single DB source, mirroring the visual treatment of
- * the file-source `IngestionStrip`.
+ * DatabaseStudyStrip — compact 4-pip horizontal row that surfaces the studying
+ * agent's progress on a single DB source on /admin/sources.
  *
- * Pips:
- *   Connected   — TCP/SSL handshake succeeded and the inventory phase started
- *                 (any `study_state` other than QUEUED / CONNECT_FAILED).
- *   Inventoried — The agent listed tables (state ∈ COLUMNS/SAMPLING/DESCRIBING/
- *                 INDEXING/READY/READY_PARTIAL, or any *_FAILED that fired
- *                 *after* INVENTORY).
- *   Documented  — Per-column inspection succeeded — proxy "we have something
- *                 worth describing" (state ∈ SAMPLING/DESCRIBING/INDEXING/
- *                 READY/READY_PARTIAL). Shows a `(n)` count when ≥1 table is
- *                 documented.
- *   Ready       — `study_state === READY || READY_PARTIAL`.
- *   Approved    — Admin flipped is_active=true.
+ * ## FX34 — unified vocabulary
  *
- * Live signal:
- *   - schema_status === 'STUDYING' → blue Loader2 spinner anchored on the
- *     first incomplete pip (the work-in-progress phase).
- *   - schema_status === 'FAILED' → red CircleAlert on the failed pip,
- *     resolved from `last_error_phase` (or last incomplete pip as fallback).
+ * Before FX34 this strip rendered "Connected · Inventoried · Documented ·
+ * Ready · Approved" — a leaky abstraction over the studying agent's internal
+ * node IDs (CONNECT / INVENTORY / COLUMNS / SAMPLE / DESCRIBE) plus an
+ * "Approved" pip that has nothing to do with the worker pipeline at all.
  *
- * This component renders against MOCKED state today. Wave 3 wires the real
- * `schema_status` / `study_state` / count fields straight from the API; the
- * pip activation logic is intentionally identical to what Wave 3 will use, so
- * no rewrites are needed at hookup time.
+ * The source-detail page (post FX23/FX29b/FX32) shows a SIMPLER, source-kind-
+ * aware vocabulary driven by `lifecycle.ts`:
+ *
+ *     Queued → Naming with AI → Studying schema → Ready
+ *
+ * FX34 brings this list-row strip in line with the detail page. Same four
+ * phases, same labels, same single source of truth (`derivePhase` from
+ * `@/features/sources/lifecycle`). Approval is dropped from the strip — it's
+ * not a worker phase, and the Mode badge + "Next step" verb cell already
+ * communicate availability.
+ *
+ * Visual treatment is unchanged: same emerald-filled / outlined dots, same
+ * Loader2 spinner anchored on the in-flight pip, same CircleAlert on failure.
+ *
+ * Stages (per `phaseOrderFor('database')`):
+ *   Queued           — `derivePhase === 'pending_upload'`
+ *   Naming with AI   — `derivePhase === 'naming'`
+ *   Studying schema  — `derivePhase === 'analyzing'`
+ *   Ready            — `derivePhase === 'ready'`
+ *
+ * The `failed` phase (job failed, or `schema_status === 'FAILED'`) is rendered
+ * as a red tone + CircleAlert on whichever pip the failure anchored on. Where
+ * possible we honour `last_error_phase` from the backend so the failure
+ * indicator lines up with the actual point of failure; otherwise we anchor on
+ * the first non-completed pip in pipeline order (matching IngestionStrip's
+ * behaviour).
  */
 
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
-import type { SchemaStatus, StudyState } from '@/lib/api/sources'
+import {
+  type Phase,
+  derivePhase,
+  phaseHint,
+  phaseLabel,
+  phaseOrderFor,
+} from '@/features/sources/lifecycle'
+import type { SourceListItem } from '@/lib/api/sources'
 import { cn } from '@/lib/utils'
 import { CircleAlert, Loader2 } from 'lucide-react'
 
 interface DatabaseStudyStripProps {
-  schemaStatus: SchemaStatus | null
-  /** Same vocabulary as the backend `SchemaStudy.study_state` column. */
-  studyState: StudyState | string | null
-  isApproved: boolean
-  tablesDocumented: number | null
-  /**
-   * Phase string the backend reports when a study fails (e.g. 'CONNECT',
-   * 'INVENTORY', 'COLUMNS', 'SAMPLING', 'DESCRIBING', 'INDEXING'). When set
-   * we anchor the failure indicator on the matching pip; otherwise we fall
-   * back to the first incomplete pip in pipeline order.
-   */
-  lastErrorPhase: string | null
-  /** Optional source name for screen-reader summaries. */
-  sourceName?: string
+  source: SourceListItem
   className?: string
 }
 
-type PipId = 'connected' | 'inventoried' | 'documented' | 'ready' | 'approved'
+type PipPhase = Exclude<Phase, 'failed' | 'chunking'>
 
 interface PipMeta {
-  id: PipId
+  phase: PipPhase
   label: string
-  tooltip: string
+  hint: string
   active: boolean
 }
 
-const PIP_ORDER: readonly PipId[] = [
-  'connected',
-  'inventoried',
-  'documented',
-  'ready',
-  'approved',
-] as const
-
-const POST_INVENTORY_STATES: readonly StudyState[] = [
-  // INVENTORY itself is included: the pip lights up the moment the worker
-  // enters the inventory phase, not only after it finishes. The spinner /
-  // in-flight indicator (anchored on the next inactive pip) tells the user
-  // we're still working — without that, the user sees "queued" frozen until
-  // a whole phase elapses.
-  'INVENTORY',
-  'COLUMNS',
-  'SAMPLING',
-  'DESCRIBING',
-  'INDEXING',
-  'READY',
-  'READY_PARTIAL',
-]
-const POST_INVENTORY_FAILED_STATES: readonly StudyState[] = [
-  'COLUMNS_FAILED',
-  'SAMPLING_FAILED',
-  'DESCRIBING_FAILED',
-  'INDEXING_FAILED',
-]
-const POST_DESCRIBE_STATES: readonly StudyState[] = [
-  'SAMPLING',
-  'DESCRIBING',
-  'INDEXING',
-  'READY',
-  'READY_PARTIAL',
-]
-const READY_STATES: readonly StudyState[] = ['READY', 'READY_PARTIAL']
-
-/** Map a `last_error_phase` string to the pip the indicator should anchor on. */
-const ERROR_PHASE_TO_PIP: Record<string, PipId> = {
-  CONNECT: 'connected',
-  CONNECTING: 'connected',
-  INVENTORY: 'inventoried',
-  COLUMNS: 'inventoried',
-  SAMPLING: 'documented',
-  DESCRIBING: 'documented',
-  INDEXING: 'ready',
+/**
+ * Map a backend `last_error_phase` token onto one of our pip phases. The
+ * backend reports phases at the granularity of the studying agent's node IDs
+ * (`CONNECT`, `INVENTORY`, `COLUMNS`, `SAMPLING`, `DESCRIBING`, `INDEXING`);
+ * we collapse anything past INVENTORY into `analyzing` since that's the single
+ * "Studying schema" chip in the new vocabulary.
+ *
+ * `CONNECT*` maps to `pending_upload` — the failure happened before the worker
+ * even started exploring the schema, which is exactly the "Queued / about to
+ * start" pip.
+ */
+const ERROR_PHASE_TO_PIP_PHASE: Record<string, PipPhase> = {
+  CONNECT: 'pending_upload',
+  CONNECTING: 'pending_upload',
+  INVENTORY: 'analyzing',
+  COLUMNS: 'analyzing',
+  SAMPLING: 'analyzing',
+  DESCRIBING: 'analyzing',
+  INDEXING: 'analyzing',
 }
 
-function isConnected(state: StudyState | string | null): boolean {
-  if (!state) return false
-  return state !== 'QUEUED' && state !== 'CONNECT_FAILED' && state !== 'CONNECTING'
-}
+function buildPips(source: SourceListItem, phase: Phase): readonly PipMeta[] {
+  const order = phaseOrderFor('database')
+  // Index of the current (or anchored) phase. For `failed` we anchor on
+  // `analyzing` so a failure during schema-study highlights "Studying schema";
+  // the per-pip failed flag is computed downstream from `last_error_phase`.
+  const anchorPhase: PipPhase =
+    phase === 'failed' ? 'analyzing' : (phase as PipPhase)
+  const anchorIdx = order.indexOf(anchorPhase)
 
-function isInventoried(state: StudyState | string | null): boolean {
-  if (!state) return false
-  return (
-    (POST_INVENTORY_STATES as readonly string[]).includes(state) ||
-    (POST_INVENTORY_FAILED_STATES as readonly string[]).includes(state)
-  )
-}
-
-function isDocumented(state: StudyState | string | null): boolean {
-  if (!state) return false
-  return (POST_DESCRIBE_STATES as readonly string[]).includes(state)
-}
-
-function isReady(state: StudyState | string | null): boolean {
-  if (!state) return false
-  return (READY_STATES as readonly string[]).includes(state)
-}
-
-function buildPips(props: DatabaseStudyStripProps): readonly PipMeta[] {
-  const { studyState, isApproved, tablesDocumented } = props
-  const documented = isDocumented(studyState)
-  const docCount = tablesDocumented ?? 0
-  const documentedLabel =
-    documented && docCount > 0 ? `Documented (${docCount.toLocaleString()})` : 'Documented'
-
-  return [
-    {
-      id: 'connected',
-      label: 'Connected',
-      tooltip: 'Database handshake succeeded',
-      active: isConnected(studyState),
-    },
-    {
-      id: 'inventoried',
-      label: 'Inventoried',
-      tooltip: 'Tables listed from information_schema',
-      active: isInventoried(studyState),
-    },
-    {
-      id: 'documented',
-      label: documentedLabel,
-      tooltip: 'Columns inspected; AI descriptions in progress or done',
-      active: documented,
-    },
-    {
-      id: 'ready',
-      label: 'Ready',
-      tooltip: 'Schema indexed and queryable by the agent',
-      active: isReady(studyState),
-    },
-    {
-      id: 'approved',
-      label: 'Approved',
-      tooltip: 'Admin-approved for retrieval',
-      active: isApproved === true,
-    },
-  ]
+  return order.map((stepPhase, idx) => {
+    const pipPhase = stepPhase as PipPhase
+    return {
+      phase: pipPhase,
+      label: phaseLabel(stepPhase, 'database'),
+      hint: phaseHint(stepPhase, 'database'),
+      // A pip is "active" if the source has progressed up to or past it. We
+      // mirror the IngestionStrip's semantics: prior-step pips light up
+      // emerald (done), the current pip lights up too (it's "active"), future
+      // pips remain outlined. The Loader2 / CircleAlert overlay lives on the
+      // current pip — see `findIndicatorPip` below.
+      active: idx <= anchorIdx,
+    }
+  })
 }
 
 /**
  * Pick the pip the studying / failure indicator should anchor on. Honours an
- * explicit `last_error_phase` mapping; otherwise picks the first incomplete
- * pip in pipeline order.
+ * explicit `last_error_phase` mapping (FX29-era backend signal) when present;
+ * otherwise falls back to the current phase from `derivePhase`.
  */
-function findIndicatorPip(pips: readonly PipMeta[], lastErrorPhase: string | null): PipId | null {
-  if (lastErrorPhase) {
-    const mapped = ERROR_PHASE_TO_PIP[lastErrorPhase.toUpperCase()]
+function findIndicatorPip(
+  pips: readonly PipMeta[],
+  phase: Phase,
+  lastErrorPhase: string | null
+): PipPhase | null {
+  if (phase === 'failed' && lastErrorPhase) {
+    const mapped = ERROR_PHASE_TO_PIP_PHASE[lastErrorPhase.toUpperCase()]
     if (mapped) return mapped
   }
-  for (const p of pips) {
-    if (!p.active) return p.id
+  if (phase === 'failed') return 'analyzing'
+  // In-flight: anchor on the current (= last-active) pip.
+  for (let i = pips.length - 1; i >= 0; i -= 1) {
+    if (pips[i].active) return pips[i].phase
   }
-  // All complete — anchor on the last so a re-study of an approved source
-  // still surfaces the spinner.
-  return pips[pips.length - 1]?.id ?? null
+  return pips[0]?.phase ?? null
 }
 
 interface PipDotProps {
@@ -220,14 +161,14 @@ function PipDot({ pip, isStudying, isFailed, failureMessage, sourceName }: PipDo
   const subjectPrefix = sourceName ? `${sourceName}: ` : ''
   const ariaLabel = `${subjectPrefix}${ariaParts.join(', ')}`
 
-  const tooltipText = isFailed ? (failureMessage ?? 'study failed') : pip.tooltip
+  const tooltipText = isFailed ? (failureMessage ?? 'study failed') : pip.hint
 
   return (
     <Tooltip>
       <TooltipTrigger asChild>
         <span
           aria-label={ariaLabel}
-          data-pip={pip.id}
+          data-pip={pip.phase}
           data-active={pip.active ? 'true' : 'false'}
           data-failed={isFailed ? 'true' : 'false'}
           data-studying={isStudying ? 'true' : 'false'}
@@ -251,7 +192,7 @@ function PipDot({ pip, isStudying, isFailed, failureMessage, sourceName }: PipDo
               <CircleAlert className="absolute -inset-1 h-4 w-4 text-red-500" aria-hidden />
             ) : null}
           </span>
-          <span className={cn('capitalize', labelClass)}>{pip.label}</span>
+          <span className={cn(labelClass)}>{pip.label}</span>
         </span>
       </TooltipTrigger>
       <TooltipContent side="top" align="center">
@@ -273,22 +214,34 @@ function Connector({ filled }: { filled: boolean }) {
   )
 }
 
-export function DatabaseStudyStrip(props: DatabaseStudyStripProps) {
-  const { schemaStatus, lastErrorPhase, className, sourceName } = props
-  const pips = buildPips(props)
+export function DatabaseStudyStrip({ source, className }: DatabaseStudyStripProps) {
+  const phase = derivePhase(source)
+  const pips = buildPips(source, phase)
+  const lastErrorPhase = source.last_error_phase ?? null
 
-  const isStudying = schemaStatus === 'STUDYING'
-  const isFailed = schemaStatus === 'FAILED'
-  const indicatorPip = isStudying || isFailed ? findIndicatorPip(pips, lastErrorPhase) : null
+  const isFailed = phase === 'failed'
+  // "Studying" = there's actual worker progress in flight. We treat any
+  // non-terminal phase (`pending_upload` / `naming` / `analyzing`) as
+  // in-flight for the spinner overlay, matching IngestionStrip's
+  // `RUNNING_STATUSES` semantics.
+  const isStudying =
+    !isFailed && (phase === 'pending_upload' || phase === 'naming' || phase === 'analyzing')
+
+  const indicatorPip =
+    isStudying || isFailed ? findIndicatorPip(pips, phase, lastErrorPhase) : null
+
+  // Failure message previewed in the tooltip. Prefer the dedicated
+  // `last_error_message` when present (R6-era field), otherwise the latest
+  // sync job's message; never leak connection strings.
+  const failureMessage: string | null = isFailed
+    ? (source.last_error_message ?? source.latest_job?.error_message ?? 'Study failed')
+    : null
 
   // Screen-reader summary; matches IngestionStrip's role="status" pattern.
   const summary = pips.map((p) => `${p.label}${p.active ? ' done' : ' pending'}`).join('; ')
-  const subject = sourceName ? `Schema study progress for ${sourceName}` : 'Schema study progress'
-
-  // Wave 3 will surface a real, admin-readable error string. Today we keep
-  // the tooltip generic — connection strings or internal messages must NEVER
-  // leak through the strip.
-  const failureMessage: string | null = isFailed ? 'Study failed — see Verb Column' : null
+  const subject = source.name
+    ? `Schema study progress for ${source.name}`
+    : 'Schema study progress'
 
   return (
     <TooltipProvider delayDuration={120}>
@@ -300,18 +253,18 @@ export function DatabaseStudyStrip(props: DatabaseStudyStripProps) {
         className={cn('inline-flex flex-wrap items-center gap-x-2 gap-y-1', className)}
       >
         {pips.map((pip, idx) => {
-          const isPipStudying = isStudying && indicatorPip === pip.id
-          const isPipFailed = isFailed && indicatorPip === pip.id
+          const isPipStudying = isStudying && indicatorPip === pip.phase
+          const isPipFailed = isFailed && indicatorPip === pip.phase
           return (
-            <span key={pip.id} className="inline-flex items-center gap-2">
+            <span key={pip.phase} className="inline-flex items-center gap-2">
               <PipDot
                 pip={pip}
                 isStudying={isPipStudying}
                 isFailed={isPipFailed}
                 failureMessage={failureMessage}
-                sourceName={sourceName}
+                sourceName={source.name}
               />
-              {idx < PIP_ORDER.length - 1 ? (
+              {idx < pips.length - 1 ? (
                 <Connector filled={pip.active && pips[idx + 1].active} />
               ) : null}
             </span>

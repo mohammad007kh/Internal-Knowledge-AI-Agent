@@ -97,7 +97,19 @@ class Source(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
     citations_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     # Internal MinIO object key — NEVER exposed in API responses
     file_storage_path: Mapped[str | None] = mapped_column(String, nullable=True)
-    next_sync_due_at: Mapped[datetime | None] = mapped_column(nullable=True)
+    # ``DateTime(timezone=True)`` is load-bearing (FX22). Migration 0018 created
+    # the on-disk column as TIMESTAMPTZ, but without this argument SQLAlchemy
+    # infers a naive type and the asyncpg dialect emits the bind parameter as
+    # ``$N::TIMESTAMP WITHOUT TIME ZONE``. Comparing that against the tz-aware
+    # ``datetime.now(timezone.utc)`` the Beat task passes raised
+    # ``can't subtract offset-naive and offset-aware datetimes`` every 60 s,
+    # so scheduled syncs never fired. Matches the rest of this model
+    # (``created_at`` / ``updated_at`` / ``deleted_at`` / ``last_studied_at`` /
+    # ``connection_last_checked_at``) which are all TZ-aware.
+    next_sync_due_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
     # Embedder pinned at Source creation; immutable once chunks exist.
     embedder_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),

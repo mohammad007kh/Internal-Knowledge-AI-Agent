@@ -500,14 +500,7 @@ export function SourcesTable({ demoSources }: SourcesTableProps = {}) {
                       </TableCell>
                       <TableCell>
                         {getTypeGroup(source.source_type) === 'database' ? (
-                          <DatabaseStudyStrip
-                            schemaStatus={source.schema_status ?? null}
-                            studyState={source.study_state ?? null}
-                            isApproved={source.is_active}
-                            tablesDocumented={source.tables_documented ?? null}
-                            lastErrorPhase={source.last_error_phase ?? null}
-                            sourceName={source.name}
-                          />
+                          <DatabaseStudyStrip source={source} />
                         ) : (
                           <IngestionStrip source={source} />
                         )}
