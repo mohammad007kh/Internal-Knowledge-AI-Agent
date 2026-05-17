@@ -170,3 +170,27 @@
     animation: none !important;
   }
 }
+
+/* ----------------------------------------------------------------------------
+ * FX31 — Smooth light ↔ dark theme cross-fade.
+ *   next-themes' `disableTransitionOnChange` is intentionally NOT set in
+ *   providers.tsx, so the class swap on <html> propagates here. We fade only
+ *   color-related properties (background-color, color, border-color, fill,
+ *   stroke) to avoid touching transform/opacity used by component-level
+ *   transitions. Element-level `transition: all 150ms` rules (Button, Tabs,
+ *   Badge, Switch, etc.) override via cascade so hover micro-interactions
+ *   stay snappy. Guarded by prefers-reduced-motion: no-preference so users
+ *   who request reduced motion still get an instant flip.
+ * -------------------------------------------------------------------------- */
+@media (prefers-reduced-motion: no-preference) {
+  *,
+  *::before,
+  *::after {
+    transition:
+      background-color 180ms ease,
+      color 180ms ease,
+      border-color 180ms ease,
+      fill 180ms ease,
+      stroke 180ms ease;
+  }
+}
