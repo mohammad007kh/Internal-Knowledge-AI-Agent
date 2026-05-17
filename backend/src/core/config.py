@@ -86,6 +86,14 @@ class Settings(BaseSettings):
     LOCKOUT_MAX_FAILS: int = 10
     LOCKOUT_WINDOW_SECS: int = 900       # 15-min sliding window
     LOCKOUT_DURATION_SECS: int = 1800    # 30-min lockout after threshold
+    # Sync cancellation (U16) — Redis-backed cooperative cancel flag for
+    # the sync_source + study_source Celery tasks. When the running task's
+    # checkpoint can't reach Redis we MUST NOT silently treat the read as
+    # "cancelled" — that would terminate real in-flight syncs on any
+    # transient Redis blip. Mirrors LOCKOUT_REQUIRE_REDIS: fail-closed in
+    # prod (re-raise the Redis error so the task's standard failure path
+    # records it), fail-open in dev (log + treat as not cancelled).
+    SYNC_CANCELLATION_REQUIRE_REDIS: bool = True
     # Pipeline v2 — wires the 4 dead admin slots
     # (clarification_detector, query_analyzer, source_router, text_to_query)
     # plus the optional reflector retry loop. Falls back to v1 (the legacy
@@ -119,12 +127,21 @@ class Settings(BaseSettings):
         Pydantic Settings supplies env values via attribute assignment, so we
         only flip the default when the env var is *not* present in the process
         environment. This keeps prod fail-closed while making dev forgiving.
+
+        Also relaxes :data:`SYNC_CANCELLATION_REQUIRE_REDIS` under the same
+        rule — a dev contributor without Redis up MUST NOT see real
+        in-flight syncs get phantom-cancelled by a Redis read error.
         """
         if (
             self.ENVIRONMENT == "development"
             and "LOCKOUT_REQUIRE_REDIS" not in os.environ
         ):
             object.__setattr__(self, "LOCKOUT_REQUIRE_REDIS", False)
+        if (
+            self.ENVIRONMENT == "development"
+            and "SYNC_CANCELLATION_REQUIRE_REDIS" not in os.environ
+        ):
+            object.__setattr__(self, "SYNC_CANCELLATION_REQUIRE_REDIS", False)
         _logger.info(
             "Account lockout config: enabled=%s require_redis=%s "
             "max_fails=%d window_secs=%d duration_secs=%d",
@@ -133,6 +150,10 @@ class Settings(BaseSettings):
             self.LOCKOUT_MAX_FAILS,
             self.LOCKOUT_WINDOW_SECS,
             self.LOCKOUT_DURATION_SECS,
+        )
+        _logger.info(
+            "Sync cancellation config: require_redis=%s",
+            self.SYNC_CANCELLATION_REQUIRE_REDIS,
         )
         return self
 

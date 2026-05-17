@@ -107,21 +107,58 @@ async def set_sync_cancelled(source_id: uuid.UUID | str) -> bool:
 async def is_sync_cancelled(source_id: uuid.UUID | str) -> bool:
     """Return ``True`` iff the cancel flag is set for *source_id*.
 
-    Safe to call from inside a Celery task — opens no DB session. Returns
-    ``False`` when Redis is unavailable (fail-open: a missing Redis means
-    cancellation cannot be requested, so we let the sync continue).
+    Safe to call from inside a Celery task — opens no DB session.
+
+    Failure policy
+    --------------
+    Redis errors (connection refused, timeout, pool exhausted, transient
+    network errors) are gated by :data:`Settings.SYNC_CANCELLATION_REQUIRE_REDIS`:
+
+    * ``False`` (dev default): log a warning and return ``False``
+      (fail-open — a Redis outage MUST NOT silently cancel real running
+      tasks; the queued-task revoke and DB-row flip still provide cancel
+      signal coverage).
+    * ``True`` (prod default): re-raise the underlying error so the caller
+      decides what to do. The Celery task's outer ``try`` will surface the
+      failure through the standard FAILED-state plumbing rather than
+      pretending the cancel flag wasn't set.
+
+    Mirrors the :class:`~src.services.account_lockout.AccountLockout`
+    pattern (ARCH-D) for symmetry — fail-open in dev, fail-closed in prod.
     """
-    client, owned = await _resolve_client()
     try:
-        raw = await client.get(_key(source_id))
-        return raw is not None
-    except Exception:  # noqa: BLE001
+        client, owned = await _resolve_client()
+    except Exception:  # noqa: BLE001 — connection-open failure path
+        if settings.SYNC_CANCELLATION_REQUIRE_REDIS:
+            raise
         logger.warning(
-            "sync.cancel: failed to read Redis flag for source_id=%s",
+            "sync.cancel: failed to open Redis client for source_id=%s "
+            "(fail-open: treating as not cancelled)",
             source_id,
             exc_info=True,
         )
         return False
+
+    try:
+        try:
+            raw = await client.get(_key(source_id))
+            return raw is not None
+        except Exception:  # noqa: BLE001
+            if settings.SYNC_CANCELLATION_REQUIRE_REDIS:
+                logger.error(
+                    "sync.cancel: failed to read Redis flag for "
+                    "source_id=%s in strict mode — propagating",
+                    source_id,
+                    exc_info=True,
+                )
+                raise
+            logger.warning(
+                "sync.cancel: failed to read Redis flag for source_id=%s "
+                "(fail-open: treating as not cancelled)",
+                source_id,
+                exc_info=True,
+            )
+            return False
     finally:
         await _close_if_owned(client, owned)
 

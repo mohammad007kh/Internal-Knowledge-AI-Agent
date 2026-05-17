@@ -47,6 +47,36 @@ pytestmark = pytest.mark.asyncio
 # ---------------------------------------------------------------------------
 
 
+@pytest.fixture(autouse=True)
+def _mock_sync_cancellation_helpers():
+    """Pin the cancel-flag contract for every test in this module.
+
+    The U16 checkpoints inside ``_run`` call
+    :func:`src.services.sync_cancellation.is_sync_cancelled`, which opens
+    a Redis client. In the unit-test environment there is no lifespan, no
+    mocked Redis, and depending on the developer's machine Redis may be
+    reachable on ``localhost`` and even carry stale cancel flags from
+    earlier work. Either way, the test contract is *"study_source runs
+    all the way through unless the test explicitly opts into the
+    cancellation path"* — so we patch both U16 cancel-check call sites
+    to return ``False`` by default.
+
+    Tests that want to exercise the cancel branch use
+    :func:`unittest.mock.patch` themselves to override this fixture.
+    """
+    with (
+        patch(
+            "src.tasks.study_source.is_sync_cancelled",
+            AsyncMock(return_value=False),
+        ),
+        patch(
+            "src.tasks.study_source.clear_sync_cancelled",
+            AsyncMock(return_value=None),
+        ),
+    ):
+        yield
+
+
 def _make_db_source(*, source_type: str = "database") -> MagicMock:
     """Build a Source ORM-shaped MagicMock for the task's pipeline."""
     from src.models.enums import SourceType
@@ -680,3 +710,113 @@ async def test_missing_source_is_skipped():
 
     assert result["status"] == "skipped"
     set_schema_status.assert_not_awaited()
+
+
+# ---------------------------------------------------------------------------
+# U16 cancellation — opt-in branch
+# ---------------------------------------------------------------------------
+
+
+async def test_cancellation_at_pre_connect_checkpoint_exits_cleanly():
+    """Opt-in to the U16 cancel branch.
+
+    The module-level autouse fixture pins ``is_sync_cancelled`` to
+    ``False`` for every other test (so the contract is "study_source
+    runs end-to-end unless explicitly cancelled"). This test overrides
+    that mock to return ``True`` at the pre-connect checkpoint and
+    asserts:
+
+    * The pipeline exits with ``status='cancelled'`` and
+      ``stage='CONNECT'``.
+    * The connector is never built (``ConnectorFactory`` untouched).
+    * The terminal "ready" flip (``SourceRepository.set_status``) is
+      NEVER called — a cancelled study MUST NOT trick the lifecycle
+      gate into opening "Available to users".
+    * The study row is marked ``CONNECT_FAILED`` with the stable
+      "Cancelled by user." message via the shared failure plumbing.
+    """
+    source = _make_db_source()
+
+    session = MagicMock()
+    session.commit = AsyncMock()
+    session.execute = AsyncMock()
+    session.flush = AsyncMock()
+    session.add = MagicMock()
+
+    study_row = MagicMock()
+    study_row.id = uuid.uuid4()
+
+    get_by_id = AsyncMock(return_value=source)
+    is_running = AsyncMock(return_value=False)
+    create_study = AsyncMock(return_value=study_row)
+    set_schema_status = AsyncMock()
+    set_status = AsyncMock()
+    mark_completed = AsyncMock()
+    mark_failed = AsyncMock()
+
+    # ConnectorFactory MUST NOT be reached. If the cancel-check fails to
+    # short-circuit, the test will observe build_mock.called == True.
+    build_mock = MagicMock()
+
+    factory = _patch_session_factory(session)
+
+    from src.repositories.schema_study_repository import SchemaStudyRepository
+    from src.repositories.source_repository import SourceRepository
+
+    with (
+        patch("src.tasks.study_source.AsyncSessionLocal", factory),
+        # Override the module-level autouse mock — opt INTO the cancel path.
+        patch(
+            "src.tasks.study_source.is_sync_cancelled",
+            AsyncMock(return_value=True),
+        ),
+        patch(
+            "src.tasks.study_source.clear_sync_cancelled",
+            AsyncMock(return_value=None),
+        ),
+        patch.object(SourceRepository, "get_by_id", get_by_id, create=False),
+        patch.object(
+            SourceRepository, "set_schema_status", set_schema_status, create=False
+        ),
+        patch.object(
+            SourceRepository, "set_status", set_status, create=False
+        ),
+        patch.object(
+            SchemaStudyRepository, "is_running", is_running, create=False
+        ),
+        patch.object(
+            SchemaStudyRepository, "create_study", create_study, create=False
+        ),
+        patch.object(
+            SchemaStudyRepository, "mark_completed", mark_completed, create=False
+        ),
+        patch.object(
+            SchemaStudyRepository, "mark_failed", mark_failed, create=False
+        ),
+        patch(
+            "src.tasks.study_source.ConnectorFactory",
+            return_value=MagicMock(build=build_mock),
+        ),
+    ):
+        from src.tasks.study_source import _run
+
+        result = await _run(source.id)
+
+    assert result["status"] == "cancelled", result
+    assert result["stage"] == "CONNECT", result
+    # The "ready" flip MUST NOT happen on a cancelled study.
+    set_status.assert_not_awaited()
+    # Connector never built — the cancel-check fired before the work started.
+    build_mock.assert_not_called()
+    # Study row marked CONNECT_FAILED with the stable cancel message via
+    # the shared failure-state plumbing.
+    mark_failed.assert_awaited_once()
+    assert mark_failed.await_args.kwargs["phase"] == "CONNECT"
+    assert mark_failed.await_args.kwargs["message"] == "Cancelled by user."
+    mark_completed.assert_not_awaited()
+    # schema_status sequence: studying (during pipeline setup) → failed
+    # (during the cancelled-response terminal). "completed" must NOT appear.
+    statuses = [c.args[1] for c in set_schema_status.await_args_list]
+    assert "studying" in statuses
+    assert "failed" in statuses
+    assert "completed" not in statuses
