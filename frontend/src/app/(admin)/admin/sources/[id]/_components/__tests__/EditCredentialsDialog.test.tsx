@@ -21,6 +21,8 @@ import type { ReactNode } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type {
+  InspectSourceRequest,
+  InspectSourceResponse,
   SourceConnectionConfig,
   SourceDetail,
   UpdateSourceCredentialsRequest,
@@ -31,6 +33,8 @@ const updateSourceCredentialsMock =
   vi.fn<(id: string, body: UpdateSourceCredentialsRequest) => Promise<SourceDetail>>()
 const getSourceConnectionConfigMock =
   vi.fn<(id: string) => Promise<SourceConnectionConfig>>()
+const inspectSourceMock =
+  vi.fn<(body: InspectSourceRequest) => Promise<InspectSourceResponse>>()
 
 vi.mock('@/lib/api/sources', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/api/sources')>()
@@ -42,6 +46,7 @@ vi.mock('@/lib/api/sources', async (importOriginal) => {
     ) => updateSourceCredentialsMock(id, body),
     getSourceConnectionConfigApi: (id: string) =>
       getSourceConnectionConfigMock(id),
+    inspectSourceApi: (body: InspectSourceRequest) => inspectSourceMock(body),
   }
 })
 
@@ -65,6 +70,8 @@ function makeConnectionConfig(
 vi.mock('sonner', () => ({
   toast: { success: vi.fn(), error: vi.fn() },
 }))
+
+import { toast } from 'sonner'
 
 import { EditCredentialsDialog } from '../EditCredentialsDialog'
 
@@ -117,6 +124,7 @@ function renderDialog(source: SourceDetail = makeSource()): {
 beforeEach(() => {
   updateSourceCredentialsMock.mockReset()
   getSourceConnectionConfigMock.mockReset()
+  inspectSourceMock.mockReset()
   // Default: a fully-populated config so the form pre-fills on open.
   getSourceConnectionConfigMock.mockResolvedValue(makeConnectionConfig())
 })
@@ -360,5 +368,95 @@ describe('EditCredentialsDialog — error rendering', () => {
         /confirm-password does not match/i
       )
     })
+  })
+})
+
+// ---------------------------------------------------------------------------
+// FX30 — scroll structure + Test connection button
+// ---------------------------------------------------------------------------
+
+describe('EditCredentialsDialog — long-form scroll structure (FX30)', () => {
+  it('renders a scrollable body region with the Save button still in the DOM', async () => {
+    renderDialog()
+    await waitForPrefill('reporting.example.com')
+
+    // The middle body region scrolls when the form is taller than the modal.
+    const scrollRegion = screen.getByTestId('edit-credentials-scroll')
+    expect(scrollRegion).toBeInTheDocument()
+    expect(scrollRegion.className).toMatch(/overflow-y-auto/)
+
+    // The footer is pinned outside the scroll region — Save must still be
+    // reachable even when the body overflows.
+    const save = screen.getByTestId('edit-credentials-save')
+    expect(save).toBeInTheDocument()
+    expect(scrollRegion.contains(save)).toBe(false)
+  })
+})
+
+describe('EditCredentialsDialog — Test connection button (FX30)', () => {
+  it('calls inspectSourceApi with the typed connection payload and toasts success', async () => {
+    const user = userEvent.setup()
+    inspectSourceMock.mockResolvedValue({
+      description: 'Connected — 12 tables visible.',
+      schema_summary: {},
+    })
+    renderDialog()
+    await waitForPrefill('reporting.example.com')
+
+    // All required fields are pre-filled except `password`. Fill it.
+    await user.type(screen.getByTestId('cred-password'), 'rotated-pw')
+    await user.click(screen.getByTestId('edit-credentials-test'))
+
+    await waitFor(() => {
+      expect(inspectSourceMock).toHaveBeenCalledTimes(1)
+    })
+    expect(inspectSourceMock).toHaveBeenCalledWith({
+      source_type: 'database',
+      connection: {
+        db_type: 'postgresql',
+        host: 'reporting.example.com',
+        port: 5432,
+        database: 'analytics',
+        username: 'report_ro',
+        password: 'rotated-pw',
+        ssl_mode: 'require',
+      },
+    })
+
+    // The payload must NOT include the dialog-local SSL_KEEP sentinel.
+    const [body] = inspectSourceMock.mock.calls[0]!
+    expect(body.connection.ssl_mode).not.toBe('__keep__')
+    // No `collection` key for non-mongo source types.
+    expect(body.connection).not.toHaveProperty('collection')
+
+    await waitFor(() => {
+      expect(toast.success).toHaveBeenCalledWith(
+        'Connected — 12 tables visible.'
+      )
+    })
+  })
+
+  it('toasts the backend detail verbatim when inspectSourceApi rejects (422)', async () => {
+    const user = userEvent.setup()
+    inspectSourceMock.mockRejectedValue({
+      response: {
+        data: {
+          detail: 'password authentication failed for user "cctp"',
+        },
+      },
+    })
+    renderDialog()
+    await waitForPrefill('reporting.example.com')
+
+    await user.type(screen.getByTestId('cred-password'), 'wrong-pw')
+    await user.click(screen.getByTestId('edit-credentials-test'))
+
+    await waitFor(() => {
+      expect(toast.error).toHaveBeenCalledWith(
+        'password authentication failed for user "cctp"'
+      )
+    })
+    // Success toast must not have fired.
+    expect(toast.success).not.toHaveBeenCalled()
   })
 })

@@ -62,6 +62,7 @@ import {
 } from '@/features/sources/hooks/useSources'
 import { extractApiErrorMessage } from '@/lib/api-error'
 import {
+  inspectSourceApi,
   type SourceConnectionConfig,
   type SourceDetail,
   type UpdateSourceCredentialsRequest,
@@ -278,63 +279,75 @@ export function EditCredentialsDialog({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
-        className="sm:max-w-[520px]"
+        className="flex max-h-[85vh] flex-col gap-0 p-0 sm:max-w-[520px]"
         data-testid="edit-credentials-dialog"
       >
-        <DialogHeader>
-          <DialogTitle>Edit connection credentials</DialogTitle>
-          <DialogDescription>
-            Editing the connection for &ldquo;{source.name}&rdquo;. Current
-            values are pre-filled. Changing host/port/database/username and
-            saving will run a Test Connection first. Leave the password blank
-            to keep the current one.
-          </DialogDescription>
-        </DialogHeader>
-
-        {/* Config-load error — non-fatal. The admin can still fill the form
-            from scratch (useful when the stored config is broken). */}
-        {configQuery.isError && (
-          <p
-            className="rounded-md border border-amber-500/40 bg-amber-500/5 p-2 text-xs text-amber-900 dark:text-amber-200"
-            role="status"
-            data-testid="edit-credentials-config-error"
-          >
-            Couldn&rsquo;t load the current connection settings — you can
-            still enter them below.
-          </p>
-        )}
-
-        {/* Stern warning — the backend resets connection_status and the
-            source becomes temporarily unavailable until the next probe. */}
-        <div
-          role="alert"
-          className="flex gap-2 rounded-md border border-amber-500/40 bg-amber-500/5 p-3 text-xs text-amber-900 dark:text-amber-200"
-          data-testid="edit-credentials-warning"
-        >
-          <AlertTriangleIcon className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
-          <div className="space-y-1">
-            <p className="font-medium">Saving will:</p>
-            <ul className="list-disc space-y-0.5 pl-4">
-              <li>Reset the connection status pill to &ldquo;Unknown&rdquo;.</li>
-              <li>
-                Make this source temporarily unavailable to chat users until
-                a Test Connection succeeds.
-              </li>
-              <li>Re-study the database schema in the background.</li>
-              <li>Write an audit log entry naming you as the editor.</li>
-              <li>
-                Run a Test Connection FIRST — if it fails, nothing is saved.
-              </li>
-            </ul>
-          </div>
-        </div>
-
         <form
           onSubmit={handleSubmit}
-          className="space-y-4"
+          className="flex min-h-0 flex-1 flex-col"
           aria-label="Edit credentials"
         >
-          <fieldset disabled={formDisabled} className="space-y-4">
+          <div className="px-6 pt-6">
+            <DialogHeader>
+              <DialogTitle>Edit connection credentials</DialogTitle>
+              <DialogDescription>
+                Editing the connection for &ldquo;{source.name}&rdquo;. Current
+                values are pre-filled. Changing host/port/database/username and
+                saving will run a Test Connection first. Leave the password
+                blank to keep the current one.
+              </DialogDescription>
+            </DialogHeader>
+          </div>
+
+          <div
+            className="flex-1 space-y-4 overflow-y-auto px-6 py-4"
+            data-testid="edit-credentials-scroll"
+          >
+            {/* Config-load error — non-fatal. The admin can still fill the
+                form from scratch (useful when the stored config is broken). */}
+            {configQuery.isError && (
+              <p
+                className="rounded-md border border-amber-500/40 bg-amber-500/5 p-2 text-xs text-amber-900 dark:text-amber-200"
+                role="status"
+                data-testid="edit-credentials-config-error"
+              >
+                Couldn&rsquo;t load the current connection settings — you can
+                still enter them below.
+              </p>
+            )}
+
+            {/* Stern warning — the backend resets connection_status and the
+                source becomes temporarily unavailable until the next probe. */}
+            <div
+              role="alert"
+              className="flex gap-2 rounded-md border border-amber-500/40 bg-amber-500/5 p-3 text-xs text-amber-900 dark:text-amber-200"
+              data-testid="edit-credentials-warning"
+            >
+              <AlertTriangleIcon
+                className="mt-0.5 h-4 w-4 shrink-0"
+                aria-hidden
+              />
+              <div className="space-y-1">
+                <p className="font-medium">Saving will:</p>
+                <ul className="list-disc space-y-0.5 pl-4">
+                  <li>
+                    Reset the connection status pill to &ldquo;Unknown&rdquo;.
+                  </li>
+                  <li>
+                    Make this source temporarily unavailable to chat users
+                    until a Test Connection succeeds.
+                  </li>
+                  <li>Re-study the database schema in the background.</li>
+                  <li>Write an audit log entry naming you as the editor.</li>
+                  <li>
+                    Run a Test Connection FIRST — if it fails, nothing is
+                    saved.
+                  </li>
+                </ul>
+              </div>
+            </div>
+
+            <fieldset disabled={formDisabled} className="space-y-4">
             <div className="grid grid-cols-2 gap-3">
               <div className="col-span-2 space-y-1.5">
                 <Label htmlFor="db_type">Type</Label>
@@ -499,58 +512,163 @@ export function EditCredentialsDialog({
                 is applied.
               </p>
             </div>
-          </fieldset>
+            </fieldset>
 
-          {submitError !== null && (
-            <p
-              className="rounded-md border border-destructive/40 bg-destructive/5 p-2 text-xs text-destructive"
-              role="alert"
-              data-testid="edit-credentials-error"
-            >
-              {submitError}
-            </p>
-          )}
+            {submitError !== null && (
+              <p
+                className="rounded-md border border-destructive/40 bg-destructive/5 p-2 text-xs text-destructive"
+                role="alert"
+                data-testid="edit-credentials-error"
+              >
+                {submitError}
+              </p>
+            )}
+          </div>
 
-          <DialogFooter>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={() => onOpenChange(false)}
-              disabled={mutation.isPending}
-              data-testid="edit-credentials-cancel"
-            >
-              Cancel
-            </Button>
-            <Button
-              type="submit"
-              size="sm"
-              disabled={formDisabled}
-              data-testid="edit-credentials-save"
-            >
-              {mutation.isPending ? (
-                <>
-                  <Loader2Icon
-                    className="mr-1.5 h-4 w-4 animate-spin"
-                    aria-hidden
-                  />
-                  Testing &amp; saving…
-                </>
-              ) : isLoadingConfig ? (
-                <>
-                  <Loader2Icon
-                    className="mr-1.5 h-4 w-4 animate-spin"
-                    aria-hidden
-                  />
-                  Loading…
-                </>
-              ) : (
-                <>Test &amp; save</>
-              )}
-            </Button>
-          </DialogFooter>
+          <div className="border-t px-6 py-4">
+            <DialogFooter className="gap-2 sm:gap-2">
+              <TestCredentialsButton
+                form={form}
+                disabled={formDisabled}
+              />
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => onOpenChange(false)}
+                disabled={mutation.isPending}
+                data-testid="edit-credentials-cancel"
+              >
+                Cancel
+              </Button>
+              <Button
+                type="submit"
+                size="sm"
+                disabled={formDisabled}
+                data-testid="edit-credentials-save"
+              >
+                {mutation.isPending ? (
+                  <>
+                    <Loader2Icon
+                      className="mr-1.5 h-4 w-4 animate-spin"
+                      aria-hidden
+                    />
+                    Testing &amp; saving…
+                  </>
+                ) : isLoadingConfig ? (
+                  <>
+                    <Loader2Icon
+                      className="mr-1.5 h-4 w-4 animate-spin"
+                      aria-hidden
+                    />
+                    Loading…
+                  </>
+                ) : (
+                  <>Test &amp; save</>
+                )}
+              </Button>
+            </DialogFooter>
+          </div>
         </form>
       </DialogContent>
     </Dialog>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// TestCredentialsButton (FX30)
+//
+// Local "Test connection" affordance for the edit-credentials modal. Mirrors
+// the canonical TestConnectionButton in the new-source wizard
+// (frontend/src/app/(admin)/admin/sources/new/page.tsx) but reads from this
+// dialog's local form state instead of react-hook-form, and lives in the
+// dialog footer (left side) so it sits next to Save/Cancel.
+//
+// Contract:
+//   - Builds an InspectSourceRequest from the current form values.
+//   - Always sends db_type/host/port/database/username/password.
+//   - Sends `ssl_mode` ONLY when the admin picked a real value (the
+//     "Keep current" SSL_KEEP sentinel is dialog-local — backend doesn't
+//     know it).
+//   - Sends `collection` ONLY for MongoDB.
+//   - Requires a real password — the SSL_KEEP/empty-password "keep current"
+//     sentinel cannot be tested (the backend needs the actual password to
+//     attempt a connection). The button is disabled with a tooltip until
+//     the admin types one.
+//   - Surfaces success / failure as a toast using extractApiErrorMessage so
+//     the backend's RFC-7807 `detail` (e.g. 'password authentication failed
+//     for user "cctp"') is shown verbatim.
+// ---------------------------------------------------------------------------
+
+interface TestCredentialsButtonProps {
+  form: CredentialsFormState
+  disabled: boolean
+}
+
+function TestCredentialsButton({ form, disabled }: TestCredentialsButtonProps) {
+  const allRequiredFilled =
+    form.db_type !== '' &&
+    form.host.trim().length > 0 &&
+    form.port.trim().length > 0 &&
+    form.database.trim().length > 0 &&
+    form.username.trim().length > 0 &&
+    form.password.length > 0
+
+  const mutation = useMutation({
+    mutationFn: async () => {
+      const portValue = Number.parseInt(form.port, 10)
+      const connection: Record<string, unknown> = {
+        db_type: form.db_type,
+        host: form.host.trim(),
+        port: Number.isFinite(portValue) ? portValue : form.port,
+        database: form.database.trim(),
+        username: form.username.trim(),
+        password: form.password,
+      }
+      if (form.ssl_mode !== SSL_KEEP) {
+        connection.ssl_mode = form.ssl_mode
+      }
+      if (form.db_type === 'mongodb' && form.collection.trim().length > 0) {
+        connection.collection = form.collection.trim()
+      }
+      return inspectSourceApi({ source_type: 'database', connection })
+    },
+    onSuccess: (data) => {
+      const description = data?.description?.trim() ?? ''
+      toast.success(
+        description.length > 0 ? description : 'Connection successful.'
+      )
+    },
+    onError: (err) => {
+      toast.error(extractApiErrorMessage(err))
+    },
+  })
+
+  const buttonDisabled = disabled || !allRequiredFilled || mutation.isPending
+  const tooltip = !allRequiredFilled
+    ? 'Enter the password to test the connection'
+    : undefined
+
+  return (
+    <Button
+      type="button"
+      variant="outline"
+      size="sm"
+      className="mr-auto"
+      onClick={() => mutation.mutate()}
+      disabled={buttonDisabled}
+      title={tooltip}
+      aria-label="Test connection"
+      data-testid="edit-credentials-test"
+    >
+      {mutation.isPending ? (
+        <>
+          <Loader2Icon className="mr-1.5 h-4 w-4 animate-spin" aria-hidden />
+          Testing…
+        </>
+      ) : (
+        'Test connection'
+      )}
+    </Button>
   )
 }
