@@ -366,7 +366,12 @@ export function derivePhase(source: SourceLike): Phase {
   //     takes over and surfaces `analyzing`.
   if (
     source.source_type === 'database' &&
-    source.schema_status === 'completed' &&
+    // SchemaStatus is typed as the legacy uppercase tokens ('READY' | 'STALE')
+    // but the wire actually carries the lowercase strings the backend writes
+    // ('completed' | 'studying' | 'failed' | …). The type drift is broader
+    // than this rule — cast through `string` to keep the comparison readable
+    // and avoid an out-of-scope type-widening here. (FX32b)
+    (source.schema_status as string | null | undefined) === 'completed' &&
     jobStatus !== 'pending' &&
     jobStatus !== 'running'
   ) {
