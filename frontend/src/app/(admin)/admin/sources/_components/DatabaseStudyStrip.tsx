@@ -230,11 +230,15 @@ export function DatabaseStudyStrip({ source, className }: DatabaseStudyStripProp
   const indicatorPip =
     isStudying || isFailed ? findIndicatorPip(pips, phase, lastErrorPhase) : null
 
-  // Failure message previewed in the tooltip. Prefer the dedicated
-  // `last_error_message` when present (R6-era field), otherwise the latest
-  // sync job's message; never leak connection strings.
+  // Failure message previewed in the tooltip. We do NOT surface raw
+  // backend error strings here because connection strings, stack
+  // traces, or internal hostnames can land in `last_error_message` /
+  // `latest_job.error_message` from driver exceptions, and every admin
+  // who hovers the row would see them. The detail page's Schema tab
+  // sanitises + renders the full reason; the list-row tooltip just
+  // tells the admin to look there. (Reversed FX34 reviewer HIGH.)
   const failureMessage: string | null = isFailed
-    ? (source.last_error_message ?? source.latest_job?.error_message ?? 'Study failed')
+    ? 'Study failed — open the source for details'
     : null
 
   // Screen-reader summary; matches IngestionStrip's role="status" pattern.
