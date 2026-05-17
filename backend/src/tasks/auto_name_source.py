@@ -17,15 +17,25 @@ Pipeline:
 3. Persist on the Source row, flip ``name_status`` and
    ``description_status`` to ``ai_set``, and append a row to
    ``source_description_history`` so the AI write is auditable.
-4. (FX26) Belt-and-suspenders: if NO ``SyncJob`` row exists yet for the
-   source, enqueue ``tasks.sync_source``. The create endpoint already
-   enqueues that task on the way out (sources.py), but a broker outage
-   at the exact moment of source creation would swallow the dispatch
-   silently — leaving the source stuck in ``pending_upload`` forever
-   even though the upload + AI-naming pass finished cleanly. The
-   count-guarded re-enqueue here is safe to call repeatedly (a duplicate
-   enqueue would just produce a second ``SyncJob`` row, which the second
-   trigger guards against).
+4. (FX26 + FX29a) Belt-and-suspenders: if NO ``SyncJob`` row exists yet
+   for the source, enqueue the right indexing task per ``source_type``:
+
+   * ``database``        → ``tasks.study_source`` (DB sources are indexed
+     by the studying agent, not the file/crawler pipeline. Dispatching
+     ``tasks.sync_source`` here would only write a no-op zero-doc
+     SyncJob and then enqueue ``tasks.study_source`` itself — same
+     terminal state, more moving parts).
+   * everything else     → ``tasks.sync_source`` (file uploads, web URLs,
+     SaaS connectors).
+
+   The create endpoint already enqueues these tasks on the way out
+   (sources.py), but a broker outage at the exact moment of source
+   creation would swallow the dispatch silently — leaving the source
+   stuck in ``pending_upload`` forever even though the upload +
+   AI-naming pass finished cleanly. The count-guarded re-enqueue here
+   is safe to call repeatedly (any existing SyncJob row blocks the
+   rescue for all kinds; for DB sources we additionally guard on a
+   non-terminal SchemaStudy row so a re-study mid-flight isn't doubled).
 
 Idempotent: if the source's status is no longer ``pending_ai`` (admin
 typed something while we were working, or the task already ran), the
@@ -111,6 +121,18 @@ async def _run(source_id: uuid.UUID) -> dict[str, Any]:
             ai_name=ai_name,
             ai_description=ai_description,
         )
+        # FX29a — snapshot source_type BEFORE the session exits. The ORM
+        # row is detached after ``await session.commit()`` and reading
+        # ``source.source_type`` post-commit would either trigger an
+        # implicit refresh (and a stray query) or raise DetachedInstanceError
+        # depending on session config. The value drives the rescue routing:
+        # DB sources go to ``tasks.study_source``, everything else to
+        # ``tasks.sync_source``.
+        source_type_value = (
+            source.source_type.value
+            if hasattr(source.source_type, "value")
+            else str(source.source_type)
+        )
         await session.commit()
 
     logger.info(
@@ -122,11 +144,15 @@ async def _run(source_id: uuid.UUID) -> dict[str, Any]:
         },
     )
 
-    # FX26 — belt-and-suspenders initial-sync trigger. Best-effort: a failure
-    # here MUST NOT roll back the naming we just persisted. Runs in its own
-    # short-lived session so the naming commit above stays the durable
-    # outcome of this task even if the broker is unreachable.
-    sync_enqueued = await _maybe_enqueue_initial_sync(source_id)
+    # FX26 + FX29a — belt-and-suspenders initial-indexing trigger. The
+    # rescue dispatches the right Celery task per source_type (DB →
+    # study_source, everything else → sync_source). Best-effort: a
+    # failure here MUST NOT roll back the naming we just persisted. Runs
+    # in its own short-lived session so the naming commit above stays
+    # the durable outcome of this task even if the broker is unreachable.
+    sync_enqueued = await _maybe_enqueue_initial_sync(
+        source_id, source_type=source_type_value
+    )
 
     return {
         "source_id": str(source_id),
@@ -252,6 +278,23 @@ def _dispatch_sync_source(source_id: uuid.UUID) -> None:
     current_app.send_task("tasks.sync_source", args=[str(source_id)])
 
 
+def _dispatch_study_source(source_id: uuid.UUID) -> None:
+    """Module-level dispatch shim for the DB studying agent (FX29a).
+
+    DB sources are indexed by ``tasks.study_source``, not the file/crawler
+    pipeline. Dispatching here directly avoids the round-trip through
+    ``tasks.sync_source`` (which, for ``source_type == "database"``,
+    writes a no-op zero-doc SyncJob then re-enqueues ``tasks.study_source``
+    itself — same terminal state, more moving parts and a spurious
+    SyncJob row that breaks the idempotency guard below).
+
+    Same monkeypatch-friendly shape as :func:`_dispatch_sync_source`.
+    """
+    from celery import current_app  # noqa: PLC0415
+
+    current_app.send_task("tasks.study_source", args=[str(source_id)])
+
+
 async def _count_sync_jobs(source_id: uuid.UUID) -> int:
     """Return the total number of SyncJob rows for *source_id*.
 
@@ -275,51 +318,93 @@ async def _count_sync_jobs(source_id: uuid.UUID) -> int:
         return int(result.scalar_one() or 0)
 
 
-async def _maybe_enqueue_initial_sync(source_id: uuid.UUID) -> bool:
-    """Idempotently enqueue ``tasks.sync_source`` if no sync ever ran (FX26).
+async def _has_running_schema_study(source_id: uuid.UUID) -> bool:
+    """Return True iff a non-terminal SchemaStudy row exists for *source_id*.
 
-    Returns ``True`` iff a fresh dispatch was attempted, ``False`` when a
-    SyncJob already exists for *source_id* (or the dispatch was skipped on
-    failure). Lives at module level so tests can monkeypatch the celery
-    dispatch without spinning up a real broker.
+    Second-layer idempotency guard for DB sources only. DB sources can
+    legitimately have ZERO SyncJob rows (the studying agent doesn't write
+    one when invoked directly), so the SyncJob count alone is not enough
+    to detect "study already in flight". Falls through to a separate query
+    rather than coupling this module to the study state machine.
+    """
+    from src.repositories.schema_study_repository import (  # noqa: PLC0415
+        SchemaStudyRepository,
+    )
 
-    The guard is a single ``COUNT(*) FROM sync_jobs WHERE source_id = …``
-    — any pending/running/terminal row counts as "we've already kicked
-    this off once" and the rescue stays a no-op. The create endpoint
-    (``api/v1/sources.py``) is the primary trigger; this hook only matters
-    when that dispatch was swallowed by a transient broker outage and the
-    source would otherwise be stranded with ``name_status='ai_set'`` and
-    no sync_job row forever.
+    async with AsyncSessionLocal() as session:
+        return await SchemaStudyRepository(session).is_running(source_id)
+
+
+async def _maybe_enqueue_initial_sync(
+    source_id: uuid.UUID, *, source_type: str
+) -> bool:
+    """Idempotently dispatch the right indexing task per source_type
+    (FX26 + FX29a).
+
+    Routing:
+
+    * ``source_type == "database"`` → ``tasks.study_source``
+    * anything else (``file_upload``, ``web_url``, ``confluence``,
+      ``sharepoint``, future kinds) → ``tasks.sync_source``
+
+    Idempotency guards:
+
+    * Any existing SyncJob row blocks the rescue for ALL source kinds. The
+      create endpoint (``api/v1/sources.py``) is the primary dispatch site;
+      this hook only fires when that dispatch was swallowed by a transient
+      broker outage and the source would otherwise be stranded with
+      ``name_status='ai_set'`` and no sync_job row forever.
+    * DB sources additionally guard on a non-terminal SchemaStudy row,
+      because a DB source can have zero SyncJob rows while a study is
+      already running (the studying agent doesn't write a sync_job when
+      invoked directly).
 
     Errors are swallowed — the AI naming write that just committed in the
     caller is the durable outcome of this task and must not be undone by
-    a transient broker hiccup here.
+    a transient broker hiccup here. Returns ``True`` iff a fresh dispatch
+    was actually attempted; ``False`` for the skip and error paths.
     """
+    is_database = source_type == "database"
     try:
         existing_count = await _count_sync_jobs(source_id)
         if existing_count > 0:
             logger.info(
-                "auto_name_source: sync already ran for source %s "
-                "(count=%d) — initial-sync rescue skipped",
+                "auto_name_source: sync_jobs row exists for source %s "
+                "(count=%d) — initial-indexing rescue skipped",
                 source_id,
                 existing_count,
             )
             return False
 
-        _dispatch_sync_source(source_id)
+        if is_database and await _has_running_schema_study(source_id):
+            logger.info(
+                "auto_name_source: schema study already running for "
+                "source %s — study rescue skipped",
+                source_id,
+            )
+            return False
+
+        if is_database:
+            _dispatch_study_source(source_id)
+            trigger = "auto_name_completed_without_study"
+        else:
+            _dispatch_sync_source(source_id)
+            trigger = "auto_name_completed_without_sync"
+
         logger.info(
-            "auto_name_source: enqueued initial sync rescue",
+            "auto_name_source: enqueued initial-indexing rescue",
             extra={
                 "source_id": str(source_id),
-                "trigger": "auto_name_completed_without_sync",
+                "source_type": source_type,
+                "trigger": trigger,
             },
         )
         return True
     except Exception:  # noqa: BLE001
         logger.warning(
-            "auto_name_source: initial-sync rescue dispatch failed — "
-            "naming preserved, source may need a manual sync",
-            extra={"source_id": str(source_id)},
+            "auto_name_source: initial-indexing rescue dispatch failed — "
+            "naming preserved, source may need a manual sync/re-study",
+            extra={"source_id": str(source_id), "source_type": source_type},
             exc_info=True,
         )
         return False

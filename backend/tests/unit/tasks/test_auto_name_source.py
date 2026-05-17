@@ -209,7 +209,11 @@ async def test_does_not_append_history_row_when_no_prior_description() -> None:
 
 async def test_initial_sync_rescue_enqueues_when_no_sync_job_exists() -> None:
     """FX26 happy path: auto-name completed, no SyncJob row → enqueue
-    ``tasks.sync_source`` so the source actually gets ingested."""
+    ``tasks.sync_source`` so the source actually gets ingested.
+
+    FX29a: callers now pass ``source_type="file_upload"`` explicitly so
+    the rescue can route by kind.
+    """
     from src.tasks.auto_name_source import _maybe_enqueue_initial_sync
 
     dispatched: list[uuid.UUID] = []
@@ -228,7 +232,9 @@ async def test_initial_sync_rescue_enqueues_when_no_sync_job_exists() -> None:
             new=fake_dispatch,
         ),
     ):
-        enqueued = await _maybe_enqueue_initial_sync(source_id)
+        enqueued = await _maybe_enqueue_initial_sync(
+            source_id, source_type="file_upload"
+        )
 
     assert enqueued is True
     assert dispatched == [source_id]
@@ -251,7 +257,9 @@ async def test_initial_sync_rescue_skips_when_sync_job_already_exists() -> None:
             new=dispatch_mock,
         ),
     ):
-        enqueued = await _maybe_enqueue_initial_sync(uuid.uuid4())
+        enqueued = await _maybe_enqueue_initial_sync(
+            uuid.uuid4(), source_type="file_upload"
+        )
 
     assert enqueued is False
     dispatch_mock.assert_not_called()
@@ -276,7 +284,9 @@ async def test_initial_sync_rescue_swallows_dispatch_errors() -> None:
             new=boom,
         ),
     ):
-        enqueued = await _maybe_enqueue_initial_sync(uuid.uuid4())
+        enqueued = await _maybe_enqueue_initial_sync(
+            uuid.uuid4(), source_type="file_upload"
+        )
 
     assert enqueued is False
 
@@ -297,7 +307,9 @@ async def test_initial_sync_rescue_swallows_count_errors() -> None:
             new=dispatch_mock,
         ),
     ):
-        enqueued = await _maybe_enqueue_initial_sync(uuid.uuid4())
+        enqueued = await _maybe_enqueue_initial_sync(
+            uuid.uuid4(), source_type="file_upload"
+        )
 
     assert enqueued is False
     dispatch_mock.assert_not_called()
@@ -307,7 +319,11 @@ async def test_run_calls_initial_sync_rescue_after_naming_commit() -> None:
     """End-to-end: ``_run`` must invoke ``_maybe_enqueue_initial_sync``
     AFTER the naming commit, so a hook failure can't roll back the AI
     naming write. Verified by patching the hook and asserting it was
-    awaited exactly once after the session commit."""
+    awaited exactly once after the session commit.
+
+    FX29a: ``_run`` now threads the captured ``source_type`` through to
+    the rescue as a kwarg, so the rescue can route by kind.
+    """
     source = _make_pending_source()
     session, factory = _patched_session(load_returns=source)
 
@@ -334,7 +350,155 @@ async def test_run_calls_initial_sync_rescue_after_naming_commit() -> None:
     ):
         result = await _run(source.id)
 
-    rescue_mock.assert_awaited_once_with(source.id)
+    rescue_mock.assert_awaited_once_with(source.id, source_type="file_upload")
     session.commit.assert_awaited_once()
     assert result["status"] == "ai_set"
     assert result["initial_sync_enqueued"] is True
+
+
+# ---------------------------------------------------------------------------
+# FX29a — per-source-type rescue routing
+# ---------------------------------------------------------------------------
+
+
+async def test_initial_sync_rescue_routes_to_study_source_for_database() -> None:
+    """FX29a: a database source with no prior SyncJob and no running
+    schema study must dispatch ``tasks.study_source`` (the studying
+    agent), NOT ``tasks.sync_source`` — the file/crawler pipeline doesn't
+    apply to DB sources.
+    """
+    from src.tasks.auto_name_source import _maybe_enqueue_initial_sync
+
+    sync_dispatched: list[uuid.UUID] = []
+    study_dispatched: list[uuid.UUID] = []
+
+    def fake_sync(source_id: uuid.UUID) -> None:
+        sync_dispatched.append(source_id)
+
+    def fake_study(source_id: uuid.UUID) -> None:
+        study_dispatched.append(source_id)
+
+    source_id = uuid.uuid4()
+    with (
+        patch(
+            "src.tasks.auto_name_source._count_sync_jobs",
+            new=AsyncMock(return_value=0),
+        ),
+        patch(
+            "src.tasks.auto_name_source._has_running_schema_study",
+            new=AsyncMock(return_value=False),
+        ),
+        patch(
+            "src.tasks.auto_name_source._dispatch_sync_source",
+            new=fake_sync,
+        ),
+        patch(
+            "src.tasks.auto_name_source._dispatch_study_source",
+            new=fake_study,
+        ),
+    ):
+        enqueued = await _maybe_enqueue_initial_sync(
+            source_id, source_type="database"
+        )
+
+    assert enqueued is True
+    assert study_dispatched == [source_id]
+    assert sync_dispatched == []
+
+
+async def test_initial_sync_rescue_routes_to_sync_source_for_web_url() -> None:
+    """FX29a: a web_url source (and any other non-database kind) must
+    keep dispatching ``tasks.sync_source`` — that's the crawler entry
+    point. The DB-specific schema-study guard must not be consulted.
+    """
+    from src.tasks.auto_name_source import _maybe_enqueue_initial_sync
+
+    sync_dispatched: list[uuid.UUID] = []
+    study_dispatched: list[uuid.UUID] = []
+
+    def fake_sync(source_id: uuid.UUID) -> None:
+        sync_dispatched.append(source_id)
+
+    def fake_study(source_id: uuid.UUID) -> None:
+        study_dispatched.append(source_id)
+
+    source_id = uuid.uuid4()
+    with (
+        patch(
+            "src.tasks.auto_name_source._count_sync_jobs",
+            new=AsyncMock(return_value=0),
+        ),
+        patch(
+            "src.tasks.auto_name_source._dispatch_sync_source",
+            new=fake_sync,
+        ),
+        patch(
+            "src.tasks.auto_name_source._dispatch_study_source",
+            new=fake_study,
+        ),
+    ):
+        enqueued = await _maybe_enqueue_initial_sync(
+            source_id, source_type="web_url"
+        )
+
+    assert enqueued is True
+    assert sync_dispatched == [source_id]
+    assert study_dispatched == []
+
+
+async def test_initial_sync_rescue_skips_for_database_when_schema_study_running() -> None:
+    """FX29a: idempotency — if a SchemaStudy row is already in flight
+    for a DB source, the rescue must NOT enqueue a second study. Without
+    this guard a re-study triggered by the create endpoint would race
+    against this rescue.
+    """
+    from src.tasks.auto_name_source import _maybe_enqueue_initial_sync
+
+    study_mock = MagicMock()
+    with (
+        patch(
+            "src.tasks.auto_name_source._count_sync_jobs",
+            new=AsyncMock(return_value=0),
+        ),
+        patch(
+            "src.tasks.auto_name_source._has_running_schema_study",
+            new=AsyncMock(return_value=True),
+        ),
+        patch(
+            "src.tasks.auto_name_source._dispatch_study_source",
+            new=study_mock,
+        ),
+    ):
+        enqueued = await _maybe_enqueue_initial_sync(
+            uuid.uuid4(), source_type="database"
+        )
+
+    assert enqueued is False
+    study_mock.assert_not_called()
+
+
+async def test_initial_sync_rescue_skips_for_database_when_sync_job_exists() -> None:
+    """FX29a: SyncJob-row guard must trip BEFORE the schema-study guard
+    for DB sources (and the rescue must not even dispatch study_source).
+    Verifies the order of checks — a stray SyncJob row (legacy artefact)
+    is enough to skip the rescue without consulting SchemaStudy state.
+    """
+    from src.tasks.auto_name_source import _maybe_enqueue_initial_sync
+
+    study_mock = MagicMock()
+    with (
+        patch(
+            "src.tasks.auto_name_source._count_sync_jobs",
+            new=AsyncMock(return_value=1),
+        ),
+        patch(
+            "src.tasks.auto_name_source._dispatch_study_source",
+            new=study_mock,
+        ),
+    ):
+        enqueued = await _maybe_enqueue_initial_sync(
+            uuid.uuid4(), source_type="database"
+        )
+
+    assert enqueued is False
+    study_mock.assert_not_called()
