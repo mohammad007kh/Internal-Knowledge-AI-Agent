@@ -240,6 +240,15 @@ async def _run(source_id: uuid.UUID) -> dict[str, Any]:
             )
 
         # ---- Persist success in a fresh session.
+        # FX32 — flip Source.status='ready' atomically with
+        # schema_status='completed' + the study row's mark_completed. DB
+        # sources never produce chunks or last_synced_at, so the frontend's
+        # derivePhase rule-6 fallback (no job + no chunks + no
+        # last_synced_at → pending_upload) would otherwise leave a fully
+        # studied DB source stuck in pending_upload forever, blocking the
+        # admin from approving it for users. The studying agent IS what
+        # makes a DB source "ready", mirroring how a successful sync makes
+        # a file/web source "ready" — be explicit about it.
         async with AsyncSessionLocal() as success_session:
             doc_json = schema_document.model_dump(mode="json")
             await SchemaStudyRepository(success_session).mark_completed(
@@ -248,9 +257,11 @@ async def _run(source_id: uuid.UUID) -> dict[str, Any]:
                 fingerprint=schema_document.fingerprint,
                 partial=schema_document.partial,
             )
-            await SourceRepository(success_session).set_schema_status(
+            source_repo_success = SourceRepository(success_session)
+            await source_repo_success.set_schema_status(
                 source_id, "completed"
             )
+            await source_repo_success.set_status(source_id, "ready")
             await success_session.commit()
 
         logger.info(

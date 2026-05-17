@@ -332,6 +332,33 @@ class SourceRepository(BaseRepository[Source]):
         )
         await self._session.execute(stmt)
 
+    async def set_status(
+        self,
+        source_id: uuid.UUID,
+        status: str,
+    ) -> None:
+        """Stamp ``status`` on a Source row (FX32).
+
+        ``Source.status`` is the lifecycle column the chat picker + admin
+        approval gate inspect ("pending" at creation, "ready" once the
+        pipeline that owns this source type finishes successfully). The
+        studying-agent celery task calls this on success so DB sources land
+        in `derivePhase`'s `ready` branch — without this write a completed
+        DB study has `schema_status='completed'` but `status='pending'`,
+        and the frontend falls through to `'pending_upload'`.
+
+        The caller owns the transaction — this method only emits the
+        UPDATE. Accepts any string; the canonical vocabulary today is
+        ``pending`` / ``ready`` (see ``Source.status`` default + the
+        admin-approval test fixtures).
+        """
+        stmt = (
+            update(Source)
+            .where(Source.id == source_id)
+            .values(status=status)
+        )
+        await self._session.execute(stmt)
+
     async def update_connection_health(
         self,
         source_id: uuid.UUID,
