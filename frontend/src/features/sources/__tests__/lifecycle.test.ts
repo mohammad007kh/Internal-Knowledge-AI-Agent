@@ -131,6 +131,57 @@ describe('derivePhase', () => {
       })
       expect(derivePhase(s)).toBe('ready')
     })
+
+    // FX32 — without rule 2b a completed DB study with no sync_job (which
+    // is the wire shape the studying-agent leaves behind on POST /sources)
+    // fell through to rule 6's "no chunks + no last_synced_at →
+    // pending_upload" fallback, locking the admin out of the approval gate.
+    it('schema_status="completed" + no sync_job + DB source → ready (FX32)', () => {
+      const s = makeSource({
+        source_type: 'database',
+        schema_status: 'completed' as unknown as SchemaStatus,
+        latest_job: null,
+        chunk_count: 0,
+        last_synced_at: null,
+        name_status: 'ai_set' as NameStatus,
+        description_status: 'ai_set' as NameStatus,
+      })
+      expect(derivePhase(s)).toBe('ready')
+    })
+
+    it('schema_status="completed" still defers to in-flight job (FX32 guard)', () => {
+      // A re-study creates a pending sync_job; the lifecycle MUST surface
+      // the in-flight state, not the stale "ready" from the prior study.
+      const s = makeSource({
+        source_type: 'database',
+        schema_status: 'completed' as unknown as SchemaStatus,
+        latest_job: makeJob({ status: 'pending' }),
+      })
+      expect(derivePhase(s)).not.toBe('ready')
+    })
+
+    it('schema_status="completed" still defers to running job (FX32 guard)', () => {
+      const s = makeSource({
+        source_type: 'database',
+        schema_status: 'completed' as unknown as SchemaStatus,
+        latest_job: makeJob({ status: 'running' }),
+      })
+      expect(derivePhase(s)).not.toBe('ready')
+    })
+
+    it('non-DB source with schema_status="completed" is not short-circuited', () => {
+      // The early-return rule is keyed on source_type === 'database'.
+      // A web source should NEVER carry schema_status (it's a DB-only
+      // column), but if it somehow did, the rule must not fire.
+      const s = makeSource({
+        source_type: 'web_url',
+        schema_status: 'completed' as unknown as SchemaStatus,
+        latest_job: null,
+        chunk_count: 0,
+      })
+      // Falls through to rule 6 — no upload signal, no chunks → pending_upload.
+      expect(derivePhase(s)).toBe('pending_upload')
+    })
   })
 
   describe('AI naming pending', () => {

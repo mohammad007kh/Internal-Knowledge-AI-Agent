@@ -346,6 +346,33 @@ export function derivePhase(source: SourceLike): Phase {
     return 'analyzing'
   }
 
+  // 2b. FX32 — DB-source studying agent terminal success. DB sources don't
+  //     produce chunks, don't set `last_synced_at`, and don't create a
+  //     `sync_job` row when study_source runs directly (POST /sources for
+  //     type=database). Without this early return, a completed DB study
+  //     lands in rule-6's `latest_job === null` fallback, fails the
+  //     chunk_count + last_synced_at check, and pins at `pending_upload`
+  //     forever — locking the admin out of the approval gate.
+  //
+  //     The studying agent IS what makes a DB source "ready". Schema
+  //     status `'completed'` (lowercase — that's what
+  //     SourceRepository.set_schema_status writes) is the canonical signal.
+  //
+  //     Defensive guard: skip when a non-terminal sync_job is in flight
+  //     so a re-study (which creates a pending/running sync_job whose
+  //     task then flips schema_status back to 'studying') doesn't briefly
+  //     read as `ready` during the race between the API row landing and
+  //     the worker stamping 'studying'. Once schema_status flips, rule 2
+  //     takes over and surfaces `analyzing`.
+  if (
+    source.source_type === 'database' &&
+    source.schema_status === 'completed' &&
+    jobStatus !== 'pending' &&
+    jobStatus !== 'running'
+  ) {
+    return 'ready'
+  }
+
   // 3. AI naming/description pending — render the "naming" phase only when
   //    we have no other forward-progress signal. Both `naming` and
   //    `analyzing` gate availability via the same gate matrix, so the
