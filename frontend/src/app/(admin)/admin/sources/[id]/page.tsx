@@ -58,6 +58,7 @@ import {
 import { SyncStatusPill } from '@/app/(admin)/admin/sources/[id]/_components/SyncStatusPill'
 import { TestTab } from '@/app/(admin)/admin/sources/[id]/_components/TestTab'
 import { useSyncJobToast } from '@/app/(admin)/admin/sources/[id]/_components/useSyncJobToast'
+import { useUnsavedChangesGuard } from '@/hooks/useUnsavedChangesGuard'
 import {
   type FormFieldConfig,
   dataNounFor,
@@ -1382,6 +1383,11 @@ function EditableSettingsForm({ source }: EditableSettingsFormProps) {
 
   const isDirty = form.formState.isDirty
   const dirtyFieldCount = Object.keys(form.formState.dirtyFields).length
+
+  // FX36: warn before in-app nav (sidebar, breadcrumbs) or tab-close / refresh
+  // while the user has unsaved Settings edits. Guard is automatically torn
+  // down when the form saves successfully (form.reset clears isDirty).
+  useUnsavedChangesGuard(isDirty)
   const syncMode = form.watch('sync_mode')
   const currentSourceMode = form.watch('source_mode')
   const isPendingName = source.name_status === 'pending_ai'
