@@ -13,6 +13,7 @@ Visibility semantics
 from __future__ import annotations
 
 import uuid
+from datetime import datetime
 from typing import Any
 
 from sqlalchemy import func, select, update
@@ -356,6 +357,27 @@ class SourceRepository(BaseRepository[Source]):
             update(Source)
             .where(Source.id == source_id)
             .values(status=status)
+        )
+        await self._session.execute(stmt)
+
+    async def mark_ready_after_sync(
+        self,
+        source_id: uuid.UUID,
+        last_synced_at: datetime,
+    ) -> None:
+        """Flip a Source row to status='ready' + stamp last_synced_at (FX35a).
+
+        Called by sync_source.py after a successful file/web/connector sync
+        so derivePhase's no-job fallback (rule 8: source.status === 'ready'
+        → ready) carries the lifecycle to Ready. Symmetric to study_source's
+        set_status('ready') handoff for DB sources (FX32a).
+
+        Caller owns the transaction — only emits the UPDATE.
+        """
+        stmt = (
+            update(Source)
+            .where(Source.id == source_id)
+            .values(status="ready", last_synced_at=last_synced_at)
         )
         await self._session.execute(stmt)
 

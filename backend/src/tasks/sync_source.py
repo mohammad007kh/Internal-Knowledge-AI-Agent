@@ -22,6 +22,7 @@ import asyncio
 import logging
 import re
 import uuid
+from datetime import datetime, timezone
 from typing import Any
 
 from langfuse import Langfuse
@@ -566,6 +567,27 @@ async def _run_sync_pipeline(  # noqa: C901
         documents_synced=documents_synced,
         chunks_created=chunks_created,
     )
+
+    # ── 7b. Flip source.status='ready' + stamp last_synced_at (FX35a) ────────
+    # Symmetric to study_source's set_status('ready') (FX32a). Without this,
+    # file/web sources stayed source.status='pending' forever — derivePhase's
+    # no-job fallback (rule 8: source.status==='ready') never fired and the
+    # lifecycle was stuck at pending_upload. Wrapped in try/except: a flip
+    # failure must NOT undo the success commit above; the source will catch
+    # up on the next sync.
+    try:
+        async with session_factory() as flip_session:
+            await SourceRepository(flip_session).mark_ready_after_sync(
+                uuid.UUID(source_id), datetime.now(timezone.utc)
+            )
+            await flip_session.commit()
+    except Exception:
+        logger.warning(
+            "sync_source: post-success status flip failed for source %s — "
+            "lifecycle may stay pending until next sync",
+            source_id,
+            exc_info=True,
+        )
 
     result: dict[str, Any] = {
         "source_id": source_id,
