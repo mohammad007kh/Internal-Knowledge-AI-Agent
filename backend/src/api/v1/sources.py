@@ -620,6 +620,27 @@ async def get_source(
         if schema_summary is not None:
             response.schema_summary = schema_summary
 
+    # FX35b: populate latest_job for the detail page. SourceResponse used to
+    # omit this field; SourceListItem already had it on the list endpoint, so
+    # frontend's SourceDetail (which extends SourceListItem) was getting None
+    # on the detail page and derivePhase fell through to pending_upload.
+    # Wrapped in try/except — a failed enrichment (Pydantic ValidationError on
+    # a mock fixture, or a transient DB hiccup) must NOT 500 the detail
+    # endpoint; the rest of the source row is still useful.
+    try:
+        from src.repositories.sync_job_repository import SyncJobRepository  # noqa: PLC0415
+
+        sync_repo = SyncJobRepository()
+        latest = await sync_repo.latest_for_source(db, source_id)
+        if latest is not None:
+            response.latest_job = SyncJobResponse.model_validate(latest)
+    except Exception:  # noqa: BLE001 — enrichment is best-effort
+        logger.warning(
+            "get_source: latest_job enrichment failed for source %s",
+            source_id,
+            exc_info=True,
+        )
+
     return response
 
 

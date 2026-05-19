@@ -463,6 +463,14 @@ class SourceResponse(BaseModel):
     connection_status: str = "unknown"
     connection_last_checked_at: datetime | None = None
     connection_last_error: str | None = None
+    # FX35b: the most recent sync_job for this source. Populated by the
+    # source-detail endpoint after model_validate (sync_jobs is a separate
+    # table; SQLAlchemy doesn't auto-include it). Frontend's SourceDetail
+    # extends SourceListItem and the lifecycle pipeline always reads
+    # `latest_job` — without this field the detail page sees None and
+    # derivePhase falls through to its no-job branch, even when the source
+    # has multiple success sync_jobs.
+    latest_job: SyncJobResponse | None = None
 
 
 class SourceListItem(BaseModel):
