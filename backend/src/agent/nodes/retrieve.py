@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Any
 
 from langfuse import Langfuse
 
+from src.agent.nodes._schema_context import load_schema_context_chunks
 from src.agent.state import AgentState
 
 if TYPE_CHECKING:
@@ -141,20 +142,56 @@ async def retrieve_context(
     source_ids: list[str] = selected_ids if selected_ids else accessible_ids
     base_query: str = (state.get("query") or "").strip()
 
+    # FX37: chunks any upstream node (text_to_query) already produced.
+    # We preserve them across this node's return paths so the synthesizer
+    # sees BOTH SQL-result rows AND schema-context blocks — historically a
+    # bare ``return {"retrieved_chunks": chunks}`` here clobbered them.
+    upstream_chunks: list[dict[str, Any]] = list(
+        state.get("retrieved_chunks") or []
+    )
+
+    # FX37: schema-context chunks for DB sources. The studying agent's
+    # SchemaDocument lives in ``schema_studies``, NOT in the ``chunks``
+    # table — vector search would never find it. We render the latest
+    # study as a synthetic chunk so the synthesizer prompt is grounded in
+    # the actual table inventory + corpus summary for every DB source the
+    # router selected, regardless of whether ``text_to_query`` fired.
+    schema_chunks = await load_schema_context_chunks(
+        db_session, source_ids=source_ids
+    )
+
+    def _merge_with_extras(found: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Combine upstream + retrieved + schema chunks deduped on chunk_id.
+
+        Order matters for the synthesizer: schema first (it's the most
+        deterministic grounding), then vector hits, then any
+        text_to_query rows.
+        """
+        merged: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        for chunk in (*schema_chunks, *found, *upstream_chunks):
+            cid = str(chunk.get("chunk_id") or "")
+            if cid and cid in seen:
+                continue
+            if cid:
+                seen.add(cid)
+            merged.append(chunk)
+        return merged
+
     # FR-019: empty allowlist → no results, no embedding call
     if not source_ids:
         logger.warning(
             "retrieve_context: empty source_ids for user=%s — returning empty",
             state.get("user_id"),
         )
-        return {"retrieved_chunks": []}
+        return {"retrieved_chunks": _merge_with_extras([])}
 
     if not base_query:
-        return {"retrieved_chunks": []}
+        return {"retrieved_chunks": _merge_with_extras([])}
 
     queries = _build_query_list(state, base_query)
     if not queries:
-        return {"retrieved_chunks": []}
+        return {"retrieved_chunks": _merge_with_extras([])}
 
     # Langfuse v2 SDK uses .span(...) (not .start_span(...) — that's v3).
     # Project is pinned to <3 since v3 dropped the .trace() API used elsewhere
@@ -287,34 +324,53 @@ async def retrieve_context(
         ]
 
         if not chunks:
+            final_chunks = _merge_with_extras([])
             span.update(
                 output={
-                    "chunk_count": 0,
+                    "chunk_count": len(final_chunks),
+                    "vector_chunk_count": 0,
+                    "schema_chunk_count": len(schema_chunks),
                     "below_threshold": True,
                     "per_variant_top3": per_variant_top3,
                     "merged_candidates": len(ordered),
                 }
             )
-            return {"retrieved_chunks": []}
+            return {"retrieved_chunks": final_chunks}
 
+        final_chunks = _merge_with_extras(chunks)
         span.update(
             output={
-                "chunk_count": len(chunks),
+                "chunk_count": len(final_chunks),
+                "vector_chunk_count": len(chunks),
+                "schema_chunk_count": len(schema_chunks),
                 "per_variant_top3": per_variant_top3,
                 "merged_candidates": len(ordered),
             }
         )
         logger.info(
-            "retrieve_context: found %d chunks (above threshold) for query len=%d (variants=%d)",
+            "retrieve_context: found %d chunks (vector=%d schema=%d upstream=%d) for query len=%d (variants=%d)",
+            len(final_chunks),
             len(chunks),
+            len(schema_chunks),
+            len(upstream_chunks),
             len(base_query),
             len(queries),
         )
-        return {"retrieved_chunks": chunks}
+        return {"retrieved_chunks": final_chunks}
 
     except Exception:
         logger.exception("retrieve_context failed")
-        span.update(output={"chunk_count": 0, "error": True})
-        return {"retrieved_chunks": [], "error": "retrieval_failed"}
+        # Even when vector retrieval blew up, the schema-context chunks
+        # we already loaded (and any upstream text_to_query rows) are
+        # still valid grounding — keep them on the way out.
+        fallback = _merge_with_extras([])
+        span.update(
+            output={
+                "chunk_count": len(fallback),
+                "schema_chunk_count": len(schema_chunks),
+                "error": True,
+            }
+        )
+        return {"retrieved_chunks": fallback, "error": "retrieval_failed"}
     finally:
         span.end()
