@@ -155,6 +155,17 @@ class Settings(BaseSettings):
             "Sync cancellation config: require_redis=%s",
             self.SYNC_CANCELLATION_REQUIRE_REDIS,
         )
+        # In production, warn loudly (but do NOT refuse boot) when TLS to
+        # MinIO is disabled at the app layer. A self-hosted operator may
+        # legitimately keep MINIO_SECURE=False behind a TLS-terminating
+        # proxy, so this stays a warning. The endpoint/credentials are
+        # deliberately omitted from the log line.
+        if self.ENVIRONMENT == "production" and self.MINIO_SECURE is False:
+            _logger.warning(
+                "MINIO_SECURE is False in production: object-storage traffic "
+                "will be unencrypted; set MINIO_SECURE=true if MinIO is "
+                "reachable over an untrusted network."
+            )
         return self
 
     def model_post_init(self, __context: object) -> None:

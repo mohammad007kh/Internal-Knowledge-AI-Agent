@@ -88,6 +88,35 @@ async def test_hsts_absent_when_not_https():
     assert "Strict-Transport-Security" not in resp.headers
 
 
+@pytest.mark.asyncio
+async def test_hsts_ignores_x_forwarded_proto():
+    """HSTS gating is driven solely by the deployment-level ``is_https``
+    flag, NOT by request-supplied headers. A client cannot induce HSTS by
+    spoofing ``X-Forwarded-Proto: https`` on a deployment configured as
+    plain-http — this mirrors the rate limiter's refusal to trust
+    unproxied forwarding headers."""
+    app = _create_test_app(is_https=False)
+    async with AsyncClient(transport=_transport(app), base_url="http://test") as client:
+        resp = await client.get("/health", headers={"X-Forwarded-Proto": "https"})
+
+    assert resp.status_code == 200
+    assert "Strict-Transport-Security" not in resp.headers
+
+
+@pytest.mark.asyncio
+async def test_other_security_headers_unconditional_on_plain_http():
+    """All non-HSTS security headers must be present even on plain-http
+    requests where HSTS is intentionally withheld."""
+    app = _create_test_app(is_https=False)
+    async with AsyncClient(transport=_transport(app), base_url="http://test") as client:
+        resp = await client.get("/health")
+
+    assert resp.status_code == 200
+    assert "Strict-Transport-Security" not in resp.headers
+    for header, value in SECURITY_HEADERS.items():
+        assert resp.headers.get(header) == value, f"Missing or wrong: {header}"
+
+
 # ── CSRF tests ───────────────────────────────────────────────────────
 
 
