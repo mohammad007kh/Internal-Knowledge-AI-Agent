@@ -155,7 +155,7 @@ services:
       langfuse-db:
         condition: service_healthy
     environment:
-      DATABASE_URL: postgresql://langfuse:langfuse@langfuse-db:5432/langfuse
+      DATABASE_URL: postgresql://langfuse:${LANGFUSE_DB_PASSWORD:-langfuse}@langfuse-db:5432/langfuse
       NEXTAUTH_SECRET: ${LANGFUSE_SECRET_KEY}
       NEXTAUTH_URL: http://localhost:${HOST_LANGFUSE_PORT:-3001}
     restart: on-failure
@@ -165,7 +165,7 @@ services:
     environment:
       POSTGRES_DB: langfuse
       POSTGRES_USER: langfuse
-      POSTGRES_PASSWORD: langfuse
+      POSTGRES_PASSWORD: ${LANGFUSE_DB_PASSWORD:-langfuse}
     volumes:
       - langfuse_db_data:/var/lib/postgresql/data
     healthcheck:

@@ -109,6 +109,18 @@ backend/alembic/versions/__pycache__/
 playwright-report/
 test-results/
 frontend/e2e/.auth/
+# Playwright HTML report output (was committed by accident — held a stray
+# screenshot from an unrelated app). Keep it out of the tree.
+frontend/e2e/report/
+# pytest run logs — leak local Windows user paths in stack traces.
+backend/pytest_out*.txt
+backend/pytest_output*.txt
+
+# =============================================================
+# Conversation/reference scratch (not project source)
+# =============================================================
+# ReferenceImage holds screenshots shared during dev conversations only.
+docs/ReferenceImage/
 
 # =============================================================
 # SpecKit (internal AI agent scaffolding - not part of project source)
