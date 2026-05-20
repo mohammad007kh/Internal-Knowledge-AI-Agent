@@ -12,7 +12,8 @@ A self-hosted, multi-stage RAG platform for internal knowledge. Admins register 
   <img alt="Next.js" src="https://img.shields.io/badge/Next.js-15-black" />
   <img alt="Postgres" src="https://img.shields.io/badge/Postgres-16%20%2B%20pgvector-336791" />
   <img alt="LangGraph" src="https://img.shields.io/badge/LangGraph-0.2+-1c3d5a" />
-  <img alt="License" src="https://img.shields.io/badge/license-TBD-lightgrey" />
+  <img alt="License" src="https://img.shields.io/badge/license-MIT-green" />
+  <img alt="Built with Atomic Spec" src="https://img.shields.io/badge/built%20with-Atomic%20Spec-7c3aed" />
 </p>
 
 ---
@@ -76,8 +77,8 @@ For a code-grounded walkthrough — which node lives in which file, what's wired
 Prerequisites: Docker 24+, Docker Compose 2.24+.
 
 ```bash
-git clone <repo-url>
-cd "Internal Knowledge AI Agent"
+git clone https://github.com/mohammad007kh/Internal-Knowledge-AI-Agent.git
+cd Internal-Knowledge-AI-Agent
 cp .env.example .env
 cp backend/.env.example backend/.env
 # Edit both .env files — at minimum set DB_PASSWORD, MINIO_SECRET_KEY,
@@ -151,7 +152,7 @@ Host ports can be shifted (`HOST_FRONTEND_PORT`, `HOST_BACKEND_PORT`, etc.) to a
 │       ├── (admin)/         # /admin/* — sources, ai-models, llm-settings, users
 │       ├── (auth)/          # /login, /setup, /password-reset, /change-password
 │       └── (user)/          # /chat, /profile
-├── docs/                    # Code-grounded docs (agentic-system, architecture review, PRDs)
+├── docs/                    # Code-grounded docs (agentic-system, PRDs, design)
 ├── specs/                   # Atomic Spec governance artifacts
 ├── memory/constitution.md   # Non-negotiable architectural principles
 ├── docker-compose.yml       # 9-service stack
@@ -198,7 +199,7 @@ CI runs the full suite on push and PR for `main` and `develop` (see [`.github/wo
 
 ### Adding a feature
 
-This project uses the **Atomic Spec** governance framework. New features go through four phases:
+This project was built with the **[Atomic Spec](https://chappygo-os.github.io/Atomic-Spec/)** governance framework. New features go through four phases:
 
 ```
 /atomicspec.specify  →  /atomicspec.plan  →  /atomicspec.tasks  →  /atomicspec.implement
@@ -224,9 +225,9 @@ docker compose exec backend alembic upgrade head
 ## Further reading
 
 - [`docs/agentic-system.md`](docs/agentic-system.md) — how a chat message becomes an answer, node-by-node
-- [`docs/architecture-review-2026-04.md`](docs/architecture-review-2026-04.md) — five-expert review and 90-day roadmap
 - [`docs/ai-models-and-embedders-design.md`](docs/ai-models-and-embedders-design.md) — design doc for the LLM / embedder admin
-- [`memory/constitution.md`](memory/constitution.md) — non-negotiable architectural principles
+- [`docs/PRD.md`](docs/PRD.md) — product requirements
+- [Atomic Spec](https://chappygo-os.github.io/Atomic-Spec/) — the spec-driven governance framework this project was built with
 
 ## Contributing
 
@@ -251,4 +252,10 @@ Before opening a PR:
 
 ## License
 
-A top-level `LICENSE` file is not yet committed. The maintainer has not selected a license — usage rights are reserved until one is added. Open an issue if you need to use this in your own deployment.
+[MIT](LICENSE) © 2026 Mohammad Khoddami.
+
+---
+
+<p align="center">
+  Built with <a href="https://chappygo-os.github.io/Atomic-Spec/">Atomic Spec</a> — a spec-driven development governance framework.
+</p>
