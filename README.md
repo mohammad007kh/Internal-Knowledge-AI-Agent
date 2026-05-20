@@ -2,9 +2,14 @@
 
 A self-hosted, multi-stage RAG platform for internal knowledge. Admins register sources, users chat. The agent decides what to read, retrieves it, and answers with citations.
 
+<!-- Hero screenshot: drop a clean admin-UI screenshot at docs/screenshots/hero.png
+     (a path that is NOT gitignored) and uncomment the block below. The old
+     docs/ReferenceImage/ folder is gitignored — conversation scratch only. -->
+<!--
 <p align="center">
-  <img src="docs/ReferenceImage/image.png" alt="Internal Knowledge AI Agent" width="820" />
+  <img src="docs/screenshots/hero.png" alt="Internal Knowledge AI Agent" width="820" />
 </p>
+-->
 
 <p align="center">
   <img alt="Python" src="https://img.shields.io/badge/python-3.12-blue" />
