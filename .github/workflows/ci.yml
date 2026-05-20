@@ -121,7 +121,7 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Lint (ESLint)
+      - name: Lint (Biome)
         run: npm run lint
 
       - name: Type-check (tsc)

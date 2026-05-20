@@ -62,14 +62,14 @@ import {
 } from '@/lib/api/sources'
 import { cn } from '@/lib/utils'
 
-// TODO: re-add 'confluence' and 'sharepoint' once backend connectors ship (see docs/architecture-review-2026-04.md)
+// TODO: re-add 'confluence' and 'sharepoint' once their backend connectors ship.
 const SOURCE_TYPE_OPTIONS = [
   { value: 'file_upload', label: 'Files', icon: FileTextIcon, category: 'File' },
   { value: 'database', label: 'Database', icon: DatabaseIcon, category: 'Database' },
   { value: 'web_url', label: 'Web URL', icon: GlobeIcon, category: 'Web' },
 ] as const
 
-// TODO: Re-add 'recursive' once WebUrlConnector implements BFS with SSRF guard + same-domain + page-cap. See architecture-review-2026-04.md.
+// TODO: Re-add 'recursive' once WebUrlConnector implements BFS with SSRF guard + same-domain + page-cap.
 const CRAWL_MODES = ['single'] as const
 type CrawlMode = (typeof CRAWL_MODES)[number]
 
@@ -217,7 +217,7 @@ const webUrlSchema = z.object({
 
 const schema = z
   .object({
-    // TODO: re-add when backend connectors ship — see docs/architecture-review-2026-04.md
+    // TODO: re-add 'confluence' / 'sharepoint' when their backend connectors ship.
     source_type: z.enum(['database', 'file_upload', 'web_url']),
     // F9: Name is conditionally required — see superRefine below. It is
     // optional at the schema level so the form remains valid when the user
@@ -1092,7 +1092,7 @@ function DatabaseConnectionFields({
         />
       </div>
 
-      {/* TODO: Add read-only enforcement once SqlDatabaseConnector applies SET TRANSACTION READ ONLY at connect-time. See architecture-review-2026-04.md. */}
+      {/* TODO: Add read-only enforcement once SqlDatabaseConnector applies SET TRANSACTION READ ONLY at connect-time. */}
 
       {isSqlDb && (
         <FormField

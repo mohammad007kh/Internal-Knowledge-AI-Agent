@@ -84,7 +84,7 @@ Every LLM-using node looks up its config from `llm_configurations` keyed by `slo
 | `retrieval` | 🟡 not LLM | `nodes/retrieve.py` (uses embedder, not LLM) | Vector search; slot exists but isn't currently consulted |
 | `schema_inspector` | 🟡 reserved | n/a | Reserved for future schema-introspection feature |
 
-Eight of the ten slots are honest LLM calls today. The two yellow rows are stage-name placeholders for features that haven't shipped — see [`docs/architecture-review-2026-04.md`](architecture-review-2026-04.md) for the roadmap.
+Eight of the ten slots are honest LLM calls today. The two yellow rows are stage-name placeholders for features that haven't shipped yet.
 
 ---
 
@@ -166,7 +166,7 @@ LLMs and embedders are *independent* axes. You can use Anthropic LLMs with Voyag
 
 ## Honesty notes (what the UI promises vs what's wired today)
 
-The architecture review (`docs/architecture-review-2026-04.md`) called out a recurring "contract drift" bug class: UI fields collected from admins that the backend silently ignored. As of `9a3eced`, three such items have been **rolled back** until the backend ships:
+A review pass called out a recurring "contract drift" bug class: UI fields collected from admins that the backend silently ignored. Three such items have been **rolled back** until the backend ships:
 
 - ❌ "Force read-only credentials" checkbox — removed from UI. Real safety is the `is_safe_sql()` check in `text_to_query`. Re-enable when `SqlDatabaseConnector` applies `SET TRANSACTION READ ONLY` on connect.
 - ❌ Recursive crawl for Web URL sources — removed from UI. Connector reads only `config["url"]` (single page). Re-enable when BFS + dedup + per-domain rate limit + page cap is implemented.
@@ -183,8 +183,6 @@ A new SSRF guard was added to `web_url_connector.py` so a malicious admin can't 
 - **Reranker stage** (Cohere or BGE). Today retrieval is single-cosine top-K; precision suffers at long-tail queries.
 - **Hybrid retrieval** (BM25 + vector RRF). Same precision concern.
 - **RAGAS evaluation harness.** No automated quality gate. Changes ship on visual sanity testing.
-
-Full roadmap with effort sizing: `docs/architecture-review-2026-04.md`.
 
 ---
 

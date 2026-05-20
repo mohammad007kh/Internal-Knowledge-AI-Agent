@@ -581,7 +581,7 @@ async def _run_sync_pipeline(  # noqa: C901
                 uuid.UUID(source_id), datetime.now(timezone.utc)
             )
             await flip_session.commit()
-    except Exception:
+    except Exception:  # noqa: BLE001 — best-effort flip; must not undo the success commit
         logger.warning(
             "sync_source: post-success status flip failed for source %s — "
             "lifecycle may stay pending until next sync",
