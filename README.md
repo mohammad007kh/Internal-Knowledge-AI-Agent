@@ -1,6 +1,6 @@
 # Internal Knowledge AI Agent
 
-A self-hosted, multi-stage RAG platform for internal knowledge. Admins register sources, users chat. The agent decides what to read, retrieves it, and answers with citations.
+A self-hosted, multi-stage RAG platform for internal knowledge. Admins register sources, users chat. The agent decides what to read, retrieves it, and answers with citations — and every LLM stage is yours to tune and trace.
 
 <!-- Hero screenshot: drop a clean admin-UI screenshot at docs/screenshots/hero.png
      (a path that is NOT gitignored) and uncomment the block below. The old
@@ -12,7 +12,7 @@ A self-hosted, multi-stage RAG platform for internal knowledge. Admins register 
 -->
 
 <p align="center">
-  <img alt="Python" src="https://img.shields.io/badge/python-3.12-blue" />
+  <img alt="Python" src="https://img.shields.io/badge/python-3.11%2B-blue" />
   <img alt="FastAPI" src="https://img.shields.io/badge/FastAPI-0.115+-009688" />
   <img alt="Next.js" src="https://img.shields.io/badge/Next.js-15-black" />
   <img alt="Postgres" src="https://img.shields.io/badge/Postgres-16%20%2B%20pgvector-336791" />
@@ -25,23 +25,38 @@ A self-hosted, multi-stage RAG platform for internal knowledge. Admins register 
 
 ## What it is
 
-Most "chat with your docs" projects ship a single LLM call wrapped around a vector store. That works until your users start asking ambiguous questions, your sources span PDFs and Postgres, or you need to know *why* the agent answered the way it did.
+Most "chat with your docs" projects ship a single LLM call wrapped around a vector store. That works until your users ask ambiguous questions, your sources span PDFs *and* a Postgres database, or someone asks *why* the agent answered the way it did and you have no trace to point at.
 
-**Internal Knowledge AI Agent** is what those projects grow into. It is a self-hosted admin platform that ingests documents, web pages, and live SQL databases into pgvector, then runs every chat message through a **10-node LangGraph pipeline** — input guard, clarification, query rewriting, source routing, vector retrieval *or* text-to-SQL, synthesis, output guard, optional self-critique, and persistence. Every LLM call is independently configurable per stage from an admin UI, and every call is traced in Langfuse.
+**Internal Knowledge AI Agent** is what those projects grow into. It is a self-hosted admin platform that indexes files and web pages into pgvector and connects live SQL/NoSQL databases, then runs every chat message through a **multi-node LangGraph pipeline** — input safety guard, query rewriting, source routing, vector retrieval *and/or* read-only generated SQL against live databases, cited synthesis, and an output safety guard. The pipeline exposes **eleven independently-configurable LLM stages**: each stage's model, temperature, max-tokens, and prompt are set from an admin UI, and every call is traced span-by-span in Langfuse.
 
-It is built for engineering teams who need a defensible internal-knowledge assistant: clean architecture on the backend, a modern Next.js admin console, no SaaS lock-in, and the kind of observability you expect when an LLM sits between your users and your data.
+It is built for engineering teams who need a defensible internal-knowledge assistant: clean architecture on the backend, a modern Next.js admin console, no SaaS lock-in, and the observability you expect when an LLM sits between your users and your data.
+
+## Why it's different
+
+| Typical "chat with your docs" | This platform |
+| --- | --- |
+| One LLM call over a single vector store | Multi-node agent: rewrite → route → retrieve / text-to-SQL → synthesize |
+| One model, one prompt, hard-coded | **Eleven** LLM stages, each with its own model, temperature, max-tokens, and prompt |
+| Files only | Files, single-page web URLs, and SQL databases (NL→SQL, read-only) |
+| Opaque — no idea why it answered that | Per-node Langfuse spans, token streaming, configurable from the UI |
+| Hosted SaaS, your data leaves the building | Docker Compose, fully self-hosted, no external traffic required |
+| No guardrails | Input/output safety guards, SSRF guard on fetches, SQL safety hardening |
 
 ## Features
 
-- **10-node LangGraph pipeline** with two pipeline versions (v2 default, v1 30-second rollback) and an opt-in self-critic node
-- **Three source types shipped end-to-end:** `file_upload` (PDF / DOCX / TXT / MD via MinIO), `database` (Postgres, async SQLAlchemy + SQL safety check), `web_url` (single-page fetch with SSRF guard against RFC1918, loopback, link-local, and cloud metadata)
-- **Admin-configurable LLMs per stage** — set the model, temperature, max tokens, and custom prompt independently for `input_guard`, `clarification_detector`, `query_analyzer`, `source_router`, `text_to_query`, `synthesizer`, `output_guard`, and `reflector`
-- **Embedder management** with a hard invariant: exactly one active embedder per deployment, enforced by partial unique index. Cross-embedder query mismatches are impossible.
+- **Multi-node LangGraph pipeline** with two graph versions (v2 default, v1 as a fast rollback path) and conditional nodes for clarification and self-critique
+- **Eleven admin-tunable LLM stages** — set the model, temperature, max-tokens, and custom prompt independently for `schema_inspector`, `clarification_detector`, `query_analyzer`, `source_router`, `retrieval`, `text_to_query`, `synthesizer`, `reflector`, `input_guard`, `output_guard`, and `titler`, each with a per-stage connection test in the UI
+- **Source types shipped end-to-end:**
+  - `file_upload` — PDF / DOCX / XLSX / CSV / TXT / MD, stored in MinIO
+  - `web_url` — **single-page** fetch only (no recursive crawl) with an SSRF guard against RFC1918, loopback, link-local, and cloud-metadata addresses, plus robots and size caps
+  - `database` — PostgreSQL / MySQL / SQL Server via SQLAlchemy, with experimental MongoDB support via Motor
+- **Natural-language → SQL** for database sources: `sqlglot` validation, read-only hardening, and automatic `LIMIT` injection before any generated query touches your data
+- **Per-stage model resolution** — admins register models, bind one per stage; the resolver caches and pools `AsyncOpenAI` clients, talks to any provider via an OpenAI-compatible `base_url`, and stores keys encrypted at rest with Fernet
+- **Embedder management** with a hard invariant: exactly one active embedder per deployment, enforced by a partial unique index. Cross-embedder query mismatches are impossible.
 - **Source studying agent** for database sources: introspects schemas, generates source descriptions, and feeds them into `text_to_query` SQL generation
-- **Streaming answers via SSE** with inline citations hydrated from chunk metadata
-- **Per-user source scoping** at the chat-session level; the router picks a subset of accessible sources per query
-- **Account lockout** layered on per-IP rate limiting (sliding window, Redis-backed, fail-open or fail-closed configurable)
-- **Langfuse observability** on every LLM call out of the box (self-hosted, no external traffic)
+- **Streaming answers via SSE** with a thinking indicator and inline numbered citations that open a slide-over panel (relevance %, excerpt, link), plus feedback thumbs and a source-scoped session selector
+- **Langfuse observability** on every LLM call, per node, out of the box — degrades cleanly to a no-op when no keys are present (self-hosted, no external traffic)
+- **Security by default** — JWT access tokens with opaque, DB-stored, revocable refresh tokens; per-email account lockout (Redis) layered on per-IP rate limiting; CSRF double-submit; CSP / HSTS / anti-clickjacking headers (HSTS production-gated)
 - **Celery + Redis** for async ingestion, with a single-replica Beat scheduler (duplicate beat = double-scheduling, enforced in compose)
 - **Docker Compose deployment** — nine services, one command, no Kubernetes required
 
@@ -65,17 +80,18 @@ flowchart LR
   worker --> mo
 ```
 
-Inside the backend, every chat message flows through the LangGraph pipeline:
+Inside the backend, every chat message flows through the LangGraph pipeline (v2 topology; clarification and reflector are conditional nodes, **off by default**):
 
 ```
-load_history → guardrail_input → check_clarification → query_analyzer → source_router
-   ├─ retrieve_context  (pgvector cosine search)
-   └─ text_to_query     (SQL generation for database sources)
-                                                    ↓
-        generate_response → [reflector?] → format_response → guardrail_output → persist
+load_history → guardrail_input → [clarification?] → query_analyzer → source_router
+   → [text_to_query]   (read-only SQL for routed database sources)
+   → retrieve_context  (pgvector cosine search, HNSW index — always runs)
+   → generate_response → [reflector?] → format_response → guardrail_output
 ```
 
-For a code-grounded walkthrough — which node lives in which file, what's wired vs aspirational, how citations are hydrated — read [`docs/agentic-system.md`](docs/agentic-system.md).
+When a database source is routed to `text_to_query`, that node runs first and then
+chains into `retrieve_context`, so vector retrieval for any non-DB sources still
+happens in the same pass. A v1 legacy graph is retained for rollback. For a code-grounded walkthrough — which node lives in which file, what's wired vs aspirational, how citations are hydrated — read [`docs/agentic-system.md`](docs/agentic-system.md).
 
 ## Quick start
 
@@ -108,9 +124,9 @@ The backend runs `alembic upgrade head` automatically on startup. When all healt
 
 Log in at http://localhost:3000/login with the `BOOTSTRAP_ADMIN_EMAIL` and `BOOTSTRAP_ADMIN_PASSWORD` you set in `backend/.env`. Then:
 
-1. Visit `/admin/ai-models` and add an LLM provider (OpenAI / Anthropic / etc.) and an embedder
-2. Visit `/admin/llm-settings` and bind each of the eight LLM-using pipeline stages to a model
-3. Visit `/admin/sources` and register a source (upload a PDF, add a database, or paste a URL)
+1. Visit `/admin/ai-models` and add an LLM provider (any OpenAI-compatible endpoint) and an embedder
+2. Visit `/admin/llm-settings` and bind each pipeline stage to a model (eleven configurable stages; use the per-stage connection test to confirm each one)
+3. Visit `/admin/sources` and register a source (upload a file, add a database, or paste a single-page URL)
 4. Open `/chat`, scope the session to that source, and ask a question
 
 ## Configuration
@@ -127,7 +143,7 @@ All environment variables are documented in [`.env.example`](.env.example) (comp
 | `BOOTSTRAP_ADMIN_EMAIL`      | First admin account (auto-created on startup)                               |
 | `BOOTSTRAP_ADMIN_PASSWORD`   | First admin password                                                        |
 | `LANGFUSE_PUBLIC_KEY` / `_SECRET_KEY` | Langfuse credentials for trace shipping                            |
-| `PIPELINE_V2_ENABLED`        | `true` (default) for full 10-node pipeline; `false` for v1 rollback         |
+| `PIPELINE_V2_ENABLED`        | `true` (default) for the multi-node v2 pipeline; `false` for v1 rollback    |
 | `PIPELINE_REFLECTOR_ENABLED` | `false` (default). Adds a self-critic LLM call per query when `true`        |
 | `LOCKOUT_ENABLED`            | Layered account lockout on top of per-IP rate limiting                      |
 
@@ -177,6 +193,8 @@ pip install -e ".[dev]"
 uvicorn src.main:app --reload --port 8000
 ```
 
+Tooling: `ruff` (lint), `mypy --strict` (types), `pytest` with an 80% coverage gate.
+
 ### Frontend
 
 ```bash
@@ -184,6 +202,8 @@ cd frontend
 pnpm install
 pnpm dev
 ```
+
+Tooling: Biome (lint/format), Vitest (unit), Playwright + axe-core (e2e + accessibility).
 
 ### Tests
 
@@ -200,7 +220,7 @@ pnpm test:unit          # vitest
 pnpm test:e2e           # playwright
 ```
 
-CI runs the full suite on push and PR for `main` and `develop` (see [`.github/workflows/ci.yml`](.github/workflows/ci.yml)).
+CI (`.github/workflows/ci.yml`) runs the backend `pytest` suite and the frontend Vitest unit tests on push and PR for `main` and `develop`. Playwright e2e runs in separate workflows.
 
 ### Adding a feature
 
