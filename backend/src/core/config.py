@@ -18,6 +18,12 @@ class Settings(BaseSettings):
     JWT_ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 15
     REFRESH_TOKEN_EXPIRE_DAYS: int = 7
+    # When the login form sets remember_me=true, the refresh cookie's max-age
+    # is extended to this many days instead of REFRESH_TOKEN_EXPIRE_DAYS.
+    # The token itself still rotates on every refresh; this only controls
+    # how long the browser persists the cookie before the user must
+    # re-authenticate from scratch.
+    REFRESH_TOKEN_REMEMBER_ME_DAYS: int = 30
     # MinIO
     # MINIO_ENDPOINT is the internal endpoint the backend uses to talk to
     # MinIO (inside the Docker network this is the service name `minio:9000`).
@@ -80,6 +86,14 @@ class Settings(BaseSettings):
     LOCKOUT_MAX_FAILS: int = 10
     LOCKOUT_WINDOW_SECS: int = 900       # 15-min sliding window
     LOCKOUT_DURATION_SECS: int = 1800    # 30-min lockout after threshold
+    # Sync cancellation (U16) — Redis-backed cooperative cancel flag for
+    # the sync_source + study_source Celery tasks. When the running task's
+    # checkpoint can't reach Redis we MUST NOT silently treat the read as
+    # "cancelled" — that would terminate real in-flight syncs on any
+    # transient Redis blip. Mirrors LOCKOUT_REQUIRE_REDIS: fail-closed in
+    # prod (re-raise the Redis error so the task's standard failure path
+    # records it), fail-open in dev (log + treat as not cancelled).
+    SYNC_CANCELLATION_REQUIRE_REDIS: bool = True
     # Pipeline v2 — wires the 4 dead admin slots
     # (clarification_detector, query_analyzer, source_router, text_to_query)
     # plus the optional reflector retry loop. Falls back to v1 (the legacy
@@ -90,6 +104,15 @@ class Settings(BaseSettings):
     # Reflector self-critic — costly per Constitution; OFF by default.
     PIPELINE_REFLECTOR_ENABLED: bool = False
     PIPELINE_REFLECTOR_MAX_RETRIES: int = 1
+    # Clarification gate. The LLM clarifier was over-eager on first-turn
+    # questions ("references entities not yet introduced" fires on virtually
+    # every fresh query in a RAG system), short-circuiting retrieve_context
+    # and forcing the user through "Could you please specify..." round-trips
+    # before the bot ever tried to find an answer. OFF by default so retrieve
+    # is the gate: if no chunks come back, the synthesizer naturally says so.
+    # The node code is kept; admins can re-enable per-environment without
+    # redeploying.
+    PIPELINE_CLARIFY_ENABLED: bool = False
     # App config (loaded from YAML)
     upload_max_size_bytes: int = 52428800
     upload_supported_formats: list[str] = ["pdf", "docx", "xlsx", "csv", "txt", "md"]
@@ -104,12 +127,21 @@ class Settings(BaseSettings):
         Pydantic Settings supplies env values via attribute assignment, so we
         only flip the default when the env var is *not* present in the process
         environment. This keeps prod fail-closed while making dev forgiving.
+
+        Also relaxes :data:`SYNC_CANCELLATION_REQUIRE_REDIS` under the same
+        rule — a dev contributor without Redis up MUST NOT see real
+        in-flight syncs get phantom-cancelled by a Redis read error.
         """
         if (
             self.ENVIRONMENT == "development"
             and "LOCKOUT_REQUIRE_REDIS" not in os.environ
         ):
             object.__setattr__(self, "LOCKOUT_REQUIRE_REDIS", False)
+        if (
+            self.ENVIRONMENT == "development"
+            and "SYNC_CANCELLATION_REQUIRE_REDIS" not in os.environ
+        ):
+            object.__setattr__(self, "SYNC_CANCELLATION_REQUIRE_REDIS", False)
         _logger.info(
             "Account lockout config: enabled=%s require_redis=%s "
             "max_fails=%d window_secs=%d duration_secs=%d",
@@ -119,6 +151,21 @@ class Settings(BaseSettings):
             self.LOCKOUT_WINDOW_SECS,
             self.LOCKOUT_DURATION_SECS,
         )
+        _logger.info(
+            "Sync cancellation config: require_redis=%s",
+            self.SYNC_CANCELLATION_REQUIRE_REDIS,
+        )
+        # In production, warn loudly (but do NOT refuse boot) when TLS to
+        # MinIO is disabled at the app layer. A self-hosted operator may
+        # legitimately keep MINIO_SECURE=False behind a TLS-terminating
+        # proxy, so this stays a warning. The endpoint/credentials are
+        # deliberately omitted from the log line.
+        if self.ENVIRONMENT == "production" and self.MINIO_SECURE is False:
+            _logger.warning(
+                "MINIO_SECURE is False in production: object-storage traffic "
+                "will be unencrypted; set MINIO_SECURE=true if MinIO is "
+                "reachable over an untrusted network."
+            )
         return self
 
     def model_post_init(self, __context: object) -> None:

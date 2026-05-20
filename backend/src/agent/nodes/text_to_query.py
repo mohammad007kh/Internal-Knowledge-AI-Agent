@@ -8,8 +8,12 @@ For each such source the node:
 
 1. Resolves the source's connection config from the DB.
 2. Generates a SQL SELECT via the LLM.
-3. Validates the SQL is read-only (see :func:`is_safe_sql`).
-4. Wraps it as ``SELECT * FROM ({generated_sql}) AS _q LIMIT 100``.
+3. Validates the SQL is read-only via the shared sqlglot-based
+   :func:`src.services.db_safety.validate_sql` (no more regex
+   blocklist false-positives on column names like ``update_at``).
+4. Appends ``LIMIT 100`` via the dialect-aware
+   :func:`src.services.db_safety.inject_limit` (works on MSSQL's
+   ``OFFSET / FETCH NEXT`` too).
 5. Executes it; appends each row as a chunk so ``persist`` renders citations.
 
 State writes (merged into existing fields):
@@ -27,7 +31,6 @@ anything that is not a single ``SELECT`` statement.
 from __future__ import annotations
 
 import logging
-import re
 import uuid
 from typing import TYPE_CHECKING, Any
 
@@ -38,6 +41,11 @@ from src.agent.state import AgentState
 from src.core.crypto import decrypt
 from src.models.enums import SourceType
 from src.prompts import load_prompt
+from src.services.db_safety import (
+    harden_postgres_connection,
+    inject_limit,
+    validate_sql,
+)
 
 if TYPE_CHECKING:
     from langfuse import Langfuse
@@ -50,55 +58,30 @@ logger = logging.getLogger(__name__)
 
 _STAGE = "text_to_query"
 _LIMIT = 100
-_FORBIDDEN_KEYWORDS = (
-    "INSERT",
-    "UPDATE",
-    "DELETE",
-    "DROP",
-    "ALTER",
-    "CREATE",
-    "TRUNCATE",
-    "GRANT",
-    "REVOKE",
-    "EXEC",
-    "MERGE",
-    "CALL",
-)
+
+# Map ``config["db_type"]`` to a sqlglot dialect name.  ``mssql`` is sqlglot's
+# ``tsql``; everything else falls back to ``postgres`` (the strictest parser
+# of the supported set, which is the right safety default).
+_DIALECT_BY_DB_TYPE: dict[str, str] = {
+    "postgresql": "postgres",
+    "mysql": "mysql",
+    "mssql": "tsql",
+}
 
 
-def is_safe_sql(sql: str) -> tuple[bool, str]:
-    """Return (safe, reason).  reason is empty when safe."""
-    if not isinstance(sql, str):
-        return False, "sql is not a string"
-    stripped = sql.strip()
-    # Strip a single trailing semicolon (some LLMs add one despite the prompt).
-    if stripped.endswith(";"):
-        stripped = stripped[:-1].rstrip()
-    if not stripped:
-        return False, "empty sql"
-    # Must start with SELECT (case-insensitive).
-    if not re.match(r"^\s*SELECT\b", stripped, flags=re.IGNORECASE):
-        return False, "must start with SELECT"
-    # Reject any further semicolons (multi-statement).
-    if ";" in stripped:
-        return False, "contains semicolon (multi-statement)"
-    # Reject SQL line / block comments.
-    if "--" in stripped or "/*" in stripped:
-        return False, "contains comments"
-    # Reject any forbidden keyword anywhere as a whole word.
-    upper = stripped.upper()
-    for kw in _FORBIDDEN_KEYWORDS:
-        if re.search(rf"\b{re.escape(kw)}\b", upper):
-            return False, f"forbidden keyword {kw}"
-    return True, ""
+def _dialect_for(config: dict[str, Any]) -> str:
+    return _DIALECT_BY_DB_TYPE.get(str(config.get("db_type", "")), "postgres")
 
 
-def wrap_with_limit(sql: str, *, limit: int = _LIMIT) -> str:
-    """Wrap *sql* with an outer ``SELECT * FROM (...) AS _q LIMIT N``."""
-    inner = sql.strip()
-    if inner.endswith(";"):
-        inner = inner[:-1].rstrip()
-    return f"SELECT * FROM ({inner}) AS _q LIMIT {limit}"
+# NOTE: The previous regex-based ``is_safe_sql`` and subquery-wrapping
+# ``wrap_with_limit`` helpers have been removed from this module.  All
+# callers now go through the shared sqlglot-based primitives:
+#
+#     from src.services.db_safety import validate_sql, inject_limit
+#
+# This eliminates the documented false-positive on column names like
+# ``update_at`` / ``call`` / ``delete_at`` that the old keyword blocklist
+# triggered on, and produces dialect-correct output on MSSQL.
 
 
 def _row_to_text(row: Any) -> str:
@@ -156,12 +139,32 @@ def _decrypt_source_config(source: Any) -> dict[str, Any] | None:
 async def _execute(
     connection_string: str,
     sql: str,
+    *,
+    db_type: str,
 ) -> list[Any]:
-    """Run *sql* against *connection_string*; returns list of mapping rows."""
+    """Run *sql* against *connection_string*; returns list of mapping rows.
+
+    For Postgres sources the connection string is run through
+    ``harden_postgres_connection`` so ``default_transaction_read_only=on`` and
+    ``statement_timeout`` apply at the libpq level — defense in depth alongside
+    ``validate_sql``. Other dialects fall back to the raw string until Phase 2
+    ships their hardening helpers.
+    """
+    connect_args: dict[str, Any] = {}
+    if db_type == "postgresql":
+        connection_string = await harden_postgres_connection(connection_string)
+        # asyncpg refuses libpq ?options=; harden via server_settings.
+        if connection_string.startswith("postgresql+asyncpg"):
+            from src.services.db_safety import (  # noqa: PLC0415
+                postgres_asyncpg_connect_args,
+            )
+
+            connect_args = postgres_asyncpg_connect_args()
     engine = create_async_engine(
         connection_string,
         pool_size=1,
         max_overflow=0,
+        connect_args=connect_args,
     )
     try:
         async with engine.connect() as conn:
@@ -228,8 +231,15 @@ async def text_to_query(
                 skipped.append(sid)
                 continue
 
-            # Schema sketch — pull from cached description for now.
-            schema_sketch = source.description or ""
+            # Schema sketch — prefer the studying agent's persisted
+            # SchemaDocument over the AI-authored description. The Phase 1
+            # Wave 1 studying agent persists a structured doc into
+            # ``schema_studies.schema_document_json``; that's a much
+            # higher-signal input for SQL generation than the freeform
+            # description (which targets retrieval routing, not query
+            # synthesis). Fall back to ``source.description`` only when
+            # no study has completed yet.
+            schema_sketch = await _load_schema_sketch(db_session, source)
 
             try:
                 raw_sql = await _generate_sql(
@@ -245,21 +255,37 @@ async def text_to_query(
                 skipped.append(sid)
                 continue
 
-            safe, reason = is_safe_sql(raw_sql)
-            if not safe:
+            dialect = _dialect_for(config)
+            validation = validate_sql(raw_sql, dialect=dialect)
+            if not validation.is_safe:
                 logger.warning(
                     "text_to_query: unsafe SQL for source=%s reason=%s — skipping",
                     sid,
-                    reason,
+                    validation.error_key,
                 )
                 skipped.append(sid)
                 continue
 
-            wrapped = wrap_with_limit(raw_sql, limit=_LIMIT)
+            try:
+                wrapped = inject_limit(raw_sql, n=_LIMIT, dialect=dialect)
+            except ValueError:
+                # Defensive: validate_sql passed but inject_limit choked.
+                # Skip this source rather than emit a half-formed query.
+                logger.warning(
+                    "text_to_query: limit injection failed for source=%s — skipping",
+                    sid,
+                    exc_info=True,
+                )
+                skipped.append(sid)
+                continue
             generated_sql[sid] = wrapped
 
             try:
-                rows = await _execute(config["connection_string"], wrapped)
+                rows = await _execute(
+                    config["connection_string"],
+                    wrapped,
+                    db_type=str(config.get("db_type", "")),
+                )
             except Exception:  # noqa: BLE001
                 logger.warning(
                     "text_to_query: execution failed for source=%s — skipping",
@@ -303,3 +329,110 @@ async def text_to_query(
         }
     finally:
         span.end()
+
+
+# ---------------------------------------------------------------------------
+# Schema-sketch loader
+# ---------------------------------------------------------------------------
+
+
+_MAX_TABLES_FOR_SKETCH = 30
+"""Cap how many tables we render into the SQL-generation prompt. Past this
+the LLM stops paying attention; truncation is documented in the prompt."""
+
+
+async def _load_schema_sketch(
+    db: "AsyncSession",  # noqa: F821 — forward ref under TYPE_CHECKING
+    source: Any,
+) -> str:
+    """Render the latest persisted SchemaDocument as a compact text block
+    suitable for the text-to-SQL prompt.
+
+    Falls back to ``source.description`` when no SchemaStudy exists yet
+    (e.g., source created before Wave 1 shipped, or studying agent hasn't
+    finished its first run).
+
+    The shape we emit is deliberately deterministic so prompt tokens stay
+    stable — one line per table with type/PK/columns and a trailing
+    relationships block.
+    """
+    from sqlalchemy import select  # noqa: PLC0415
+
+    from src.models.schema_study import SchemaStudy  # noqa: PLC0415
+    from src.services.db_introspection.schema_doc import SchemaDocument  # noqa: PLC0415
+
+    stmt = (
+        select(SchemaStudy)
+        .where(SchemaStudy.source_id == source.id)
+        .where(SchemaStudy.schema_document_json.is_not(None))
+        .order_by(SchemaStudy.finished_at.desc().nulls_last())
+        .limit(1)
+    )
+    study = (await db.execute(stmt)).scalar_one_or_none()
+    if study is None or study.schema_document_json is None:
+        return source.description or ""
+
+    try:
+        doc = SchemaDocument.model_validate(study.schema_document_json)
+    except Exception:  # noqa: BLE001 — bad JSON shape is recoverable
+        logger.warning(
+            "text_to_query: schema_document_json failed strict validation — "
+            "falling back to source.description",
+            extra={"source_id": str(source.id)},
+            exc_info=True,
+        )
+        return source.description or ""
+
+    return _render_schema_sketch(doc)
+
+
+def _render_schema_sketch(doc: "SchemaDocument") -> str:  # noqa: F821
+    """Format a :class:`SchemaDocument` into a compact text block the LLM
+    can read efficiently.
+
+    Format::
+
+        Dialect: postgresql
+        Tables:
+        - public.orders (table) PK=[id]
+            columns: id:int, customer_id:int, total:float, ...
+            description: Per-customer purchase orders.
+        - public.customers (table) PK=[id]
+            columns: id:int, email:text, ...
+        Relationships:
+        - public.orders.customer_id -> public.customers.id
+
+    Truncates beyond _MAX_TABLES_FOR_SKETCH and notes the truncation
+    inline so the LLM knows it doesn't have the full schema.
+    """
+    lines: list[str] = [f"Dialect: {doc.dialect}", "Tables:"]
+    considered = doc.tables[:_MAX_TABLES_FOR_SKETCH]
+    for table in considered:
+        pk_str = f" PK=[{', '.join(table.primary_key)}]" if table.primary_key else ""
+        lines.append(f"- {table.name} ({table.kind}){pk_str}")
+        if table.columns:
+            cols = ", ".join(
+                f"{c.name}:{c.type}" for c in table.columns[:20]
+            )
+            if len(table.columns) > 20:
+                cols += f", ... (+{len(table.columns) - 20} more)"
+            lines.append(f"    columns: {cols}")
+        if table.description.strip():
+            # Cap per-table description so a single chatty table can't
+            # blow the prompt budget.
+            lines.append(f"    description: {table.description.strip()[:200]}")
+    if len(doc.tables) > _MAX_TABLES_FOR_SKETCH:
+        extra = len(doc.tables) - _MAX_TABLES_FOR_SKETCH
+        lines.append(f"  (truncated — {extra} additional tables not shown)")
+
+    relationships: list[str] = []
+    for table in considered:
+        for rel in table.relationships:
+            from_cols = ".".join([table.name, ",".join(rel.from_columns)])
+            to_cols = ".".join([rel.to_table, ",".join(rel.to_columns)])
+            relationships.append(f"- {from_cols} -> {to_cols}")
+    if relationships:
+        lines.append("Relationships:")
+        lines.extend(relationships)
+
+    return "\n".join(lines)

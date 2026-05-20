@@ -23,9 +23,15 @@ class SourceType(enum.StrEnum):
 
 
 class SyncStatus(enum.StrEnum):
-    """Lifecycle states for a SyncJob run."""
+    """Lifecycle states for a SyncJob run.
+
+    ``CANCELLED`` is a fifth terminal state introduced by U16 for cooperative
+    cancellation. A task marked CANCELLED has exited at a safe checkpoint —
+    work completed so far is retained, but no further steps will run.
+    """
 
     PENDING = "pending"
     RUNNING = "running"
     SUCCESS = "success"
     FAILED = "failed"
+    CANCELLED = "cancelled"

@@ -5,7 +5,7 @@ import { useSidebar } from '@/components/dashboard/SidebarProvider'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { apiClient } from '@/lib/api-client'
 import { cn } from '@/lib/utils'
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   ChevronRightIcon,
   ListIcon,
@@ -13,27 +13,140 @@ import {
   MessageSquareIcon,
   PlusIcon,
 } from 'lucide-react'
-import { usePathname, useRouter } from 'next/navigation'
+import { usePathname } from 'next/navigation'
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { toast } from 'sonner'
 import { useSelectedSession } from './SelectedSessionContext'
 import { SessionListSheet } from './SessionListSheet'
+import {
+  SessionDeleteDialog,
+  SessionEditInput,
+  SessionRowKebab,
+  useSessionRowActions,
+} from './SessionRowActions'
+import type { Message, SessionMessagesResponse } from './types'
 
 interface ChatSession {
   id: string
-  title: string
+  // Nullable since U15 (lazy creation): a brand-new session may exist for
+  // a few hundred ms with no title yet. The sidebar falls back to a
+  // preview of the first user message in that window.
+  title: string | null
   created_at: string
   updated_at: string
   message_count: number
 }
 
+/** Characters to slice off the first user message for the fallback label. */
+const FALLBACK_TITLE_CHARS = 30
+const FALLBACK_PLACEHOLDER = 'New chat'
+
+/**
+ * Compose the label rendered for a session row. Prefers the real title;
+ * when the row was created via U15 lazy-creation and the titler hasn't yet
+ * landed, falls back to the first user message read from the cached
+ * messages query, truncated to a short preview.
+ */
+function useSessionLabel(session: ChatSession): string {
+  const queryClient = useQueryClient()
+  return useMemo(() => {
+    if (session.title) return session.title
+    const cached = queryClient.getQueryData<SessionMessagesResponse>([
+      'chat-session-messages',
+      session.id,
+    ])
+    const firstUser = cached?.messages?.find((m: Message) => m.role === 'user')
+    const preview = firstUser?.content?.trim()
+    if (preview) {
+      return preview.length > FALLBACK_TITLE_CHARS
+        ? `${preview.slice(0, FALLBACK_TITLE_CHARS).trimEnd()}…`
+        : preview
+    }
+    return FALLBACK_PLACEHOLDER
+  }, [session.id, session.title, queryClient])
+}
+
 interface SessionsResponse {
-  items: ChatSession[]
+  // Backend chat-sessions envelope is `{sessions, total}` — the lone outlier
+  // in our paginated APIs. See backend/src/schemas/chat.py.
+  sessions: ChatSession[]
   total: number
 }
 
 interface ChatSidebarGroupProps {
   onNavigate?: () => void
+}
+
+interface SidebarSessionRowProps {
+  session: ChatSession
+  isActive: boolean
+  onSelect: () => void
+}
+
+/**
+ * Single recent-chat row in the sidebar disclosure. Owns its own
+ * `useSessionRowActions` so the kebab + inline rename input are
+ * fully self-contained — the parent group just hands us the session
+ * and the select callback.
+ *
+ * The dialog is rendered alongside each row (rather than once at the
+ * group level) because each row owns its own dialog-open state via the
+ * shared hook. Only one can be open at a time in practice — clicking
+ * Delete on row B while row A's dialog is open reuses A's state slot
+ * via the kebab close, but each row is a stable component instance and
+ * the dialog is portalled, so this is safe.
+ */
+function SidebarSessionRow({ session, isActive, onSelect }: SidebarSessionRowProps) {
+  const actions = useSessionRowActions(session)
+  const label = useSessionLabel(session)
+
+  return (
+    <li>
+      <div
+        className={cn(
+          'group flex w-full items-center gap-2 rounded-md px-3 py-1.5 text-left text-xs transition-colors',
+          isActive
+            ? 'bg-accent text-accent-foreground'
+            : 'text-muted-foreground hover:bg-accent/50 hover:text-foreground'
+        )}
+      >
+        <MessageSquareIcon className="h-3 w-3 shrink-0 opacity-70" aria-hidden />
+        {actions.isEditing ? (
+          <div
+            className="flex flex-1 items-center gap-1"
+            onClick={(e) => e.stopPropagation()}
+            onKeyDown={(e) => e.stopPropagation()}
+          >
+            <SessionEditInput
+              initialTitle={session.title ?? ''}
+              value={actions.editTitle}
+              onChange={actions.setEditTitle}
+              onCommit={actions.commitEdit}
+              onCancel={actions.cancelEdit}
+            />
+          </div>
+        ) : (
+          <>
+            <button
+              type="button"
+              onClick={onSelect}
+              aria-current={isActive ? 'page' : undefined}
+              aria-label={`Chat session: ${label}`}
+              className="min-w-0 flex-1 truncate text-left"
+            >
+              {label}
+            </button>
+            <SessionRowKebab session={session} actions={actions} />
+          </>
+        )}
+      </div>
+      <SessionDeleteDialog
+        open={actions.deleteOpen}
+        onOpenChange={actions.setDeleteOpen}
+        onConfirm={actions.confirmDelete}
+        title={label}
+      />
+    </li>
+  )
 }
 
 const STORAGE_KEY = 'ui:nav-group-chat'
@@ -74,12 +187,10 @@ function writeStored(value: boolean): void {
  */
 export function ChatSidebarGroup({ onNavigate }: ChatSidebarGroupProps) {
   const pathname = usePathname()
-  const router = useRouter()
   const { collapsed: ctxCollapsed, isMobile } = useSidebar()
   const collapsed = isMobile ? false : ctxCollapsed
 
   const { sessionId, setSessionId } = useSelectedSession()
-  const queryClient = useQueryClient()
 
   const [sheetOpen, setSheetOpen] = useState(false)
   const [userExpanded, setUserExpanded] = useState<boolean>(false)
@@ -116,7 +227,7 @@ export function ChatSidebarGroup({ onNavigate }: ChatSidebarGroupProps) {
   })
 
   const sessions = useMemo(() => {
-    const items = data?.items ?? []
+    const items = data?.sessions ?? []
     return [...items]
       .sort((a, b) => (a.updated_at < b.updated_at ? 1 : -1))
       .slice(0, MAX_INLINE_SESSIONS)
@@ -125,33 +236,24 @@ export function ChatSidebarGroup({ onNavigate }: ChatSidebarGroupProps) {
   const totalSessions = data?.total ?? 0
   const hasMore = totalSessions > MAX_INLINE_SESSIONS
 
-  const createMutation = useMutation({
-    mutationFn: async (): Promise<ChatSession> => {
-      const res = await apiClient.post<ChatSession>('/api/v1/chat/sessions', {
-        title: 'New chat',
-      })
-      return res.data
-    },
-    onSuccess: (session) => {
-      queryClient.invalidateQueries({ queryKey: ['chat-sessions'] })
-      setSessionId(session.id)
-      if (!onChatRoute) {
-        router.push('/chat')
-      }
-      onNavigate?.()
-    },
-    onError: () => toast.error('Failed to create session.'),
-  })
+  // U15 lazy creation: the "+" button no longer fires `POST /sessions`.
+  // It just clears any active selection so the URL lands on `/chat`,
+  // where the empty-hero composer is ready to accept the first message.
+  // The actual session row is created server-side when the user sends.
+  const handleNewChat = useCallback(() => {
+    setSessionId(null, { replace: true })
+    onNavigate?.()
+  }, [setSessionId, onNavigate])
 
   const handleSelect = useCallback(
     (id: string) => {
+      // `setSessionId` is now URL-driven and will navigate to `/chat/<id>`
+      // from any route in the user shell — no manual `router.push('/chat')`
+      // needed.
       setSessionId(id)
-      if (!onChatRoute) {
-        router.push('/chat')
-      }
       onNavigate?.()
     },
-    [setSessionId, onChatRoute, router, onNavigate]
+    [setSessionId, onNavigate]
   )
 
   const openAllChats = useCallback(() => {
@@ -225,8 +327,7 @@ export function ChatSidebarGroup({ onNavigate }: ChatSidebarGroupProps) {
         <button
           type="button"
           aria-label="New chat"
-          disabled={createMutation.isPending}
-          onClick={() => createMutation.mutate()}
+          onClick={handleNewChat}
           // 44x44 hit target on mobile per WCAG 2.5.5; condenses to 24x24
           // visually on desktop where pointer precision is higher.
           className="flex h-11 w-11 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground md:h-6 md:w-6"
@@ -243,27 +344,14 @@ export function ChatSidebarGroup({ onNavigate }: ChatSidebarGroupProps) {
             </p>
           ) : (
             <ul className="space-y-0.5">
-              {sessions.map((session) => {
-                const isActive = session.id === sessionId && onChatRoute
-                return (
-                  <li key={session.id}>
-                    <button
-                      type="button"
-                      onClick={() => handleSelect(session.id)}
-                      aria-current={isActive ? 'page' : undefined}
-                      className={cn(
-                        'flex w-full items-center gap-2 rounded-md px-3 py-1.5 text-left text-xs transition-colors',
-                        isActive
-                          ? 'bg-accent text-accent-foreground'
-                          : 'text-muted-foreground hover:bg-accent/50 hover:text-foreground'
-                      )}
-                    >
-                      <MessageSquareIcon className="h-3 w-3 shrink-0 opacity-70" aria-hidden />
-                      <span className="flex-1 truncate">{session.title}</span>
-                    </button>
-                  </li>
-                )
-              })}
+              {sessions.map((session) => (
+                <SidebarSessionRow
+                  key={session.id}
+                  session={session}
+                  isActive={session.id === sessionId && onChatRoute}
+                  onSelect={() => handleSelect(session.id)}
+                />
+              ))}
             </ul>
           )}
 

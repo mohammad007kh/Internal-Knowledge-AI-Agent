@@ -14,17 +14,26 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # pnpm/action-setup MUST run before setup-node so the pnpm cache resolves.
+      # The pnpm version is read from frontend/package.json's "packageManager"
+      # field — no root package.json exists, so package_json_file is required.
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: frontend/package.json
+
       - uses: actions/setup-node@v4
         with:
           node-version: "20"
+          cache: "pnpm"
+          cache-dependency-path: frontend/pnpm-lock.yaml
 
       - name: Install frontend dependencies
         working-directory: frontend
-        run: npm ci
+        run: pnpm install --frozen-lockfile
 
       - name: Install Playwright browsers
         working-directory: frontend
-        run: npx playwright install --with-deps chromium firefox
+        run: pnpm exec playwright install --with-deps chromium firefox
 
       - name: Start backend services
         run: docker compose up -d db redis minio backend worker
@@ -34,14 +43,15 @@ jobs:
 
       - name: Start frontend dev server
         working-directory: frontend
-        run: npm run dev &
+        run: pnpm dev &
 
       - name: Wait for frontend
-        run: npx wait-on http://localhost:3000
+        working-directory: frontend
+        run: pnpm exec wait-on http://localhost:3000
 
       - name: Run Playwright tests
         working-directory: frontend
-        run: npx playwright test --project=chromium --reporter=html
+        run: pnpm exec playwright test --project=chromium --reporter=html
 
       - name: Upload Playwright report
         uses: actions/upload-artifact@v4

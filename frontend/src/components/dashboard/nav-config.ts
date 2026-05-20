@@ -4,11 +4,10 @@ import {
   Layers,
   LayoutDashboardIcon,
   MessageCircleIcon,
-  PlugIcon,
+  ScrollTextIcon,
   ShieldIcon,
   SlidersHorizontalIcon,
   SparklesIcon,
-  UserCircleIcon,
   UsersIcon,
 } from 'lucide-react'
 import type { ComponentType, SVGProps } from 'react'
@@ -32,10 +31,15 @@ export interface NavItem {
   groupKey?: string
 }
 
-/** Top-level navigation for the user shell. */
+/**
+ * Top-level navigation for the user shell.
+ *
+ * Note: Profile is intentionally NOT listed here. It is reachable via the
+ * "Profile settings" entry inside the user popover at the bottom of the
+ * sidebar (see `UserPopover.tsx`), which is the canonical location.
+ */
 export const USER_NAV: readonly NavItem[] = [
   { href: '/chat', label: 'Chat', icon: MessageCircleIcon },
-  { href: '/profile', label: 'Profile', icon: UserCircleIcon },
 ] as const
 
 /**
@@ -47,7 +51,6 @@ export const USER_NAV: readonly NavItem[] = [
 export const ADMIN_NAV: readonly NavItem[] = [
   { href: '/admin/sources', label: 'Sources', icon: DatabaseIcon },
   { href: '/admin/users', label: 'Users', icon: UsersIcon },
-  { href: '/admin/connectors', label: 'Connectors', icon: PlugIcon },
   { href: '/admin/analytics', label: 'Analytics', icon: LayoutDashboardIcon },
   {
     href: '/admin/ai',
@@ -61,6 +64,7 @@ export const ADMIN_NAV: readonly NavItem[] = [
     ],
   },
   { href: '/admin/policy', label: 'Policy', icon: ShieldIcon },
+  { href: '/admin/audit-log', label: 'Audit log', icon: ScrollTextIcon },
 ] as const
 
 /**

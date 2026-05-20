@@ -97,25 +97,25 @@ class TestRead:
         result = await repo.get_by_id(uuid.uuid4())
         assert result is None
 
-    async def test_deactivated_source_excluded_from_list_active(
+    async def test_soft_deleted_source_excluded_from_list_active(
         self, repo: SourceRepository, sample_source: Source
     ) -> None:
-        deactivated = await repo.deactivate(sample_source.id)
-        assert deactivated is True
+        deleted = await repo.soft_delete(sample_source.id)
+        assert deleted is True
         results = await repo.list_active()
         ids = [s.id for s in results]
         assert sample_source.id not in ids
 
-    async def test_deactivated_source_still_returned_by_get_by_id(
+    async def test_soft_deleted_source_still_returned_by_get_by_id(
         self, repo: SourceRepository, sample_source: Source
     ) -> None:
-        """get_by_id ignores is_active flag."""
-        await repo.deactivate(sample_source.id)
+        """get_by_id ignores deleted_at filter."""
+        await repo.soft_delete(sample_source.id)
         found = await repo.get_by_id(sample_source.id)
         assert found is not None
-        assert found.is_active is False
+        assert found.deleted_at is not None
 
-    async def test_list_active_excludes_inactive(
+    async def test_list_active_excludes_soft_deleted(
         self, repo: SourceRepository, admin_user: object  # type: ignore[type-arg]
     ) -> None:
         active = await repo.create(
@@ -124,17 +124,17 @@ class TestRead:
             config_encrypted=b"x",
             owner_id=admin_user.id,  # type: ignore[attr-defined]
         )
-        inactive = await repo.create(
-            name="Inactive",
+        deleted = await repo.create(
+            name="Deleted",
             source_type=SourceType.WEB_URL,
             config_encrypted=b"x",
             owner_id=admin_user.id,  # type: ignore[attr-defined]
         )
-        await repo.deactivate(inactive.id)
+        await repo.soft_delete(deleted.id)
         results = await repo.list_active()
         result_ids = [s.id for s in results]
         assert active.id in result_ids
-        assert inactive.id not in result_ids
+        assert deleted.id not in result_ids
 
 
 # ---------------------------------------------------------------------------

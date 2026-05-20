@@ -15,6 +15,20 @@ interface ChatInputBarProps {
   disabled?: boolean
   isStreaming?: boolean
   sessionId: string | null
+  /**
+   * True while the parent is in the middle of auto-creating a session in
+   * response to a send. Used to disable the send button and the textarea
+   * for the brief moment between submission and the new session being ready
+   * so the user cannot fire two creates in a row.
+   */
+  isCreatingSession?: boolean
+  /**
+   * When true, the input is usable even with no session selected. The parent
+   * is responsible for transparently creating a session before forwarding
+   * the message to the stream (auto-create-on-send flow in `ChatLayout`).
+   * Defaults to false to preserve existing call sites.
+   */
+  allowEmptySession?: boolean
 }
 
 const MAX_CHARS = 4000
@@ -25,17 +39,24 @@ export function ChatInputBar({
   disabled = false,
   isStreaming = false,
   sessionId,
+  isCreatingSession = false,
+  allowEmptySession = false,
 }: ChatInputBarProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const { selectedIds, selectedSources, handleChange, handleRemove, isUpdating } =
     useSessionSources({ sessionId })
 
+  const inputDisabled =
+    disabled || isStreaming || isCreatingSession || (!sessionId && !allowEmptySession)
+  const sendDisabled = disabled || isCreatingSession || (!sessionId && !allowEmptySession)
+
   const handleSend = useCallback(() => {
     const value = textareaRef.current?.value.trim()
-    if (!value || disabled || !sessionId) return
+    if (!value || disabled || isCreatingSession) return
+    if (!sessionId && !allowEmptySession) return
     onSend(value)
     if (textareaRef.current) textareaRef.current.value = ''
-  }, [disabled, onSend, sessionId])
+  }, [disabled, onSend, sessionId, allowEmptySession, isCreatingSession])
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -92,14 +113,20 @@ export function ChatInputBar({
           placeholder={
             isStreaming
               ? 'Generating… press Esc to stop'
-              : sessionId
-                ? 'Ask a question… (Enter to send)'
-                : 'Select a session first…'
+              : isCreatingSession
+                ? 'Creating chat…'
+                : sessionId || allowEmptySession
+                  ? 'Ask a question… (Enter to send)'
+                  : 'Select a session first…'
           }
-          className={cn('max-h-40 min-h-[2.75rem] flex-1 resize-none rounded-xl')}
+          // min-h-10 (40px) matches the source-selector trigger and the send
+          // button so the input row has a single, consistent baseline height
+          // at rest. The textarea still grows up to max-h-40 on multi-line
+          // content via the resize-none + rows={1} contract (FX15).
+          className={cn('max-h-40 min-h-10 flex-1 resize-none rounded-xl')}
           rows={1}
           maxLength={MAX_CHARS}
-          disabled={disabled || !sessionId || isStreaming}
+          disabled={inputDisabled}
           onKeyDown={handleKeyDown}
           aria-label="Chat message input"
         />
@@ -118,7 +145,7 @@ export function ChatInputBar({
           <Button
             type="submit"
             size="icon"
-            disabled={disabled || !sessionId}
+            disabled={sendDisabled}
             aria-label="Send message"
             className="shrink-0"
           >

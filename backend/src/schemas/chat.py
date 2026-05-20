@@ -6,7 +6,7 @@ from enum import StrEnum
 from typing import Any
 from uuid import UUID
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 # ---------------------------------------------------------------------------
 # Enumerations
@@ -29,9 +29,41 @@ class ChatSessionCreate(BaseModel):
     source_ids: list[str] | None = None
 
 
+class ChatSessionUpdate(BaseModel):
+    """Partial update for a chat session. At least one field is required.
+
+    Title-only payloads come from the rename UI; source_ids-only payloads
+    come from the source-picker on every selection change.  Both can be
+    sent in a single PATCH if the caller wants to update both fields.
+    """
+
+    title: str | None = Field(default=None, max_length=255)
+    source_ids: list[str] | None = None
+
+    @field_validator("title")
+    @classmethod
+    def strip_title(cls, v: str | None) -> str | None:
+        if v is None:
+            return None
+        stripped = v.strip()
+        if not stripped:
+            raise ValueError("title must not be blank")
+        return stripped
+
+    @model_validator(mode="after")
+    def at_least_one_field(self) -> ChatSessionUpdate:
+        if self.title is None and self.source_ids is None:
+            raise ValueError("at least one of {title, source_ids} must be provided")
+        return self
+
+
 class ChatSessionResponse(BaseModel):
     id: UUID
-    title: str
+    # Nullable since U15 (lazy chat creation): until the first user message
+    # is sent and the titler runs, a session row may have no title yet.  The
+    # frontend renders a preview of the first user message as the fallback
+    # label in that window.
+    title: str | None = None
     created_at: datetime
     updated_at: datetime
     message_count: int = 0
@@ -56,7 +88,20 @@ class ChatMessageResponse(BaseModel):
     role: MessageRoleSchema
     content: str
     created_at: datetime
-    metadata: dict[str, Any] = Field(default_factory=dict)
+    # User feedback on assistant messages — null when no thumbs given.
+    # Surfaces the FeedbackButtons' initialRating so re-loading the chat
+    # restores the user's prior up/down + comment.
+    feedback_rating: int | None = None
+    feedback_comment: str | None = None
+    # NOTE: do NOT add a `metadata` field here.  The ChatMessage ORM has no
+    # `metadata` column, and pydantic's from_attributes lookup would fall back
+    # to SQLAlchemy's class-level `Base.metadata` (a MetaData() instance,
+    # NOT a dict), causing model_validate() to crash with
+    # `Input should be a valid dictionary [type=dict_type, input_value=MetaData()]`.
+    # That bug 500'd GET /chat/sessions/{id} for any session with messages and
+    # in turn broke the chat UI (see the MetaData-collision incident).  Use
+    # `sources_cited`, `message_type`, or `is_partial` directly if you need
+    # per-message side data.
 
     model_config = {"from_attributes": True}
 
@@ -96,6 +141,12 @@ class StreamEventType(StrEnum):
     DONE = "done"
     CLARIFICATION = "clarification"
     ERROR = "error"
+    TITLE = "title"
+    # Emitted as the FIRST frame on the lazy-creation path
+    # (``POST /sessions/new/messages``) so the client can swap the URL from
+    # ``/chat`` → ``/chat/<id>`` and patch the sidebar cache before any
+    # tokens flow.  Never emitted when the path already targets a real id.
+    SESSION_CREATED = "session_created"
 
 
 class ChatStreamEvent(BaseModel):
@@ -120,9 +171,29 @@ class ChatStreamEvent(BaseModel):
         message: str
         code: str = "internal_error"
 
+    class TitleData(BaseModel):
+        title: str
+
+    class SessionCreatedData(BaseModel):
+        session_id: str
+        source_ids: list[str] = Field(default_factory=list)
+
     def to_sse(self) -> str:
-        """Format as a Server-Sent Event string."""
-        return f"data: {self.model_dump_json()}\n\n"
+        """Format as a Server-Sent Event string.
+
+        Emits proper SSE-spec frames — ``event: <name>\\ndata: <inner_json>\\n\\n`` —
+        because the frontend's parseSseFrame() reads the event name from the
+        ``event:`` header line, not from the JSON body.  Previously this method
+        wrote the whole envelope (``data: {"event":..., "data":...}``) on a single
+        ``data:`` line, leaving frame.event = the SSE default 'message' on the
+        client and the entire switch falling through to the no-op default branch
+        — i.e. tokens never rendered, ``done`` never invalidated the message
+        cache. This was the second root cause of "I sent a message and got
+        nothing back".
+        """
+        import json
+
+        return f"event: {self.event.value}\ndata: {json.dumps(self.data)}\n\n"
 
     @classmethod
     def delta(cls, token: str) -> ChatStreamEvent:
@@ -159,4 +230,30 @@ class ChatStreamEvent(BaseModel):
         return cls(
             event=StreamEventType.ERROR,
             data={"message": message, "code": code},
+        )
+
+    @classmethod
+    def title(cls, title: str) -> ChatStreamEvent:
+        """Emit the auto-generated session title as the first SSE frame."""
+        return cls(event=StreamEventType.TITLE, data={"title": title})
+
+    @classmethod
+    def session_created(
+        cls,
+        *,
+        session_id: str,
+        source_ids: list[str] | None = None,
+    ) -> ChatStreamEvent:
+        """Emit the freshly-created session id as the very first SSE frame.
+
+        Used by the lazy-creation path (``POST /sessions/new/messages``) so
+        the client can swap the URL to ``/chat/<id>`` and patch the sidebar
+        cache before tokens start flowing.
+        """
+        return cls(
+            event=StreamEventType.SESSION_CREATED,
+            data={
+                "session_id": session_id,
+                "source_ids": source_ids or [],
+            },
         )

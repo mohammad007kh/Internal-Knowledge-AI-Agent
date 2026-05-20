@@ -21,9 +21,14 @@ class ChatSessionRepository:
         session: AsyncSession,
         *,
         user_id: uuid.UUID,
-        title: str = "New conversation",
+        title: str | None = None,
     ) -> ChatSession:
-        """Insert a new chat session and return the refreshed ORM object."""
+        """Insert a new chat session and return the refreshed ORM object.
+
+        ``title`` is optional since U15 (lazy chat creation): when omitted
+        the row's title starts as NULL and the synchronous titler stage on
+        the first user turn fills it in before any tokens stream.
+        """
         obj = ChatSession(user_id=user_id, title=title)
         session.add(obj)
         await session.flush()
@@ -68,6 +73,23 @@ class ChatSessionRepository:
         if obj is None:
             return None
         obj.title = title
+        await session.flush()
+        await session.refresh(obj)
+        return obj
+
+    async def update_source_ids(
+        self,
+        session: AsyncSession,
+        session_id: uuid.UUID,
+        source_ids: list[str],
+    ) -> ChatSession | None:
+        """Replace the source-id allowlist for a session. Empty list = retrieve
+        across all sources the user has access to (the default-fallback
+        semantics handled by ChatSessionService.get_source_ids_for_session)."""
+        obj = await self.get(session, session_id)
+        if obj is None:
+            return None
+        obj.source_ids = list(source_ids)
         await session.flush()
         await session.refresh(obj)
         return obj

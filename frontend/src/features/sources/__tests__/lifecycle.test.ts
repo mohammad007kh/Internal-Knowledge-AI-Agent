@@ -1,0 +1,840 @@
+/**
+ * Lifecycle phase + gate matrix coverage.
+ *
+ * Every cell in the derivePhase table from `lifecycle.ts` gets a dedicated
+ * case so any future change shows up as a single broken assertion rather
+ * than a cluster of cascading failures.
+ */
+
+import type {
+  NameStatus,
+  SchemaStatus,
+  SourceDetail,
+  SourceListItem,
+  SyncJob,
+} from '@/lib/api/sources'
+import { describe, expect, it } from 'vitest'
+import {
+  PHASE_ORDER,
+  type Phase,
+  type SourceKind,
+  availabilityBlockers,
+  derivePhase,
+  isInFlightPhase,
+  isPollingPhase,
+  lifecycleGatesFor,
+  phaseHint,
+  phaseLabel,
+  phaseOrderFor,
+  phaseProgress,
+} from '../lifecycle'
+
+function makeJob(overrides: Partial<SyncJob> = {}): SyncJob {
+  return {
+    id: 'job-1',
+    source_id: 'src-1',
+    status: 'success',
+    started_at: '2026-05-09T00:00:00Z',
+    finished_at: '2026-05-09T00:05:00Z',
+    completed_at: '2026-05-09T00:05:00Z',
+    error_message: null,
+    documents_synced: 0,
+    documents_indexed: 0,
+    chunks_created: 0,
+    created_at: '2026-05-09T00:00:00Z',
+    updated_at: '2026-05-09T00:05:00Z',
+    ...overrides,
+  }
+}
+
+function makeSource(overrides: Partial<SourceListItem> = {}): SourceListItem {
+  return {
+    id: 'src-1',
+    name: 'Test',
+    source_type: 'file_upload',
+    is_active: false,
+    created_at: '2026-05-09T00:00:00Z',
+    has_upload: true,
+    document_count: 0,
+    chunk_count: 0,
+    latest_job: null,
+    ...overrides,
+  }
+}
+
+function makeDetail(overrides: Partial<SourceDetail> = {}): SourceDetail {
+  return {
+    ...makeSource(),
+    source_mode: 'snapshot',
+    retrieval_mode: 'vector_only',
+    description: 'A test source',
+    sync_mode: 'manual',
+    sync_schedule: null,
+    last_synced_at: null,
+    status: 'pending',
+    citations_enabled: true,
+    updated_at: '2026-05-09T00:00:00Z',
+    owner_email: null,
+    schema_summary: null,
+    ...overrides,
+  } as SourceDetail
+}
+
+describe('derivePhase', () => {
+  describe('terminal failures', () => {
+    it('returns failed when the latest job failed', () => {
+      const s = makeSource({ latest_job: makeJob({ status: 'failed' }) })
+      expect(derivePhase(s)).toBe('failed')
+    })
+
+    it('returns failed when schema_status is FAILED', () => {
+      const s = makeSource({
+        source_type: 'database',
+        schema_status: 'FAILED' as SchemaStatus,
+        latest_job: makeJob({ status: 'success' }),
+      })
+      expect(derivePhase(s)).toBe('failed')
+    })
+
+    it('a failed job beats a pending_ai name', () => {
+      const s = makeSource({
+        name_status: 'pending_ai' as NameStatus,
+        latest_job: makeJob({ status: 'failed' }),
+      })
+      expect(derivePhase(s)).toBe('failed')
+    })
+  })
+
+  describe('DB schema-study states', () => {
+    it('STUDYING → analyzing', () => {
+      const s = makeSource({
+        source_type: 'database',
+        schema_status: 'STUDYING' as SchemaStatus,
+      })
+      expect(derivePhase(s)).toBe('analyzing')
+    })
+
+    it('QUEUED → analyzing', () => {
+      const s = makeSource({
+        source_type: 'database',
+        schema_status: 'QUEUED' as SchemaStatus,
+      })
+      expect(derivePhase(s)).toBe('analyzing')
+    })
+
+    it('READY schema with success job → ready', () => {
+      const s = makeSource({
+        source_type: 'database',
+        schema_status: 'READY' as SchemaStatus,
+        latest_job: makeJob({ status: 'success' }),
+        chunk_count: 5,
+      })
+      expect(derivePhase(s)).toBe('ready')
+    })
+
+    // FX32 — without rule 2b a completed DB study with no sync_job (which
+    // is the wire shape the studying-agent leaves behind on POST /sources)
+    // fell through to rule 6's "no chunks + no last_synced_at →
+    // pending_upload" fallback, locking the admin out of the approval gate.
+    it('schema_status="completed" + no sync_job + DB source → ready (FX32)', () => {
+      const s = makeSource({
+        source_type: 'database',
+        schema_status: 'completed' as unknown as SchemaStatus,
+        latest_job: null,
+        chunk_count: 0,
+        last_synced_at: null,
+        name_status: 'ai_set' as NameStatus,
+        description_status: 'ai_set' as NameStatus,
+      })
+      expect(derivePhase(s)).toBe('ready')
+    })
+
+    it('schema_status="completed" still defers to in-flight job (FX32 guard)', () => {
+      // A re-study creates a pending sync_job; the lifecycle MUST surface
+      // the in-flight state, not the stale "ready" from the prior study.
+      const s = makeSource({
+        source_type: 'database',
+        schema_status: 'completed' as unknown as SchemaStatus,
+        latest_job: makeJob({ status: 'pending' }),
+      })
+      expect(derivePhase(s)).not.toBe('ready')
+    })
+
+    it('schema_status="completed" still defers to running job (FX32 guard)', () => {
+      const s = makeSource({
+        source_type: 'database',
+        schema_status: 'completed' as unknown as SchemaStatus,
+        latest_job: makeJob({ status: 'running' }),
+      })
+      expect(derivePhase(s)).not.toBe('ready')
+    })
+
+    it('non-DB source with schema_status="completed" is not short-circuited', () => {
+      // The early-return rule is keyed on source_type === 'database'.
+      // A web source should NEVER carry schema_status (it's a DB-only
+      // column), but if it somehow did, the rule must not fire.
+      const s = makeSource({
+        source_type: 'web_url',
+        schema_status: 'completed' as unknown as SchemaStatus,
+        latest_job: null,
+        chunk_count: 0,
+      })
+      // Falls through to rule 6 — no upload signal, no chunks → pending_upload.
+      expect(derivePhase(s)).toBe('pending_upload')
+    })
+  })
+
+  describe('AI naming pending', () => {
+    it('name_status pending_ai → naming, even with no job', () => {
+      const s = makeSource({ name_status: 'pending_ai' as NameStatus })
+      expect(derivePhase(s)).toBe('naming')
+    })
+
+    it('description_status pending_ai → naming', () => {
+      const s = makeSource({ description_status: 'pending_ai' as NameStatus })
+      expect(derivePhase(s)).toBe('naming')
+    })
+
+    it('naming pending dominates a still-running job', () => {
+      const s = makeSource({
+        name_status: 'pending_ai' as NameStatus,
+        latest_job: makeJob({ status: 'running', chunks_created: 10 }),
+      })
+      expect(derivePhase(s)).toBe('naming')
+    })
+
+    it('naming pending dominates a completed job', () => {
+      const s = makeSource({
+        name_status: 'pending_ai' as NameStatus,
+        latest_job: makeJob({ status: 'success', chunks_created: 10 }),
+        chunk_count: 10,
+      })
+      expect(derivePhase(s)).toBe('naming')
+    })
+  })
+
+  describe('in-flight ingestion job', () => {
+    it('running with zero chunks → chunking', () => {
+      const s = makeSource({
+        latest_job: makeJob({ status: 'running', chunks_created: 0 }),
+        chunk_count: 0,
+      })
+      expect(derivePhase(s)).toBe('chunking')
+    })
+
+    it('running with chunks > 0 → analyzing', () => {
+      const s = makeSource({
+        latest_job: makeJob({ status: 'running', chunks_created: 50 }),
+        chunk_count: 50,
+      })
+      expect(derivePhase(s)).toBe('analyzing')
+    })
+  })
+
+  describe('queued (pending) job', () => {
+    it('file source with no upload + pending job → pending_upload', () => {
+      const s = makeSource({
+        source_type: 'file_upload',
+        has_upload: false,
+        latest_job: makeJob({ status: 'pending' }),
+      })
+      expect(derivePhase(s)).toBe('pending_upload')
+    })
+
+    it('file source WITH upload + pending job → chunking', () => {
+      const s = makeSource({
+        source_type: 'file_upload',
+        has_upload: true,
+        latest_job: makeJob({ status: 'pending' }),
+      })
+      expect(derivePhase(s)).toBe('chunking')
+    })
+
+    it('non-file source + pending job → chunking', () => {
+      const s = makeSource({
+        source_type: 'web_url',
+        has_upload: false,
+        latest_job: makeJob({ status: 'pending' }),
+      })
+      expect(derivePhase(s)).toBe('chunking')
+    })
+  })
+
+  describe('no job recorded', () => {
+    it('file source with no upload → pending_upload', () => {
+      const s = makeSource({
+        source_type: 'file_upload',
+        has_upload: false,
+        latest_job: null,
+      })
+      expect(derivePhase(s)).toBe('pending_upload')
+    })
+
+    it('source with chunks but no job → ready (defensive)', () => {
+      const s = makeSource({
+        latest_job: null,
+        chunk_count: 100,
+        last_synced_at: '2026-05-09T00:05:00Z',
+      })
+      expect(derivePhase(s)).toBe('ready')
+    })
+
+    it('source with no chunks and no job and no upload signal → pending_upload', () => {
+      const s = makeSource({
+        source_type: 'web_url',
+        latest_job: null,
+        chunk_count: 0,
+      })
+      expect(derivePhase(s)).toBe('pending_upload')
+    })
+  })
+
+  describe('terminal success', () => {
+    it('success + chunks → ready', () => {
+      const s = makeSource({
+        latest_job: makeJob({ status: 'success', chunks_created: 42 }),
+        chunk_count: 42,
+      })
+      expect(derivePhase(s)).toBe('ready')
+    })
+
+    it('completed + chunks → ready', () => {
+      const s = makeSource({
+        latest_job: makeJob({ status: 'completed', chunks_created: 7 }),
+        chunk_count: 7,
+      })
+      expect(derivePhase(s)).toBe('ready')
+    })
+  })
+})
+
+describe('phaseLabel', () => {
+  const allPhases: Phase[] = [
+    'pending_upload',
+    'naming',
+    'chunking',
+    'analyzing',
+    'ready',
+    'failed',
+  ]
+
+  it('returns a non-empty string for every phase (default kind = file)', () => {
+    for (const phase of allPhases) {
+      expect(phaseLabel(phase).length).toBeGreaterThan(0)
+    }
+  })
+
+  it.each<SourceKind>(['file', 'database', 'web', 'connector'])(
+    'returns a non-empty string for every phase when kind=%s',
+    (kind) => {
+      for (const phase of allPhases) {
+        expect(phaseLabel(phase, kind).length).toBeGreaterThan(0)
+      }
+    }
+  )
+
+  it('FX23: file source keeps the original upload-centric labels', () => {
+    expect(phaseLabel('pending_upload', 'file')).toBe('Waiting for upload')
+    expect(phaseLabel('naming', 'file')).toBe('Naming with AI')
+    expect(phaseLabel('chunking', 'file')).toBe('Chunking content')
+    expect(phaseLabel('analyzing', 'file')).toBe('Analyzing & indexing')
+    expect(phaseLabel('ready', 'file')).toBe('Ready')
+    expect(phaseLabel('failed', 'file')).toBe('Failed')
+  })
+
+  it('FX23: database source reads "Queued" for pending and "Studying schema" for analyzing', () => {
+    expect(phaseLabel('pending_upload', 'database')).toBe('Queued')
+    expect(phaseLabel('naming', 'database')).toBe('Naming with AI')
+    expect(phaseLabel('analyzing', 'database')).toBe('Studying schema')
+    expect(phaseLabel('ready', 'database')).toBe('Ready')
+    expect(phaseLabel('failed', 'database')).toBe('Failed')
+  })
+
+  it('FX23: web source reads "Crawling content" instead of "Chunking content"', () => {
+    expect(phaseLabel('pending_upload', 'web')).toBe('Queued')
+    expect(phaseLabel('naming', 'web')).toBe('Naming with AI')
+    expect(phaseLabel('chunking', 'web')).toBe('Crawling content')
+    expect(phaseLabel('analyzing', 'web')).toBe('Analyzing & indexing')
+    expect(phaseLabel('ready', 'web')).toBe('Ready')
+    expect(phaseLabel('failed', 'web')).toBe('Failed')
+  })
+
+  it('FX23: connector source mirrors the web labels', () => {
+    // SaaS connectors (Confluence, Notion, etc.) behave like crawlers from
+    // the user's POV — same chips, same copy.
+    for (const phase of allPhases) {
+      expect(phaseLabel(phase, 'connector')).toBe(phaseLabel(phase, 'web'))
+    }
+  })
+
+  it('defaults to the file labels when no kind is passed', () => {
+    for (const phase of allPhases) {
+      expect(phaseLabel(phase)).toBe(phaseLabel(phase, 'file'))
+    }
+  })
+
+  describe('FX26: file pending_upload label is hasUpload-aware', () => {
+    it('with hasUpload=true the file label flips to "Queued for indexing"', () => {
+      expect(
+        phaseLabel('pending_upload', 'file', { hasUpload: true })
+      ).toBe('Queued for indexing')
+    })
+
+    it('with hasUpload=false the file label stays "Waiting for upload"', () => {
+      expect(
+        phaseLabel('pending_upload', 'file', { hasUpload: false })
+      ).toBe('Waiting for upload')
+    })
+
+    it('omitting opts is equivalent to hasUpload=false (back-compat)', () => {
+      expect(phaseLabel('pending_upload', 'file')).toBe('Waiting for upload')
+    })
+
+    it('does not affect other phases or kinds', () => {
+      // hasUpload is only meaningful for the file pending_upload pair.
+      expect(
+        phaseLabel('chunking', 'file', { hasUpload: true })
+      ).toBe('Chunking content')
+      expect(
+        phaseLabel('pending_upload', 'database', { hasUpload: true })
+      ).toBe('Queued')
+      expect(
+        phaseLabel('pending_upload', 'web', { hasUpload: true })
+      ).toBe('Queued')
+      expect(
+        phaseLabel('pending_upload', 'connector', { hasUpload: true })
+      ).toBe('Queued')
+    })
+  })
+})
+
+describe('phaseHint', () => {
+  const inFlightPhases: ReadonlyArray<Exclude<Phase, 'failed'>> = [
+    'pending_upload',
+    'naming',
+    'chunking',
+    'analyzing',
+    'ready',
+  ]
+
+  it.each<SourceKind>(['file', 'database', 'web', 'connector'])(
+    'returns a non-empty hint for every step phase when kind=%s',
+    (kind) => {
+      for (const phase of inFlightPhases) {
+        expect(phaseHint(phase, kind).length).toBeGreaterThan(0)
+      }
+    }
+  )
+
+  it('database analyzing hint mentions the studying agent', () => {
+    expect(phaseHint('analyzing', 'database')).toMatch(/studying agent/i)
+  })
+
+  it('web chunking hint mentions crawling', () => {
+    expect(phaseHint('chunking', 'web')).toMatch(/crawl/i)
+  })
+
+  it('file pending_upload hint mentions object storage', () => {
+    expect(phaseHint('pending_upload', 'file')).toMatch(/object storage/i)
+  })
+
+  it('defaults to the file hints when no kind is passed', () => {
+    for (const phase of inFlightPhases) {
+      expect(phaseHint(phase)).toBe(phaseHint(phase, 'file'))
+    }
+  })
+
+  describe('FX26: file pending_upload hint is hasUpload-aware', () => {
+    it('with hasUpload=true the hint reflects "queued for indexing"', () => {
+      expect(
+        phaseHint('pending_upload', 'file', { hasUpload: true })
+      ).toMatch(/queued/i)
+    })
+
+    it('with hasUpload=false the hint still mentions object storage', () => {
+      expect(
+        phaseHint('pending_upload', 'file', { hasUpload: false })
+      ).toMatch(/object storage/i)
+    })
+  })
+})
+
+describe('phaseOrderFor', () => {
+  it('file source walks all five chips including chunking', () => {
+    expect(phaseOrderFor('file')).toEqual([
+      'pending_upload',
+      'naming',
+      'chunking',
+      'analyzing',
+      'ready',
+    ])
+  })
+
+  it('web source walks all five chips including chunking', () => {
+    expect(phaseOrderFor('web')).toEqual([
+      'pending_upload',
+      'naming',
+      'chunking',
+      'analyzing',
+      'ready',
+    ])
+  })
+
+  it('connector source walks the same five chips as web', () => {
+    expect(phaseOrderFor('connector')).toEqual(phaseOrderFor('web'))
+  })
+
+  it('database source drops the chunking chip — derivePhase never produces it', () => {
+    expect(phaseOrderFor('database')).toEqual([
+      'pending_upload',
+      'naming',
+      'analyzing',
+      'ready',
+    ])
+    expect(phaseOrderFor('database')).not.toContain('chunking')
+  })
+
+  it('every kind ends at "ready"', () => {
+    for (const kind of ['file', 'database', 'web', 'connector'] as const) {
+      const order = phaseOrderFor(kind)
+      expect(order[order.length - 1]).toBe('ready')
+    }
+  })
+})
+
+describe('phaseProgress', () => {
+  it('emits monotonic progress through PHASE_ORDER', () => {
+    let prev = -1
+    for (const p of PHASE_ORDER) {
+      const v = phaseProgress(p)
+      expect(v).toBeGreaterThanOrEqual(prev)
+      prev = v
+    }
+  })
+
+  it('caps "ready" at 100', () => {
+    expect(phaseProgress('ready')).toBe(100)
+  })
+})
+
+describe('isInFlightPhase / isPollingPhase', () => {
+  it('treats all four pre-ready phases as in-flight', () => {
+    expect(isInFlightPhase('pending_upload')).toBe(true)
+    expect(isInFlightPhase('naming')).toBe(true)
+    expect(isInFlightPhase('chunking')).toBe(true)
+    expect(isInFlightPhase('analyzing')).toBe(true)
+    expect(isInFlightPhase('ready')).toBe(false)
+    expect(isInFlightPhase('failed')).toBe(false)
+  })
+
+  it('polls only while the worker is actually doing something', () => {
+    // pending_upload is quiet — no worker action until the admin uploads
+    // bytes, so we don't waste an HTTP roundtrip every 3s.
+    expect(isPollingPhase('pending_upload')).toBe(false)
+    expect(isPollingPhase('naming')).toBe(true)
+    expect(isPollingPhase('chunking')).toBe(true)
+    expect(isPollingPhase('analyzing')).toBe(true)
+    expect(isPollingPhase('ready')).toBe(false)
+    expect(isPollingPhase('failed')).toBe(false)
+  })
+})
+
+describe('lifecycleGatesFor — gate matrix', () => {
+  const phases: Phase[] = [
+    'pending_upload',
+    'naming',
+    'chunking',
+    'analyzing',
+    'ready',
+    'failed',
+  ]
+
+  it.each(phases)('returns a complete gate object for %s', (phase) => {
+    const gates = lifecycleGatesFor(phase)
+    expect(gates).toHaveProperty('canSyncNow')
+    expect(gates).toHaveProperty('canChat')
+    expect(gates).toHaveProperty('canMakeAvailableToUsers')
+    expect(gates).toHaveProperty('canEditConfig')
+  })
+
+  it('ready phase — every consumer-facing control is open', () => {
+    const g = lifecycleGatesFor('ready')
+    expect(g.canSyncNow).toBe(true)
+    expect(g.canChat).toBe(true)
+    expect(g.canMakeAvailableToUsers).toBe(true)
+    expect(g.canEditConfig).toBe(true)
+  })
+
+  it('in-flight phases close sync, chat, availability — but never config', () => {
+    for (const p of ['pending_upload', 'naming', 'chunking', 'analyzing'] as Phase[]) {
+      const g = lifecycleGatesFor(p)
+      expect(g.canSyncNow).toBe(false)
+      expect(g.canChat).toBe(false)
+      expect(g.canMakeAvailableToUsers).toBe(false)
+      expect(g.canEditConfig).toBe(true)
+      expect(g.syncNowReason.length).toBeGreaterThan(0)
+      expect(g.chatReason.length).toBeGreaterThan(0)
+      expect(g.availabilityReason.length).toBeGreaterThan(0)
+    }
+  })
+
+  it('failed phase — sync is open for retry; chat + availability are closed', () => {
+    const g = lifecycleGatesFor('failed')
+    expect(g.canSyncNow).toBe(true)
+    expect(g.canChat).toBe(false)
+    expect(g.canMakeAvailableToUsers).toBe(false)
+    expect(g.canEditConfig).toBe(true)
+  })
+
+  // U16 — canStopSync from the phase-only matrix is always false; the real
+  // source-aware answer lives on useLifecycle / stopSyncTargetJobId.
+  it('canStopSync defaults to false for every phase from the matrix', () => {
+    for (const p of phases) {
+      expect(lifecycleGatesFor(p).canStopSync).toBe(false)
+    }
+  })
+})
+
+describe('lifecycleGatesFor — FX29b per-kind verbs', () => {
+  // Before FX29b every non-`ready`/non-`failed` phase surfaced
+  // file-pipeline copy ("finish uploading the files", "finish chunking
+  // the content") regardless of source_type. A web_url source mid-crawl
+  // would read "Wait for the worker to finish uploading the files",
+  // which is wrong and confusing.
+
+  it('web source in pending_upload says queueing the initial crawl, not uploading', () => {
+    const g = lifecycleGatesFor('pending_upload', 'web')
+    expect(g.availabilityReason).toContain('queueing the initial crawl')
+    expect(g.syncNowReason).toContain('queueing the initial crawl')
+    expect(g.chatReason).toContain('queueing the initial crawl')
+    expect(g.availabilityReason).not.toMatch(/uploading the files/i)
+  })
+
+  it('web source in chunking talks about crawling, not chunking', () => {
+    const g = lifecycleGatesFor('chunking', 'web')
+    expect(g.availabilityReason).toContain('crawling the pages')
+    expect(g.availabilityReason).not.toMatch(/chunking the content/i)
+  })
+
+  it('connector source mirrors the web verbs across every in-flight phase', () => {
+    for (const phase of ['pending_upload', 'naming', 'chunking', 'analyzing'] as const) {
+      expect(lifecycleGatesFor(phase, 'connector')).toEqual(
+        lifecycleGatesFor(phase, 'web')
+      )
+    }
+  })
+
+  it('database source in analyzing says studying the schema (all three copies)', () => {
+    const g = lifecycleGatesFor('analyzing', 'database')
+    expect(g.availabilityReason).toContain('studying the schema')
+    expect(g.chatReason).toContain('studying the schema')
+    expect(g.syncNowReason).toContain('studying the schema')
+    expect(g.availabilityReason).not.toMatch(/indexing/i)
+  })
+
+  it('database source in pending_upload says queueing the schema study', () => {
+    const g = lifecycleGatesFor('pending_upload', 'database')
+    expect(g.availabilityReason).toContain('queueing the schema study')
+    expect(g.availabilityReason).not.toMatch(/uploading the files/i)
+  })
+
+  it('file kind is the default and preserves the legacy file verbs', () => {
+    // Back-compat: any pre-FX29b call site without a kind argument must
+    // observe identical strings to the explicit `'file'` call.
+    expect(lifecycleGatesFor('pending_upload')).toEqual(
+      lifecycleGatesFor('pending_upload', 'file')
+    )
+    expect(
+      lifecycleGatesFor('pending_upload', 'file').availabilityReason
+    ).toContain('uploading the files')
+    expect(
+      lifecycleGatesFor('chunking', 'file').availabilityReason
+    ).toContain('chunking the content')
+  })
+
+  it('failed and ready rows are kind-independent (no inFlight verb used)', () => {
+    // The `failed` and `ready` branches don't touch IN_FLIGHT_VERBS, so
+    // varying `kind` must produce identical gate objects. Catches a
+    // regression where someone wires `kind` into the wrong branch.
+    for (const phase of ['failed', 'ready'] as const) {
+      const file = lifecycleGatesFor(phase, 'file')
+      const web = lifecycleGatesFor(phase, 'web')
+      const db = lifecycleGatesFor(phase, 'database')
+      expect(file).toEqual(web)
+      expect(file).toEqual(db)
+    }
+  })
+})
+
+describe('useLifecycle — FX29b threads kind through to gate copy', () => {
+  // Smoke-check that the React hook wrapper actually plumbs the wire
+  // source_type → sourceKindOf → lifecycleGatesFor(kind). Without this
+  // test the per-kind verbs would only fire from direct callers.
+  it('web_url source mid-crawl surfaces the web-pipeline verb', async () => {
+    const { useLifecycle } = await import('../lifecycle')
+    const s = makeDetail({
+      source_type: 'web_url',
+      has_upload: false,
+      latest_job: makeJob({ status: 'running', chunks_created: 0 }),
+      chunk_count: 0,
+    })
+    const result = useLifecycle(s)
+    // running + zero chunks → chunking; web verb is "crawling the pages".
+    expect(result.phase).toBe('chunking')
+    expect(result.availabilityReason).toContain('crawling the pages')
+  })
+
+  it('database source in STUDYING surfaces the schema-study verb', async () => {
+    const { useLifecycle } = await import('../lifecycle')
+    const s = makeDetail({
+      source_type: 'database',
+      schema_status: 'STUDYING' as SchemaStatus,
+    })
+    const result = useLifecycle(s)
+    expect(result.phase).toBe('analyzing')
+    expect(result.availabilityReason).toContain('studying the schema')
+  })
+})
+
+describe('U16 — stop sync gate (useLifecycle + stopSyncTargetJobId)', () => {
+  it('canStopSync is true when latest_job is pending', async () => {
+    const { useLifecycle, stopSyncTargetJobId } = await import('../lifecycle')
+    const s = makeDetail({
+      latest_job: makeJob({ id: 'job-77', status: 'pending' }),
+    })
+    expect(useLifecycle(s).canStopSync).toBe(true)
+    expect(stopSyncTargetJobId(s)).toBe('job-77')
+  })
+
+  it('canStopSync is true when latest_job is running', async () => {
+    const { useLifecycle, stopSyncTargetJobId } = await import('../lifecycle')
+    const s = makeDetail({
+      latest_job: makeJob({ id: 'job-88', status: 'running' }),
+    })
+    expect(useLifecycle(s).canStopSync).toBe(true)
+    expect(stopSyncTargetJobId(s)).toBe('job-88')
+  })
+
+  it('canStopSync is false when latest_job is terminal', async () => {
+    const { useLifecycle, stopSyncTargetJobId } = await import('../lifecycle')
+    for (const status of ['success', 'failed', 'completed', 'cancelled'] as const) {
+      const s = makeDetail({
+        latest_job: makeJob({ status }),
+      })
+      expect(useLifecycle(s).canStopSync).toBe(false)
+      expect(stopSyncTargetJobId(s)).toBe(null)
+    }
+  })
+
+  it('canStopSync is false when there is no latest_job at all', async () => {
+    const { useLifecycle, stopSyncTargetJobId } = await import('../lifecycle')
+    const s = makeDetail({ latest_job: null })
+    expect(useLifecycle(s).canStopSync).toBe(false)
+    expect(stopSyncTargetJobId(s)).toBe(null)
+  })
+
+  it('a cancelled latest_job is rendered as the failed phase (gate-matrix collapse)', () => {
+    const s = makeDetail({
+      latest_job: makeJob({ status: 'cancelled' }),
+    })
+    expect(derivePhase(s)).toBe('failed')
+  })
+})
+
+describe('shouldPollSourceLifecycle', () => {
+  // Imported here (not at top) so the bulk of the suite remains focused on
+  // the pure phase derivation. This block just verifies the polling
+  // predicate widens to cover AI-naming and schema-study states (U14).
+  it('returns false for a steady-state source', async () => {
+    const { shouldPollSourceLifecycle } = await import(
+      '@/features/sources/hooks/useSources'
+    )
+    const s = makeSource({
+      latest_job: makeJob({ status: 'success' }),
+    })
+    expect(shouldPollSourceLifecycle(s)).toBe(false)
+  })
+
+  it('returns true while the sync job is running', async () => {
+    const { shouldPollSourceLifecycle } = await import(
+      '@/features/sources/hooks/useSources'
+    )
+    const s = makeSource({ latest_job: makeJob({ status: 'running' }) })
+    expect(shouldPollSourceLifecycle(s)).toBe(true)
+  })
+
+  it('returns true while AI naming is pending (no job)', async () => {
+    const { shouldPollSourceLifecycle } = await import(
+      '@/features/sources/hooks/useSources'
+    )
+    const s = makeSource({ name_status: 'pending_ai' as NameStatus })
+    expect(shouldPollSourceLifecycle(s)).toBe(true)
+  })
+
+  it('returns true while AI description is pending', async () => {
+    const { shouldPollSourceLifecycle } = await import(
+      '@/features/sources/hooks/useSources'
+    )
+    const s = makeSource({ description_status: 'pending_ai' as NameStatus })
+    expect(shouldPollSourceLifecycle(s)).toBe(true)
+  })
+
+  it('returns true while the schema study is queued or running', async () => {
+    const { shouldPollSourceLifecycle } = await import(
+      '@/features/sources/hooks/useSources'
+    )
+    expect(
+      shouldPollSourceLifecycle(
+        makeSource({ schema_status: 'QUEUED' as SchemaStatus })
+      )
+    ).toBe(true)
+    expect(
+      shouldPollSourceLifecycle(
+        makeSource({ schema_status: 'STUDYING' as SchemaStatus })
+      )
+    ).toBe(true)
+  })
+})
+
+describe('availabilityBlockers', () => {
+  it('reports an empty array when name + description are set and not pending', () => {
+    const s = makeDetail({
+      name_status: 'ai_set',
+      description_status: 'ai_set',
+      description: 'A clear description.',
+    })
+    expect(availabilityBlockers(s)).toEqual([])
+  })
+
+  it('reports a blocker when name is pending_ai', () => {
+    const s = makeDetail({
+      name_status: 'pending_ai',
+      description_status: 'ai_set',
+      description: 'Already there.',
+    })
+    expect(availabilityBlockers(s)).toHaveLength(1)
+    expect(availabilityBlockers(s)[0]).toMatch(/naming/i)
+  })
+
+  it('reports a blocker when description is pending_ai', () => {
+    const s = makeDetail({
+      name_status: 'user_set',
+      description_status: 'pending_ai',
+      description: '',
+    })
+    // pending_ai supersedes the empty-string check.
+    expect(availabilityBlockers(s)).toEqual([
+      'AI description has not finished — wait for it to clear.',
+    ])
+  })
+
+  it('reports the empty-description blocker when not pending and the field is empty', () => {
+    const s = makeDetail({
+      name_status: 'user_set',
+      description_status: 'user_set',
+      description: '   ',
+    })
+    expect(availabilityBlockers(s)).toHaveLength(1)
+    expect(availabilityBlockers(s)[0]).toMatch(/description is empty/i)
+  })
+})

@@ -6,7 +6,7 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class EmbedderCreate(BaseModel):
@@ -21,6 +21,23 @@ class EmbedderCreate(BaseModel):
     dimensions: int = Field(..., ge=64, le=4096)
     max_input_tokens: int | None = None
     is_active: bool = False
+
+    @model_validator(mode="after")
+    def _reject_unsupported_provider(self) -> EmbedderCreate:
+        """Reject providers that have no native embedder offering.
+
+        Defense in depth: ``embedding_service_factory._materialise`` performs
+        the same check at runtime to catch any stale rows that bypassed this
+        validator (legacy data, manual DB inserts, etc.).
+        """
+        # Local import avoids a circular dependency at module import time.
+        from src.services.provider_catalog import PROVIDERS_WITHOUT_NATIVE_EMBEDDER
+
+        if self.provider in PROVIDERS_WITHOUT_NATIVE_EMBEDDER:
+            raise ValueError(
+                f"Provider '{self.provider}' does not offer a native embedder."
+            )
+        return self
 
 
 class EmbedderUpdate(BaseModel):

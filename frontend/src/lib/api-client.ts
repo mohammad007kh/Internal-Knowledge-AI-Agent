@@ -71,9 +71,21 @@ apiClient.interceptors.response.use(
 
     const original = error.config
 
-    // Never retry the refresh endpoint itself — it would loop.
-    const isRefreshUrl = original?.url?.includes('/auth/refresh')
-    if (error.response?.status !== 401 || original._retried || isRefreshUrl) {
+    // Never retry auth endpoints. /auth/refresh would loop; /auth/login and
+    // /auth/logout are unauthenticated by design — a 401 there is not a
+    // session-expired signal, it's a credentials/state error that must
+    // surface to the caller verbatim. Without this guard, a wrong-password
+    // 401 on /auth/login would silently trigger a refresh attempt and the
+    // refresh's error message ("Invalid or expired refresh token") would
+    // mask the real login error in the UI toast.
+    const noRetryUrls = ['/auth/refresh', '/auth/login', '/auth/logout']
+    const isAuthEndpoint = noRetryUrls.some((u) => original?.url?.includes(u))
+    if (error.response?.status !== 401 || original._retried || isAuthEndpoint) {
+      // For auth endpoints with problem+json bodies, parse so callers get
+      // the human-readable detail rather than axios's generic error message.
+      if (isAuthEndpoint && contentType.includes('application/problem+json')) {
+        return Promise.reject(parseErrorResponse(error))
+      }
       return Promise.reject(error)
     }
 

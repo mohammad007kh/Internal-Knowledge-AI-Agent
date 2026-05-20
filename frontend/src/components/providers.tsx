@@ -22,7 +22,8 @@ export function Providers({ children }: { children: React.ReactNode }) {
   return (
     <QueryClientProvider client={queryClient}>
       <AuthProvider>
-        <ThemeProvider attribute="class" defaultTheme="system" enableSystem disableTransitionOnChange>
+        {/* FX31: keep transitions enabled on theme flip so globals.css can fade colors smoothly */}
+        <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
           {children}
           <Toaster richColors closeButton position="top-right" />
         </ThemeProvider>

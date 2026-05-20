@@ -86,6 +86,34 @@ async def test_falls_back_to_single_variant_on_llm_error() -> None:
 
 
 @pytest.mark.asyncio
+async def test_degraded_flag_set_on_exception() -> None:
+    """FX5/RC4: any LLM failure must mark the request as degraded so
+    retrieve_context can apply its prior-turn stop-gap, but the pipeline
+    must continue running (no exception bubbles).
+    """
+    failing = AsyncMock()
+    failing.chat.completions.create.side_effect = RuntimeError("upstream 503")
+    resolver = _resolver_for(failing)
+    result = await analyze_query(
+        _state(), ai_model_resolver=resolver, langfuse=_langfuse()
+    )
+    assert result["query_analyzer_degraded"] is True
+    # And the fallback variants are still emitted so retrieve has something.
+    assert result["query_variants"] == ["What is the refund policy?"]
+
+
+@pytest.mark.asyncio
+async def test_degraded_flag_false_on_success() -> None:
+    """The degraded flag must default to False on a clean call."""
+    payload = {"variants": ["What is the refund policy?", "refund timeline"]}
+    resolver = _resolver_for(_openai_returning(payload))
+    result = await analyze_query(
+        _state(), ai_model_resolver=resolver, langfuse=_langfuse()
+    )
+    assert result["query_analyzer_degraded"] is False
+
+
+@pytest.mark.asyncio
 async def test_falls_back_on_invalid_json() -> None:
     client = AsyncMock()
     completion = MagicMock()
@@ -103,3 +131,42 @@ async def test_empty_query_returns_empty_variants() -> None:
     result = await analyze_query(_state(query="   "), ai_model_resolver=resolver, langfuse=_langfuse())
     assert result["query_variants"] == []
     resolver.resolve.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_reflector_feedback_fed_back_into_llm_prompt() -> None:
+    """Slice E defect-2 fix: reflector retry must surface feedback to the LLM.
+
+    Without this, the second pass through query_analyzer re-runs the same
+    prompt with the same query, so the retry loop is theatre.
+    """
+    http_client = _openai_returning({"variants": ["refund timeline rules"]})
+    resolver = _resolver_for(http_client)
+    state = _state()
+    state["reflector_feedback"] = "Answer omitted the 14-day window."
+    await analyze_query(state, ai_model_resolver=resolver, langfuse=_langfuse())
+
+    # Inspect the actual messages sent to the LLM.
+    kwargs = http_client.chat.completions.create.await_args.kwargs
+    user_msg = next(m for m in kwargs["messages"] if m["role"] == "user")
+    assert "Previous attempt was rejected" in user_msg["content"]
+    assert "14-day window" in user_msg["content"]
+    # Original query is still present.
+    assert "What is the refund policy?" in user_msg["content"]
+
+
+@pytest.mark.asyncio
+async def test_no_reflector_feedback_keeps_prompt_clean() -> None:
+    """Without feedback, the user message has the query under the LATEST
+    USER MESSAGE label and no retry preamble."""
+    http_client = _openai_returning({"variants": ["v1"]})
+    resolver = _resolver_for(http_client)
+    await analyze_query(_state(), ai_model_resolver=resolver, langfuse=_langfuse())
+
+    kwargs = http_client.chat.completions.create.await_args.kwargs
+    user_msg = next(m for m in kwargs["messages"] if m["role"] == "user")
+    # The query is now wrapped in a labelled section so the rewriter knows
+    # which line to act on; "rejected because" preamble must be absent.
+    assert "LATEST USER MESSAGE:" in user_msg["content"]
+    assert "What is the refund policy?" in user_msg["content"]
+    assert "rejected because" not in user_msg["content"]

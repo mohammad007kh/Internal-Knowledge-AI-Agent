@@ -7,6 +7,10 @@ services:
         # value through build args so changing HOST_BACKEND_PORT only
         # requires `docker compose build frontend` (no runtime env needed).
         NEXT_PUBLIC_API_URL: "http://localhost:${HOST_BACKEND_PORT:-8000}"
+        # MinIO presigned upload URLs are issued by the backend at this host
+        # so the frontend's upload-trust allowlist must include it. Shifting
+        # HOST_MINIO_API_PORT also requires `docker compose build frontend`.
+        NEXT_PUBLIC_MINIO_PUBLIC_URL: "http://localhost:${HOST_MINIO_API_PORT:-9000}"
     ports:
       - "${HOST_FRONTEND_PORT:-3000}:3000"
     depends_on:
@@ -28,7 +32,7 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-    env_file: .env
+    env_file: backend/.env
     environment:
       # Override .env so presigned URLs always track HOST_MINIO_API_PORT.
       # Otherwise users who shift the host port would see broken downloads
@@ -61,7 +65,7 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-    env_file: .env
+    env_file: backend/.env
     volumes:
       - ./app_config.yaml:/app/app_config.yaml:ro
     healthcheck:
@@ -86,7 +90,7 @@ services:
         condition: service_healthy
       worker:
         condition: service_started
-    env_file: .env
+    env_file: backend/.env
     volumes:
       - ./app_config.yaml:/app/app_config.yaml:ro
     # FR-033 — MUST be exactly 1 replica; duplicate beat = double-scheduling hazard
@@ -151,7 +155,7 @@ services:
       langfuse-db:
         condition: service_healthy
     environment:
-      DATABASE_URL: postgresql://langfuse:langfuse@langfuse-db:5432/langfuse
+      DATABASE_URL: postgresql://langfuse:${LANGFUSE_DB_PASSWORD:-langfuse}@langfuse-db:5432/langfuse
       NEXTAUTH_SECRET: ${LANGFUSE_SECRET_KEY}
       NEXTAUTH_URL: http://localhost:${HOST_LANGFUSE_PORT:-3001}
     restart: on-failure
@@ -161,7 +165,7 @@ services:
     environment:
       POSTGRES_DB: langfuse
       POSTGRES_USER: langfuse
-      POSTGRES_PASSWORD: langfuse
+      POSTGRES_PASSWORD: ${LANGFUSE_DB_PASSWORD:-langfuse}
     volumes:
       - langfuse_db_data:/var/lib/postgresql/data
     healthcheck:

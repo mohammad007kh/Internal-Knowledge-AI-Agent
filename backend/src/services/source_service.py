@@ -117,11 +117,24 @@ class SourceService:
         Raises:
             ConflictError: if a source with the same name exists for this owner.
         """
-        existing = await self._repo.find_by_name_and_owner(payload.name, owner_id)
-        if existing is not None:
-            raise ConflictError(
-                f"A source named {payload.name!r} already exists for this user."
+        # When the admin opted into AI auto-naming, the wire payload may carry
+        # an empty ``name``. Stamp a placeholder server-side so DB constraints
+        # (NOT NULL) hold and the row is addressable in the UI ("Naming…")
+        # until the auto-naming worker writes the real value. Skip the
+        # uniqueness check in this path because "Untitled source" can legitimately
+        # appear multiple times — the placeholder is replaced before the row is
+        # surfaced to non-admin users.
+        if payload.auto_name_and_description and not payload.name.strip():
+            effective_name = "Untitled source"
+        else:
+            effective_name = payload.name
+            existing = await self._repo.find_by_name_and_owner(
+                effective_name, owner_id
             )
+            if existing is not None:
+                raise ConflictError(
+                    f"A source named {effective_name!r} already exists for this user."
+                )
 
         is_file = payload.source_type in FILE_SOURCE_TYPES
         is_database = payload.source_type == "database"
@@ -166,12 +179,25 @@ class SourceService:
             self._encrypt_config(config_for_encryption) if config_for_encryption else None
         )
 
+        # AI auto-naming bookkeeping. When the user opted in, the description
+        # is also handled by the AI even if they typed nothing — keep these
+        # two signals in lock-step so the UI's "Naming…" indicator stays
+        # consistent.
+        if payload.auto_name_and_description:
+            name_status = "pending_ai"
+            description_status = "pending_ai"
+            description_for_persist: str | None = None
+        else:
+            name_status = "user_set"
+            description_status = "user_set"
+            description_for_persist = payload.description or None
+
         return await self._repo.create(
-            name=payload.name,
+            name=effective_name,
             source_type=persisted_source_type,
             source_mode=source_mode,
             retrieval_mode=payload.retrieval_mode,
-            description=payload.description or None,
+            description=description_for_persist,
             sync_mode=payload.sync_mode,
             sync_schedule=payload.sync_schedule,
             citations_enabled=payload.citations_enabled,
@@ -179,6 +205,9 @@ class SourceService:
             file_storage_path=first_object_key,
             owner_id=owner_id,
             status="pending",
+            name_status=name_status,
+            description_status=description_status,
+            auto_name_and_description=payload.auto_name_and_description,
         )
 
     @staticmethod
@@ -300,8 +329,15 @@ class SourceService:
     ) -> Source:
         """Partially update a Source.
 
-        Only non-``None`` payload fields are written.  If *config* is
-        supplied it is re-encrypted before storage.
+        Forwards every non-``None`` field from *payload* to the repository so
+        the admin UI's Regenerate / edit flows persist correctly. ``config``
+        is re-encrypted before storage.
+
+        When the admin manually sets ``name`` or ``description`` here (i.e.
+        not via the AI auto-naming pipeline), the corresponding
+        ``name_status`` / ``description_status`` columns are flipped to
+        ``"user_set"`` so the auto-naming worker knows not to overwrite the
+        human-typed value.
 
         Raises:
             NotFoundError: if *source_id* does not match an active Source.
@@ -310,10 +346,32 @@ class SourceService:
         await self.get_source(source_id)
 
         kwargs: dict[str, Any] = {}
+        # Forward every non-None editable field. Keep this list in lock-step
+        # with the editable fields declared on :class:`SourceUpdate`.
+        for field in (
+            "name",
+            "description",
+            "citations_enabled",
+            "retrieval_mode",
+            "sync_mode",
+            "sync_schedule",
+            "source_mode",
+            "is_active",
+        ):
+            value = getattr(payload, field)
+            if value is not None:
+                kwargs[field] = value
+
+        # Auto-naming bookkeeping: a manual edit to name/description means the
+        # admin explicitly set the value, so the auto-naming worker must not
+        # clobber it. Treat ``description=""`` (clear-to-empty) as an explicit
+        # intent too — the field-validator above strips it before we see it.
         if payload.name is not None:
-            kwargs["name"] = payload.name
-        if payload.is_active is not None:
-            kwargs["is_active"] = payload.is_active
+            kwargs["name_status"] = "user_set"
+        if payload.description is not None:
+            kwargs["description_status"] = "user_set"
+
+        # ``config`` stays a special case — re-encrypted before storage.
         if payload.config is not None:
             kwargs["config_encrypted"] = self._encrypt_config(payload.config)
 
@@ -327,15 +385,20 @@ class SourceService:
         return updated
 
     async def delete_source(self, source_id: uuid.UUID) -> None:
-        """Soft-delete a Source (sets ``is_active = False``).
+        """Soft-delete a Source (sets ``deleted_at = now()``).
+
+        Approval state (``is_active``) is preserved unchanged so the audit
+        trail can show whether the source was approved at the time of
+        deletion.
 
         Raises:
-            NotFoundError: if *source_id* is not found or already inactive.
+            NotFoundError: if *source_id* is not found or already
+            soft-deleted.
         """
-        deactivated = await self._repo.deactivate(source_id)
-        if not deactivated:
+        deleted = await self._repo.soft_delete(source_id)
+        if not deleted:
             raise NotFoundError(
-                f"Source {source_id} not found or already inactive."
+                f"Source {source_id} not found or already deleted."
             )
 
     # ------------------------------------------------------------------ #
@@ -356,6 +419,144 @@ class SourceService:
         return self._decrypt_config(source.config_encrypted)
 
     # ------------------------------------------------------------------ #
+    # Credentials rotation (U8 / FX4)
+    # ------------------------------------------------------------------ #
+
+    async def update_database_credentials(
+        self,
+        *,
+        source_id: uuid.UUID,
+        submitted: dict[str, Any],
+        connection_uri: str | None,
+    ) -> tuple[Source, list[str]]:
+        """Encrypt + persist a credential rotation, after a live probe.
+
+        Builds a candidate connector config by overlaying *submitted* on the
+        existing decrypted config (or wholly replacing the connection-string
+        slot when *connection_uri* is provided), runs the connector's
+        ``test_connection`` against it, then on success re-encrypts the
+        candidate, stamps connection-health columns to "unknown", and
+        returns the updated row plus the sorted list of changed field names.
+
+        Raises:
+            NotFoundError: if *source_id* does not match an active Source.
+            ValueError: if the merged candidate fails
+                :class:`DatabaseConnectionConfig` validation.
+            ConnectorTestFailedError: if the live probe fails — the source
+                row is NOT mutated, so the caller (route handler) maps this
+                straight to a 422 with the modal-stays-open contract.
+        """
+        from datetime import UTC, datetime as _datetime  # noqa: PLC0415
+
+        from src.core.exceptions import ConnectorTestFailedError  # noqa: PLC0415
+
+        existing_config = await self.get_source_config(source_id)
+        candidate_config: dict[str, Any] = dict(existing_config)
+        changed_fields: list[str] = sorted(
+            k for k in submitted.keys() if k != "confirm_password"
+        )
+
+        # ``connection_uri`` is the escape-hatch: it slots straight into
+        # whichever connection-string key the underlying connector reads.
+        if connection_uri is not None:
+            existing_db_type = candidate_config.get("db_type") or submitted.get(
+                "db_type"
+            )
+            if existing_db_type == "mongodb":
+                candidate_config["uri"] = connection_uri
+            else:
+                candidate_config["connection_string"] = connection_uri
+
+        # Pass-through structured fields the connector reads directly.
+        for key in ("db_type", "query", "ssl_mode", "collection", "database"):
+            value = submitted.get(key)
+            if value is not None:
+                candidate_config[key] = value
+
+        # If host/port/username/password is present we re-assemble the
+        # connection_string via ``_build_database_config`` over a typed
+        # payload that merges existing + submitted.
+        rebuild_keys = {"host", "port", "username", "password"}
+        if rebuild_keys & submitted.keys():
+            merged: dict[str, Any] = {
+                "db_type": candidate_config.get("db_type")
+                or submitted.get("db_type"),
+                "host": submitted.get("host", existing_config.get("host", "")),
+                "port": submitted.get("port", existing_config.get("port", 0)),
+                "database": submitted.get(
+                    "database", existing_config.get("database", "")
+                ),
+                "username": submitted.get(
+                    "username", existing_config.get("username", "")
+                ),
+                "password": submitted.get(
+                    "password", existing_config.get("password", "")
+                ),
+                "query": candidate_config.get("query"),
+                "ssl_mode": candidate_config.get("ssl_mode"),
+                "collection": candidate_config.get("collection"),
+            }
+            try:
+                typed = DatabaseConnectionConfig.model_validate(merged)
+            except ValidationError as exc:
+                # ValueError lets the route handler map to 422 with the
+                # standard sanitised-error envelope.  We don't echo the
+                # candidate config — only the field path strings.
+                paths = ", ".join(
+                    ".".join(str(loc) for loc in err.get("loc", ()))
+                    for err in exc.errors()
+                )
+                raise ValueError(
+                    f"Invalid credential payload (fields: {paths or 'unknown'})."
+                ) from exc
+            candidate_config = self._build_database_config(typed)
+            # Persist the structured fields too so a future /credentials
+            # call has host/port/db/username on hand for partial rotation.
+            candidate_config["host"] = typed.host
+            candidate_config["port"] = typed.port
+            candidate_config["database"] = typed.database
+            candidate_config["username"] = typed.username
+            candidate_config["password"] = typed.password
+
+        # Live probe — failure must not mutate the source row.
+        source = await self.get_source(source_id)
+        try:
+            connector = self._connector_factory.build(
+                source_type=source.source_type,
+                source_id=str(source_id),
+                decrypted_config=candidate_config,
+            )
+            ok = bool(await connector.test_connection())
+        except Exception as exc:  # noqa: BLE001
+            ok = False
+            # Log only the exception TYPE — the message can include host /
+            # credentials embedded by the underlying driver.
+            logger.warning(
+                "Credential update test_connection raised: source_id=%s err_type=%s",
+                source_id,
+                type(exc).__name__,
+            )
+
+        if not ok:
+            raise ConnectorTestFailedError(
+                "Connection test failed with the supplied credentials. "
+                "Credentials were NOT updated.",
+            )
+
+        # Persist (re-encrypt + reset connection health).
+        new_encrypted = self._encrypt_config(candidate_config)
+        updated = await self._repo.update(
+            source_id,
+            config_encrypted=new_encrypted,
+            connection_status="unknown",
+            connection_last_checked_at=_datetime.now(UTC),
+            connection_last_error=None,
+        )
+        if updated is None:
+            raise NotFoundError(f"Source {source_id} not found.")
+        return updated, changed_fields
+
+    # ------------------------------------------------------------------ #
     # List helpers
     # ------------------------------------------------------------------ #
 
@@ -364,21 +565,83 @@ class SourceService:
         owner_id: uuid.UUID,
         skip: int = 0,
         limit: int = 50,
+        available_only: bool = False,
     ) -> tuple[list[Source], int]:
-        """Return paginated sources for *owner_id* with a total count."""
-        sources = await self._repo.list_by_owner_with_jobs(owner_id, skip=skip, limit=limit)
-        total = await self._repo.count_by_owner(owner_id)
+        """Return paginated non-deleted sources for *owner_id* with a total count.
+
+        ``available_only=True`` restricts to admin-approved
+        (``is_active = TRUE``) — pass this from user-facing surfaces such as
+        the chat session source picker.
+        """
+        sources = await self._repo.list_by_owner_with_jobs(
+            owner_id, skip=skip, limit=limit, available_only=available_only
+        )
+        total = await self._repo.count_by_owner(
+            owner_id, available_only=available_only
+        )
         return sources, total
 
     async def list_all_active_sources(
         self,
         skip: int = 0,
         limit: int = 100,
+        available_only: bool = False,
     ) -> tuple[list[Source], int]:
-        """Return all active sources (admin view) with a total count."""
-        sources = await self._repo.list_active_with_jobs(skip=skip, limit=limit)
-        total = await self._repo.count_active()
+        """Return all non-deleted sources (admin view) with a total count.
+
+        ``available_only=True`` restricts to admin-approved sources — pass
+        this when the consumer is the chat session source picker.
+        """
+        sources = await self._repo.list_active_with_jobs(
+            skip=skip, limit=limit, available_only=available_only
+        )
+        total = await self._repo.count_active(available_only=available_only)
         return sources, total
+
+    # ------------------------------------------------------------------ #
+    # Aggregate listings (T-107 ingestion-clarity)
+    # ------------------------------------------------------------------ #
+
+    async def list_sources_for_owner_with_counts(
+        self,
+        owner_id: uuid.UUID,
+        *,
+        skip: int = 0,
+        limit: int = 50,
+        available_only: bool = False,
+    ) -> tuple[list[tuple[Source, int, int]], int]:
+        """Owner-scoped listing with per-source document/chunk counts.
+
+        Single round-trip — counts are computed via correlated subqueries
+        in the repository so the result stays bounded by ``limit`` rather
+        than the full sources table.
+        """
+        return await self._repo.list_with_counts(
+            owner_id=owner_id,
+            skip=skip,
+            limit=limit,
+            available_only=available_only,
+        )
+
+    async def list_all_sources_with_counts(
+        self,
+        *,
+        skip: int = 0,
+        limit: int = 100,
+        available_only: bool = False,
+    ) -> tuple[list[tuple[Source, int, int]], int]:
+        """Admin listing with per-source document/chunk counts.
+
+        Mirrors :meth:`list_all_active_sources` but adds aggregate counts
+        for the four-stage ingestion-clarity strip on the admin sources
+        table — without an N+1.
+        """
+        return await self._repo.list_with_counts(
+            owner_id=None,
+            skip=skip,
+            limit=limit,
+            available_only=available_only,
+        )
 
     # ------------------------------------------------------------------ #
     # Connectivity test
@@ -389,7 +652,16 @@ class SourceService:
 
         The connector registry import is deferred so this method is safe to
         call before the connector subsystem is fully wired up.
+
+        Side effect (Slice A): the result is persisted onto the Source row
+        (``connection_status`` / ``connection_last_checked_at`` /
+        ``connection_last_error``) so the UI can render
+        "Last tested 4 min ago — succeeded/failed" without keeping client
+        state. Persistence failures are logged but never alter the bool
+        returned to the caller — the probe outcome is the source of truth.
         """
+        ok = False
+        last_error: str | None = None
         try:
             source = await self.get_source(source_id)
             config = await self.get_source_config(source_id)
@@ -398,6 +670,50 @@ class SourceService:
                 source_id=str(source_id),
                 decrypted_config=config,
             )
-            return bool(await connector.test_connection())
+            ok = bool(await connector.test_connection())
+            if not ok:
+                last_error = "connector reported failure"
+        except Exception as exc:  # noqa: BLE001
+            ok = False
+            last_error = str(exc)
+
+        await self._persist_connection_probe(
+            source_id, success=ok, error=last_error
+        )
+        return ok
+
+    async def _persist_connection_probe(
+        self,
+        source_id: uuid.UUID,
+        *,
+        success: bool,
+        error: str | None,
+    ) -> None:
+        """Stamp the connection-health columns on the Source row.
+
+        Truncates ``error`` to 500 chars (the column limit) and never
+        embeds connection strings — the caller is responsible for stripping
+        any credentials before passing the message in.
+
+        On success: ``connection_status='healthy'``, ``connection_last_error=None``.
+        On failure: ``connection_status='failed'``, error message persisted.
+
+        The repository is a stateless wrapper over the request-scoped
+        :class:`AsyncSession`; commit responsibility belongs to the FastAPI
+        handler that owns the session, so we only flush here.
+        """
+        from datetime import UTC, datetime  # noqa: PLC0415
+
+        truncated = error[:500] if error else None
+        try:
+            await self._repo.update_connection_health(
+                source_id,
+                status="healthy" if success else "failed",
+                error=None if success else truncated,
+                checked_at=datetime.now(UTC),
+            )
         except Exception:  # noqa: BLE001
-            return False
+            logger.exception(
+                "Failed to persist connection probe result",
+                extra={"source_id": str(source_id), "success": success},
+            )

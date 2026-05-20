@@ -7,6 +7,7 @@ authentication lifecycle.
 
 from __future__ import annotations
 
+import logging
 import secrets
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
@@ -20,8 +21,12 @@ from src.services.password_service import PasswordService
 from src.services.user_service import UserService
 
 if TYPE_CHECKING:
+    from sqlalchemy.ext.asyncio import AsyncSession
+
     from src.models.user import User
     from src.services.account_lockout import AccountLockout
+
+_logger = logging.getLogger(__name__)
 
 
 class AuthService:
@@ -33,13 +38,33 @@ class AuthService:
         refresh_repo: RefreshTokenRepository,
         user_service: UserService,
         password_service: PasswordService,
+        session: "AsyncSession | None" = None,
         lockout: "AccountLockout | None" = None,
     ) -> None:
         self._user_repo = user_repo
         self._refresh_repo = refresh_repo
         self._user_service = user_service
         self._password_svc = password_service
+        self._session = session
         self._lockout = lockout
+
+    # ------------------------------------------------------------------ #
+    # Internal helpers                                                    #
+    # ------------------------------------------------------------------ #
+
+    async def _commit(self) -> None:
+        """Persist pending writes on the bound request-scoped session.
+
+        When ``session`` was not provided (legacy / unit-test path), we log
+        and skip — repositories already flush, and the test stack mocks the
+        commit boundary at the route level.
+        """
+        if self._session is None:
+            _logger.debug(
+                "AuthService.session is None — skipping commit; rely on caller"
+            )
+            return
+        await self._session.commit()
 
     # ------------------------------------------------------------------ #
     # Public API                                                          #
@@ -111,6 +136,7 @@ class AuthService:
         record = await self._refresh_repo.get_valid_by_token(raw_token)
         if record is not None:
             await self._refresh_repo.revoke(record.id)
+            await self._commit()
 
     async def accept_invitation(
         self,
@@ -143,6 +169,7 @@ class AuthService:
         await self._refresh_repo.create_password_reset_token(
             user.id, raw, expires_at
         )
+        await self._commit()
         return raw
 
     async def confirm_password_reset(
@@ -172,6 +199,7 @@ class AuthService:
         )
         await self._refresh_repo.consume_reset_token(record.id)
         await self._refresh_repo.revoke_all_for_user(user.id)
+        await self._commit()
 
     async def change_password(
         self,
@@ -203,6 +231,7 @@ class AuthService:
             must_change_password=False,
         )
         await self._refresh_repo.revoke_all_for_user(user.id)
+        await self._commit()
 
     # ------------------------------------------------------------------ #
     # Helpers                                                             #
@@ -212,10 +241,14 @@ class AuthService:
         """Create an access + refresh token pair for *user*.
 
         Returns ``(access_token, raw_refresh_token, must_change_password)``.
+
+        Commits the bound session so the freshly-minted refresh-token row is
+        durable before the cookie is returned to the client.
         """
         access_token = create_access_token(
             {"sub": str(user.id), "role": user.role.value}
         )
         raw_refresh = secrets.token_urlsafe(32)
         await self._refresh_repo.create_refresh_token(user.id, raw_refresh)
+        await self._commit()
         return access_token, raw_refresh, user.must_change_password

@@ -1,17 +1,65 @@
+# ─── Backend Docker build context ignore list ───────────────────────────────
+# Goal: ship the smallest, secret-free build context to the daemon.
+# Anything excluded here is invisible to `COPY . .` in the Dockerfile.
+# ────────────────────────────────────────────────────────────────────────────
+
+# Secrets — NEVER bake into an image. Compose injects via env_file at runtime.
 .env
 .env.*
+
+# VCS metadata
 .git/
 .gitignore
+
+# Python bytecode and tooling caches
 __pycache__/
 **/__pycache__/
+*.pyc
+*.pyo
+*.pyd
 .venv/
 venv/
-*.pyc
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
-htmlcov/
+
+# Coverage artefacts (regenerated in CI; not needed at runtime)
 .coverage
+coverage.xml
+htmlcov/
+
+# Test suite & docs are not shipped in the runtime image
 tests/
 docs/
 README.md
+
+# Local pytest run logs (found in backend/: pytest_out*.txt, pytest_output*.txt)
+pytest_out*.txt
+pytest_output*.txt
+
+# Ad-hoc debugging script — not part of the running app
+check_tables.py
+
+# Generic log / db / temp artefacts that may appear during local dev
+*.log
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+*.sqlite3
+*.sqlite3-wal
+*.sqlite3-shm
+*.db
+*.tmp
+*.bak
+
+# Editor / IDE state
+.idea/
+.vscode/
+*.swp
+
+# Stray frontend bleed-through (defensive — backend should never have these)
+node_modules/
+
+# The Dockerfile itself doesn't need to live inside the image
+Dockerfile
+.dockerignore

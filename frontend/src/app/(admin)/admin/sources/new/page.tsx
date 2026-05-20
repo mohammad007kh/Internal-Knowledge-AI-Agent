@@ -1,18 +1,18 @@
 'use client'
 
 import { zodResolver } from '@hookform/resolvers/zod'
+import { useMutation } from '@tanstack/react-query'
 import {
   AlertCircleIcon,
-  BookOpenIcon,
   CheckCircle2Icon,
   ChevronRightIcon,
-  CloudIcon,
   DatabaseIcon,
   FileTextIcon,
   GlobeIcon,
+  InfoIcon,
   Loader2Icon,
-  PlusIcon,
   RefreshCwIcon,
+  SparklesIcon,
   XIcon,
 } from 'lucide-react'
 import Link from 'next/link'
@@ -23,8 +23,10 @@ import { toast } from 'sonner'
 import { z } from 'zod'
 
 import { EmbedderPicker } from '@/components/admin/EmbedderPicker'
+import { FileDropzone } from '@/components/admin/FileDropzone'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Checkbox } from '@/components/ui/checkbox'
 import {
   Form,
   FormControl,
@@ -36,6 +38,7 @@ import {
 } from '@/components/ui/form'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import {
   Select,
   SelectContent,
@@ -45,7 +48,6 @@ import {
 } from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import {
   type CreateSourcePayload,
   type FileTypeKey,
@@ -53,15 +55,27 @@ import {
   useCreateSource,
 } from '@/hooks/use-create-source'
 import { useUploadFile } from '@/hooks/use-upload-url'
+import { extractApiErrorMessage } from '@/lib/api-error'
+import {
+  type InspectSourceResponse,
+  inspectSourceApi,
+} from '@/lib/api/sources'
 import { cn } from '@/lib/utils'
 
+// TODO: re-add 'confluence' and 'sharepoint' once their backend connectors ship.
 const SOURCE_TYPE_OPTIONS = [
   { value: 'file_upload', label: 'Files', icon: FileTextIcon, category: 'File' },
   { value: 'database', label: 'Database', icon: DatabaseIcon, category: 'Database' },
   { value: 'web_url', label: 'Web URL', icon: GlobeIcon, category: 'Web' },
-  { value: 'confluence', label: 'Confluence', icon: BookOpenIcon, category: 'SaaS' },
-  { value: 'sharepoint', label: 'SharePoint', icon: CloudIcon, category: 'SaaS' },
 ] as const
+
+// TODO: Re-add 'recursive' once WebUrlConnector implements BFS with SSRF guard + same-domain + page-cap.
+const CRAWL_MODES = ['single'] as const
+type CrawlMode = (typeof CRAWL_MODES)[number]
+
+const CRAWL_MODE_DESCRIPTIONS: Record<CrawlMode, string> = {
+  single: 'Fetch just this URL once.',
+}
 
 const FILE_EXTENSION_MAP: Record<string, FileTypeKey> = {
   pdf: 'pdf',
@@ -73,7 +87,6 @@ const FILE_EXTENSION_MAP: Record<string, FileTypeKey> = {
   markdown: 'markdown',
 }
 
-const ACCEPTED_FILE_EXTENSIONS = '.pdf,.docx,.xlsx,.csv,.txt,.md,.markdown'
 const MAX_PARALLEL_UPLOADS = 3
 
 const FILE_TYPE_LABELS: Record<FileTypeKey, string> = {
@@ -184,18 +197,34 @@ const databaseConnectionSchema = z
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         path: ['query'],
-        message: 'Query is required for SQL databases',
+        message: 'Query is required for SQL sources',
       })
     }
   })
 
 type DatabaseConnectionValues = z.infer<typeof databaseConnectionSchema>
 
+const webUrlSchema = z.object({
+  url: z
+    .string()
+    .min(1, 'URL is required')
+    .url('Enter a valid URL')
+    .refine((value) => /^https?:\/\//i.test(value), {
+      message: 'URL must start with http:// or https://',
+    }),
+  crawl_mode: z.enum(CRAWL_MODES),
+})
+
 const schema = z
   .object({
-    source_type: z.enum(['database', 'file_upload', 'web_url', 'confluence', 'sharepoint']),
-    name: z.string().min(1, 'Name is required').max(200, 'Max 200 characters'),
+    // TODO: re-add 'confluence' / 'sharepoint' when their backend connectors ship.
+    source_type: z.enum(['database', 'file_upload', 'web_url']),
+    // F9: Name is conditionally required — see superRefine below. It is
+    // optional at the schema level so the form remains valid when the user
+    // opts into AI-naming and submits an empty string.
+    name: z.string().max(200, 'Max 200 characters'),
     description: z.string().max(500, 'Max 500 characters').optional(),
+    auto_name_and_description: z.boolean(),
     db_type: z.enum(DB_TYPES).optional(),
     host: z.string().optional(),
     port: z.union([z.string(), z.number()]).optional(),
@@ -205,31 +234,58 @@ const schema = z
     query: z.string().optional(),
     collection: z.string().optional(),
     ssl_mode: z.enum(['disable', 'require']).optional(),
+    url: z.string().optional(),
+    crawl_mode: z.enum(CRAWL_MODES).optional(),
     retrieval_mode: z.enum(['vector_only', 'text_to_query', 'hybrid']),
     sync_mode: z.enum(['manual', 'scheduled', 'delta']),
     sync_schedule: z.string().optional(),
     citations_enabled: z.boolean(),
   })
   .superRefine((values, ctx) => {
-    if (values.source_type !== 'database') return
-    const dbResult = databaseConnectionSchema.safeParse({
-      db_type: values.db_type,
-      host: values.host,
-      port: values.port,
-      database_name: values.database_name,
-      username: values.username,
-      password: values.password,
-      query: values.query,
-      collection: values.collection,
-      ssl_mode: values.ssl_mode,
-    })
-    if (!dbResult.success) {
-      for (const issue of dbResult.error.issues) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          path: issue.path,
-          message: issue.message,
-        })
+    // F9: Name is required only when the user has NOT opted into AI-naming.
+    if (!values.auto_name_and_description && values.name.trim().length === 0) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['name'],
+        message: 'Name is required',
+      })
+    }
+    if (values.source_type === 'database') {
+      const dbResult = databaseConnectionSchema.safeParse({
+        db_type: values.db_type,
+        host: values.host,
+        port: values.port,
+        database_name: values.database_name,
+        username: values.username,
+        password: values.password,
+        query: values.query,
+        collection: values.collection,
+        ssl_mode: values.ssl_mode,
+      })
+      if (!dbResult.success) {
+        for (const issue of dbResult.error.issues) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: issue.path,
+            message: issue.message,
+          })
+        }
+      }
+      return
+    }
+    if (values.source_type === 'web_url') {
+      const webResult = webUrlSchema.safeParse({
+        url: values.url,
+        crawl_mode: values.crawl_mode,
+      })
+      if (!webResult.success) {
+        for (const issue of webResult.error.issues) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: issue.path,
+            message: issue.message,
+          })
+        }
       }
     }
   })
@@ -248,7 +304,6 @@ export default function NewSourcePage() {
   const uploadFile = useUploadFile()
 
   const [uploads, setUploads] = useState<UploadEntry[]>([])
-  const fileInputRef = useRef<HTMLInputElement | null>(null)
 
   // Counters derived from uploads state.
   const uploadSummary = useMemo(() => {
@@ -269,6 +324,7 @@ export default function NewSourcePage() {
       source_type: 'file_upload',
       name: '',
       description: '',
+      auto_name_and_description: false,
       db_type: 'postgresql',
       host: '',
       port: DB_DEFAULT_PORTS.postgresql,
@@ -278,6 +334,8 @@ export default function NewSourcePage() {
       query: '',
       collection: '',
       ssl_mode: 'disable',
+      url: '',
+      crawl_mode: 'single',
       retrieval_mode: 'hybrid',
       sync_mode: 'manual',
       sync_schedule: '',
@@ -288,6 +346,7 @@ export default function NewSourcePage() {
   const sourceType = form.watch('source_type')
   const syncMode = form.watch('sync_mode')
   const dbType = form.watch('db_type') ?? 'postgresql'
+  const autoNaming = form.watch('auto_name_and_description')
   const isFileType = FILE_SOURCE_TYPES.has(sourceType)
   const isDatabaseType = sourceType === 'database'
   const isMongo = isDatabaseType && dbType === 'mongodb'
@@ -370,16 +429,14 @@ export default function NewSourcePage() {
   )
 
   const enqueueFiles = useCallback(
-    (files: FileList | File[]) => {
+    (files: File[]) => {
+      // Files arrive pre-validated from <FileDropzone /> (extension + MIME +
+      // size). detectFileType therefore always resolves; the null branch is a
+      // defensive no-op, never the rejection path it used to be.
       const newEntries: UploadEntry[] = []
-      const rejected: string[] = []
-
-      for (const file of Array.from(files)) {
+      for (const file of files) {
         const fileType = detectFileType(file.name)
-        if (!fileType) {
-          rejected.push(file.name)
-          continue
-        }
+        if (!fileType) continue
         newEntries.push({
           localId: makeLocalId(),
           file,
@@ -391,11 +448,6 @@ export default function NewSourcePage() {
         })
       }
 
-      if (rejected.length > 0) {
-        toast.error(
-          `Unsupported file type: ${rejected.join(', ')}. Allowed: PDF, Word, Excel, CSV, Text, Markdown.`
-        )
-      }
       if (newEntries.length === 0) return
 
       setUploads((prev) => [...prev, ...newEntries])
@@ -403,13 +455,6 @@ export default function NewSourcePage() {
     },
     [drainQueue]
   )
-
-  function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
-    const list = e.target.files
-    if (!list || list.length === 0) return
-    enqueueFiles(list)
-    if (fileInputRef.current) fileInputRef.current.value = ''
-  }
 
   function handleRetry(localId: string) {
     const entry = uploads.find((u) => u.localId === localId)
@@ -419,10 +464,6 @@ export default function NewSourcePage() {
 
   function handleRemove(localId: string) {
     setUploads((prev) => prev.filter((u) => u.localId !== localId))
-  }
-
-  function handleAddMore() {
-    fileInputRef.current?.click()
   }
 
   async function onSubmit(values: FormValues) {
@@ -459,6 +500,11 @@ export default function NewSourcePage() {
         }
       }
       connection = base
+    } else if (values.source_type === 'web_url') {
+      connection = {
+        url: values.url ?? '',
+        crawl_mode: values.crawl_mode ?? 'single',
+      }
     }
 
     let files: UploadedFileRef[] | null = null
@@ -473,16 +519,20 @@ export default function NewSourcePage() {
         }))
     }
 
+    // F9: when auto-naming is on, send empty strings for name + description
+    // and let the backend stamp the placeholder. Otherwise pass the user's
+    // values through unchanged.
     const payload: CreateSourcePayload = {
-      name: values.name,
+      name: values.auto_name_and_description ? '' : values.name,
       source_type: values.source_type,
-      description: values.description ?? '',
+      description: values.auto_name_and_description ? '' : (values.description ?? ''),
       connection,
       files,
       retrieval_mode: values.retrieval_mode,
       sync_mode: values.sync_mode,
       sync_schedule: values.sync_mode === 'scheduled' ? (values.sync_schedule ?? null) : null,
       citations_enabled: values.citations_enabled,
+      auto_name_and_description: values.auto_name_and_description,
     }
 
     createSource.mutate(payload, {
@@ -491,7 +541,7 @@ export default function NewSourcePage() {
         router.push(`/admin/sources/${result.id}`)
       },
       onError: (err) => {
-        toast.error(err.message || 'Failed to create source')
+        toast.error(extractApiErrorMessage(err) || 'Failed to create source')
       },
     })
   }
@@ -532,7 +582,7 @@ export default function NewSourcePage() {
                       <div
                         role="radiogroup"
                         aria-label="Source type"
-                        className="grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-5"
+                        className="grid grid-cols-2 gap-2 sm:grid-cols-3"
                       >
                         {SOURCE_TYPE_OPTIONS.map((opt) => {
                           const Icon = opt.icon
@@ -573,39 +623,6 @@ export default function NewSourcePage() {
                   </FormItem>
                 )}
               />
-
-              <FormField
-                control={form.control}
-                name="name"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Name</FormLabel>
-                    <FormControl>
-                      <Input placeholder="My Knowledge Base" maxLength={200} {...field} />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-
-              <FormField
-                control={form.control}
-                name="description"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Description (optional)</FormLabel>
-                    <FormControl>
-                      <Textarea
-                        placeholder="What documents does this source contain?"
-                        maxLength={500}
-                        rows={2}
-                        {...field}
-                      />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
             </CardContent>
           </Card>
 
@@ -618,9 +635,8 @@ export default function NewSourcePage() {
                 <FilesPickerSection
                   uploads={uploads}
                   summary={uploadSummary}
-                  fileInputRef={fileInputRef}
-                  onPick={handleFileChange}
-                  onAddMore={handleAddMore}
+                  disabled={createSource.isPending}
+                  onAddFiles={enqueueFiles}
                   onRetry={handleRetry}
                   onRemove={handleRemove}
                 />
@@ -633,6 +649,8 @@ export default function NewSourcePage() {
                     portTouchedRef.current = true
                   }}
                 />
+              ) : sourceType === 'web_url' ? (
+                <WebUrlConnectionFields form={form} />
               ) : (
                 <p className="text-sm text-muted-foreground">
                   No additional configuration is required for this source type yet.
@@ -771,6 +789,113 @@ export default function NewSourcePage() {
                         onCheckedChange={field.onChange}
                       />
                     </FormControl>
+                  </FormItem>
+                )}
+              />
+            </CardContent>
+          </Card>
+
+          {/* F9: AI-naming opt-in card. Lives last in the form so the user
+              has already supplied connection / files context before deciding
+              whether to let the assistant pick a name + description. */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Naming</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <FormField
+                control={form.control}
+                name="auto_name_and_description"
+                render={({ field }) => (
+                  <FormItem className="space-y-2">
+                    <div className="flex items-start gap-3">
+                      <FormControl>
+                        <Checkbox
+                          id="auto-naming-checkbox"
+                          checked={field.value}
+                          onCheckedChange={(next) => {
+                            field.onChange(next)
+                            if (next) {
+                              // Clear the user's drafts so unchecking later
+                              // gives them a fresh slate to type into.
+                              form.setValue('name', '', {
+                                shouldDirty: false,
+                                shouldValidate: false,
+                              })
+                              form.setValue('description', '', {
+                                shouldDirty: false,
+                                shouldValidate: false,
+                              })
+                            }
+                          }}
+                          className="mt-0.5"
+                        />
+                      </FormControl>
+                      <div className="space-y-1">
+                        <FormLabel
+                          htmlFor="auto-naming-checkbox"
+                          className="flex items-center gap-1.5 text-sm font-medium"
+                        >
+                          <SparklesIcon
+                            className="h-3.5 w-3.5 text-muted-foreground"
+                            aria-hidden
+                          />
+                          Let AI name and describe this source for me
+                        </FormLabel>
+                        <FormDescription className="text-xs">
+                          Skip this and the assistant will read your source after ingestion and
+                          write a clear name + retrieval-friendly description. You can edit either
+                          later.
+                        </FormDescription>
+                      </div>
+                    </div>
+                  </FormItem>
+                )}
+              />
+
+              <FormField
+                control={form.control}
+                name="name"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Name</FormLabel>
+                    <FormControl>
+                      <Input
+                        placeholder={
+                          autoNaming
+                            ? 'AI will pick a name after ingestion'
+                            : 'My Knowledge Base'
+                        }
+                        maxLength={200}
+                        disabled={autoNaming}
+                        {...field}
+                      />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
+              <FormField
+                control={form.control}
+                name="description"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Description (optional)</FormLabel>
+                    <FormControl>
+                      <Textarea
+                        placeholder={
+                          autoNaming
+                            ? 'AI will write a description after ingestion'
+                            : 'What documents does this source contain?'
+                        }
+                        maxLength={500}
+                        rows={2}
+                        disabled={autoNaming}
+                        {...field}
+                      />
+                    </FormControl>
+                    <FormMessage />
                   </FormItem>
                 )}
               />
@@ -967,6 +1092,8 @@ function DatabaseConnectionFields({
         />
       </div>
 
+      {/* TODO: Add read-only enforcement once SqlDatabaseConnector applies SET TRANSACTION READ ONLY at connect-time. */}
+
       {isSqlDb && (
         <FormField
           control={form.control}
@@ -997,7 +1124,31 @@ function DatabaseConnectionFields({
           name="query"
           render={({ field }) => (
             <FormItem>
-              <FormLabel>Query</FormLabel>
+              <div className="flex items-center gap-1.5">
+                <FormLabel className="m-0">Query</FormLabel>
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <button
+                      type="button"
+                      aria-label="About the query field"
+                      className="-m-2 inline-flex h-9 w-9 items-center justify-center rounded-full text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    >
+                      <InfoIcon className="h-4 w-4" aria-hidden />
+                    </button>
+                  </PopoverTrigger>
+                  <PopoverContent side="top" className="max-w-xs text-sm">
+                    <p>
+                      Paste a SELECT that returns the rows to index. Read-only is enforced
+                      regardless: the agent rejects anything that isn&apos;t a single SELECT.
+                    </p>
+                    <p className="mt-2">
+                      Use any joins, filters, or projections you need to narrow the index to the
+                      relevant tables and columns.
+                    </p>
+                    <p className="mt-2 font-medium">Read-only is enforced regardless.</p>
+                  </PopoverContent>
+                </Popover>
+              </div>
               <FormControl>
                 <Textarea
                   className="font-mono text-xs"
@@ -1007,8 +1158,7 @@ function DatabaseConnectionFields({
                 />
               </FormControl>
               <FormDescription>
-                SELECT statement that returns the rows to index. The first column should be a stable
-                id.
+                Required. Paste a SELECT statement that returns the rows to index.
               </FormDescription>
               <FormMessage />
             </FormItem>
@@ -1038,18 +1188,164 @@ function DatabaseConnectionFields({
         <code className="mt-1 block break-all font-mono text-xs">{preview}</code>
       </div>
 
-      <TooltipProvider>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <span className="inline-flex">
-              <Button type="button" variant="outline" size="sm" disabled>
-                Test connection
-              </Button>
-            </span>
-          </TooltipTrigger>
-          <TooltipContent>Coming soon</TooltipContent>
-        </Tooltip>
-      </TooltipProvider>
+      <TestConnectionButton form={form} />
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Test connection — calls POST /api/v1/sources/inspect with the form's typed
+// connection dict (no Source row yet). Result is diagnostic only and MUST
+// NOT auto-fill the form's name/description fields.
+// ---------------------------------------------------------------------------
+
+interface TestConnectionButtonProps {
+  form: UseFormReturn<FormValues>
+}
+
+function getTestConnectionErrorMessage(error: unknown): string {
+  // Surface the backend's RFC-7807 `detail` ("Could not connect to database
+  // source", etc.) rather than axios's generic "Request failed with status
+  // code 422". `extractApiErrorMessage` handles both the raw AxiosError (when
+  // `inspectSourceApi` calls `apiClient` directly) and a pre-flattened Error.
+  const message = extractApiErrorMessage(error)
+  if (message === 'An unexpected error occurred.') {
+    return 'Could not connect. Check the connection details and try again.'
+  }
+  return message
+}
+
+function TestConnectionButton({ form }: TestConnectionButtonProps) {
+  const host = form.watch('host') ?? ''
+  const port = form.watch('port')
+  const databaseName = form.watch('database_name') ?? ''
+  const username = form.watch('username') ?? ''
+  const password = form.watch('password') ?? ''
+  const dbType = (form.watch('db_type') ?? 'postgresql') as DbType
+  const sslMode = form.watch('ssl_mode')
+
+  const portFilled = port !== undefined && port !== null && String(port).trim().length > 0
+  const requiredFilled =
+    host.trim().length > 0 &&
+    portFilled &&
+    databaseName.trim().length > 0 &&
+    username.trim().length > 0 &&
+    password.trim().length > 0
+
+  const mutation = useMutation<InspectSourceResponse, Error, void>({
+    mutationFn: async () => {
+      const portValue =
+        typeof port === 'number' ? port : Number(port ?? Number.NaN)
+      const connection: Record<string, unknown> = {
+        db_type: dbType,
+        host: host.trim(),
+        port: Number.isFinite(portValue) ? portValue : DB_DEFAULT_PORTS[dbType],
+        database: databaseName.trim(),
+        username: username.trim(),
+        password,
+      }
+      if (dbType !== 'mongodb' && sslMode) {
+        connection.ssl_mode = sslMode
+      }
+      return inspectSourceApi({ source_type: 'database', connection })
+    },
+  })
+
+  const isPending = mutation.isPending
+  const buttonDisabled = !requiredFilled || isPending
+
+  function handleClick() {
+    mutation.mutate()
+  }
+
+  return (
+    <div className="space-y-2">
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        onClick={handleClick}
+        disabled={buttonDisabled}
+        aria-label="Test connection"
+      >
+        {isPending ? (
+          <>
+            <Loader2Icon className="mr-1.5 h-3.5 w-3.5 animate-spin" aria-hidden />
+            Testing…
+          </>
+        ) : (
+          'Test connection'
+        )}
+      </Button>
+
+      {mutation.isSuccess && !isPending && (
+        <div
+          role="status"
+          aria-live="polite"
+          className="flex items-start gap-2 rounded-md border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-xs text-emerald-700 dark:text-emerald-300"
+        >
+          <CheckCircle2Icon className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
+          <span data-testid="test-connection-success">
+            {mutation.data.description.trim().length > 0
+              ? mutation.data.description
+              : 'Connection successful.'}
+          </span>
+        </div>
+      )}
+
+      {mutation.isError && !isPending && (
+        <div
+          role="alert"
+          className="flex items-start gap-2 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive"
+        >
+          <XIcon className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
+          <span data-testid="test-connection-error">
+            {getTestConnectionErrorMessage(mutation.error)}
+          </span>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Web URL connection — single URL + crawl mode picker.
+// ---------------------------------------------------------------------------
+
+interface WebUrlConnectionFieldsProps {
+  form: UseFormReturn<FormValues>
+}
+
+function WebUrlConnectionFields({ form }: WebUrlConnectionFieldsProps) {
+  // Crawl mode is fixed to 'single' for now — the Select is omitted entirely.
+  // See WebUrlConnectionFields TODO above (CRAWL_MODES) for re-add criteria.
+
+  return (
+    <div className="space-y-4">
+      <FormField
+        control={form.control}
+        name="url"
+        render={({ field }) => (
+          <FormItem>
+            <FormLabel>URL</FormLabel>
+            <FormControl>
+              <Input
+                type="url"
+                inputMode="url"
+                placeholder="https://docs.example.com/handbook"
+                autoComplete="off"
+                spellCheck={false}
+                {...field}
+              />
+            </FormControl>
+            <FormDescription>
+              Must start with <code>http://</code> or <code>https://</code>.{' '}
+              {CRAWL_MODE_DESCRIPTIONS.single}
+            </FormDescription>
+            <FormMessage />
+          </FormItem>
+        )}
+      />
     </div>
   )
 }
@@ -1068,9 +1364,10 @@ interface UploadSummaryShape {
 interface FilesPickerSectionProps {
   uploads: UploadEntry[]
   summary: UploadSummaryShape
-  fileInputRef: React.MutableRefObject<HTMLInputElement | null>
-  onPick: (e: React.ChangeEvent<HTMLInputElement>) => void
-  onAddMore: () => void
+  /** True while the create-source mutation is in flight — locks the dropzone. */
+  disabled: boolean
+  /** Receives the already-validated files emitted by the dropzone. */
+  onAddFiles: (files: File[]) => void
   onRetry: (localId: string) => void
   onRemove: (localId: string) => void
 }
@@ -1078,43 +1375,23 @@ interface FilesPickerSectionProps {
 function FilesPickerSection({
   uploads,
   summary,
-  fileInputRef,
-  onPick,
-  onAddMore,
+  disabled,
+  onAddFiles,
   onRetry,
   onRemove,
 }: FilesPickerSectionProps) {
   return (
     <div className="space-y-3">
       {uploads.length === 0 ? (
-        <div className="space-y-2">
-          <label className="block text-sm font-medium" htmlFor="file-upload">
-            Upload files
-          </label>
-          <input
-            ref={fileInputRef}
-            id="file-upload"
-            type="file"
-            multiple
-            accept={ACCEPTED_FILE_EXTENSIONS}
-            onChange={onPick}
-            className="block w-full text-sm text-muted-foreground file:mr-4 file:rounded-md file:border-0 file:bg-primary file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-primary-foreground hover:file:bg-primary/90"
-            aria-label="Upload files"
-          />
-          <p className="text-xs text-muted-foreground">
-            Select one or more files. Allowed: PDF, Word, Excel, CSV, Text, Markdown.
-          </p>
-        </div>
+        <FileDropzone variant="full" onFiles={onAddFiles} disabled={disabled} />
       ) : (
         <>
-          <input
-            ref={fileInputRef}
-            type="file"
-            multiple
-            accept={ACCEPTED_FILE_EXTENSIONS}
-            onChange={onPick}
-            className="sr-only"
-            aria-label="Add more files"
+          {/* The compact dropzone IS the "add more" affordance. It locks
+              while any upload is in flight so the queue stays coherent. */}
+          <FileDropzone
+            variant="compact"
+            onFiles={onAddFiles}
+            disabled={disabled || summary.inFlight > 0}
           />
           <UploadSummary summary={summary} />
           <ul className="space-y-2" aria-label="Selected files">
@@ -1122,10 +1399,6 @@ function FilesPickerSection({
               <UploadRow key={entry.localId} entry={entry} onRetry={onRetry} onRemove={onRemove} />
             ))}
           </ul>
-          <Button type="button" variant="outline" size="sm" onClick={onAddMore} className="gap-1.5">
-            <PlusIcon className="h-4 w-4" aria-hidden />
-            Add more files
-          </Button>
         </>
       )}
     </div>

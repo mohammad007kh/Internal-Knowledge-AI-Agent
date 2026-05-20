@@ -22,6 +22,9 @@ from src.core.security import (
 )
 from src.models.user import User
 from src.repositories.admin_audit_log_repository import AdminAuditLogRepository
+from src.repositories.invitation_repository import InvitationRepository
+from src.repositories.refresh_token_repository import RefreshTokenRepository
+from src.repositories.user_repository import UserRepository
 from src.schemas.auth import (
     AcceptInvitationRequest,
     ChangePasswordRequest,
@@ -30,8 +33,10 @@ from src.schemas.auth import (
     PasswordResetRequest,
     TokenResponse,
 )
-from src.services.audit_service import emit_audit
+from src.services.audit_service import emit_audit, mask_email
 from src.services.auth_service import AuthService
+from src.services.password_service import PasswordService
+from src.services.user_service import UserService
 
 router = APIRouter()
 
@@ -41,15 +46,47 @@ router = APIRouter()
 # ---------------------------------------------------------------------------
 
 
-def _get_auth_service() -> AuthService:
-    """Resolve :class:`AuthService` from the DI container.
+def _get_auth_service(
+    db: AsyncSession = Depends(get_db),
+) -> AuthService:
+    """Construct :class:`AuthService` bound to the request-scoped DB session.
 
-    Uses a lazy import so that the module can be loaded without triggering
-    the full container wiring (helpful for unit tests).
+    Replaces the legacy ``Container.auth_service()`` resolver, which built
+    every repository against a *separate* :class:`AsyncSession` — leaving the
+    refresh-token row in an uncommitted, GC-rollback'd session while the
+    route handler committed only its audit-log session. The result was a
+    refresh-token cookie pointing at a row that never landed in the DB and
+    a 401 on the very next ``/auth/refresh``.
+
+    All repositories AND the inner :class:`UserService` now share the same
+    :class:`AsyncSession` so the refresh-token row written by
+    ``_issue_tokens`` lives in the same transaction as the audit-log row
+    written by the route handler. :class:`AuthService` commits the session
+    itself at the end of every mutating method.
+
+    Tests continue to override this symbol via
+    ``app.dependency_overrides[_get_auth_service] = ...`` to inject mocks —
+    FastAPI ignores the dependency parameters when an override is active.
     """
     from src.core.container import Container  # noqa: PLC0415
 
-    return Container.auth_service()
+    user_repo = UserRepository(session=db)
+    refresh_repo = RefreshTokenRepository(session=db)
+    user_service = UserService(
+        user_repo=user_repo,
+        invitation_repo=InvitationRepository(session=db),
+        password_service=PasswordService(),
+        refresh_token_repo=refresh_repo,
+        email_service=Container.email_service(),
+    )
+    return AuthService(
+        user_repo=user_repo,
+        refresh_repo=refresh_repo,
+        user_service=user_service,
+        password_service=PasswordService(),
+        session=db,
+        lockout=Container.account_lockout(),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -73,10 +110,12 @@ def _token_response(
     access_token: str,
     refresh_token: str,
     must_change_password: bool,
+    *,
+    remember_me: bool = False,
 ) -> TokenResponse:
     """Build a :class:`TokenResponse` and attach refresh / CSRF cookies."""
-    set_refresh_cookie(response, refresh_token)
-    set_csrf_cookie(response, secrets.token_urlsafe(32))
+    set_refresh_cookie(response, refresh_token, remember_me=remember_me)
+    set_csrf_cookie(response, secrets.token_urlsafe(32), remember_me=remember_me)
     return TokenResponse(
         access_token=access_token,
         expires_in=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
@@ -102,6 +141,11 @@ async def login(
     try:
         access, refresh, mcp = await auth_service.login(body.email, body.password)
     except UnauthorizedError:
+        # Never store the caller-supplied email in plaintext — a botnet
+        # spraying random addresses against /login would accumulate PII
+        # in admin_audit_log.metadata. Hash + mask instead so support
+        # staff can still correlate repeat failures.
+        masked, email_hash = mask_email(body.email)
         await emit_audit(
             audit_repo,
             admin_user_id=None,
@@ -109,7 +153,11 @@ async def login(
             resource_type="user",
             resource_id=None,
             request=request,
-            metadata={"email": body.email, "reason": "invalid_credentials"},
+            metadata={
+                "email_masked": masked,
+                "email_hash": email_hash,
+                "reason": "invalid_credentials",
+            },
         )
         await db.commit()
         raise
@@ -129,7 +177,7 @@ async def login(
         metadata={},
     )
     await db.commit()
-    return _token_response(response, access, refresh, mcp)
+    return _token_response(response, access, refresh, mcp, remember_me=body.remember_me)
 
 
 @router.post("/refresh", response_model=TokenResponse, status_code=status.HTTP_200_OK)

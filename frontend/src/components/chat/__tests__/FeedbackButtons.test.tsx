@@ -37,7 +37,7 @@ describe('FeedbackButtons', () => {
     await userEvent.click(thumbsUp)
 
     await waitFor(() => {
-      expect(apiClient.post).toHaveBeenCalledWith('/chat/sessions/s1/messages/m1/feedback', {
+      expect(apiClient.post).toHaveBeenCalledWith('/api/v1/chat/sessions/s1/messages/m1/feedback', {
         rating: 1,
         comment: null,
       })
@@ -78,7 +78,7 @@ describe('FeedbackButtons', () => {
     await userEvent.click(screen.getByRole('button', { name: /^submit$/i }))
 
     await waitFor(() => {
-      expect(apiClient.post).toHaveBeenCalledWith('/chat/sessions/s1/messages/m1/feedback', {
+      expect(apiClient.post).toHaveBeenCalledWith('/api/v1/chat/sessions/s1/messages/m1/feedback', {
         rating: -1,
         comment: 'Wrong answer',
       })

@@ -4,11 +4,11 @@ This file is read by Claude Code at session start. It governs all AI-assisted de
 
 ## What This Project Is
 
-An AI-powered internal knowledge retrieval and Q&A system. It indexes internal documents and surfaces relevant answers through a conversational interface using an 8-node LangGraph pipeline.
+An AI-powered internal knowledge retrieval and Q&A system. It indexes internal documents and surfaces relevant answers through a conversational interface using a 10-node LangGraph pipeline.
 
 **Tech Stack:**
 - Backend: Python 3.12 + FastAPI (modular monolith, clean architecture)
-- Agent Pipeline: LangChain + LangGraph (8-node, Langfuse-traced)
+- Agent Pipeline: LangChain + LangGraph (10-node, Langfuse-traced)
 - Frontend: Next.js 15 (App Router) + shadcn/ui + Tailwind CSS v4
 - Database: PostgreSQL 16 + pgvector
 - Jobs: Celery + Redis (Celery Beat = 1 replica only)

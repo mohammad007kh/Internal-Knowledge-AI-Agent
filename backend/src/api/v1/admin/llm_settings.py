@@ -49,6 +49,7 @@ STAGES: list[str] = [
     "reflector",
     "input_guard",
     "output_guard",
+    "titler",
 ]
 
 STAGE_META: dict[str, tuple[str, str]] = {
@@ -68,6 +69,10 @@ STAGE_META: dict[str, tuple[str, str]] = {
     "reflector": ("Reflector", "Reflects on and improves answers"),
     "input_guard": ("Input Guard", "Policy/safety guard on user input"),
     "output_guard": ("Output Guard", "Policy/safety guard on model output"),
+    "titler": (
+        "Auto Titler",
+        "Generates short sidebar-style titles for new chat sessions",
+    ),
 }
 
 
@@ -234,7 +239,7 @@ async def update_stage_config(
     await emit_audit(
         audit_repo,
         admin_user_id=admin.id,
-        action="update",
+        action="llm_setting.update",
         resource_type="llm_setting",
         resource_id=row.id,
         request=request,

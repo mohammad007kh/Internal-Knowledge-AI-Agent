@@ -39,6 +39,13 @@ def test_schema_sse_format() -> None:
 
     event = ChatStreamEvent(event=StreamEventType.DELTA, data={"token": "Hello"})
     sse = event.to_sse()
-    assert sse.startswith("data: ")
+    # Proper SSE-spec frame: `event: <name>\ndata: <inner_json>\n\n` so the
+    # frontend's parseSseFrame() picks the event name from the header line and
+    # routes to the right switch case. Previously the wrapper put both fields
+    # inside one data line which broke client-side dispatch entirely.
+    assert sse.startswith("event: delta\n")
+    assert "data: " in sse
     assert sse.endswith("\n\n")
-    assert '"delta"' in sse
+    # Inner data line carries only the payload, not the event-name envelope.
+    assert '"token": "Hello"' in sse
+    assert '"event"' not in sse  # event name lives in the header, not the body

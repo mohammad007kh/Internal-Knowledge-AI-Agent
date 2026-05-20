@@ -4,8 +4,8 @@ import { vi } from 'vitest'
 import { SourceChips } from '../SourceChips'
 
 const sources = [
-  { id: 's1', name: 'Confluence Wiki', type: 'confluence', document_count: 10 },
-  { id: 's2', name: 'Jira', type: 'jira', document_count: 5 },
+  { id: 's1', name: 'Confluence Wiki', source_type: 'confluence', document_count: 10 },
+  { id: 's2', name: 'Jira', source_type: 'jira', document_count: 5 },
 ]
 
 test('renders source badges', () => {

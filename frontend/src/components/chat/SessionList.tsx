@@ -1,89 +1,85 @@
 'use client'
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from '@/components/ui/alert-dialog'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { apiClient } from '@/lib/api-client'
 import { cn } from '@/lib/utils'
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import {
-  CheckIcon,
-  MessageSquareIcon,
-  PencilIcon,
-  PlusIcon,
-  SearchIcon,
-  Trash2Icon,
-  XIcon,
-} from 'lucide-react'
-import { useCallback, useState } from 'react'
-import { toast } from 'sonner'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { MessageSquareIcon, PlusIcon, SearchIcon } from 'lucide-react'
+import { useMemo, useState } from 'react'
 import { useSelectedSession } from './SelectedSessionContext'
+import {
+  SessionDeleteDialog,
+  SessionEditInput,
+  SessionRowKebab,
+  useSessionRowActions,
+} from './SessionRowActions'
+import type { Message, SessionMessagesResponse } from './types'
 
 interface ChatSession {
   id: string
-  title: string
+  // Nullable since U15 (lazy creation): a freshly-created session may not
+  // have a title yet; the row falls back to a preview of the first user
+  // message in that window.
+  title: string | null
   created_at: string
   updated_at: string
   message_count: number
 }
 
 interface SessionsResponse {
-  items: ChatSession[]
+  // Backend chat-sessions envelope is `{sessions, total}` — see
+  // backend/src/schemas/chat.py::ChatSessionListResponse. SessionList
+  // historically read `items`, which silently returned undefined; the
+  // sort/filter pipeline below now keys off `sessions` to match the wire.
+  sessions: ChatSession[]
   total: number
 }
+
+const FALLBACK_TITLE_CHARS = 30
+const FALLBACK_PLACEHOLDER = 'New chat'
 
 const sessionsApi = {
   list: async (): Promise<SessionsResponse> => {
     const res = await apiClient.get<SessionsResponse>('/api/v1/chat/sessions?limit=100')
     return res.data
   },
-  create: async (title: string): Promise<ChatSession> => {
-    const res = await apiClient.post<ChatSession>('/api/v1/chat/sessions', { title })
-    return res.data
-  },
-  rename: async (id: string, title: string): Promise<ChatSession> => {
-    const res = await apiClient.patch<ChatSession>(`/api/v1/chat/sessions/${id}`, { title })
-    return res.data
-  },
-  delete: async (id: string): Promise<void> => {
-    await apiClient.delete(`/api/v1/chat/sessions/${id}`)
-  },
 }
 
 interface SessionItemProps {
   session: ChatSession
   isActive: boolean
-  isEditing: boolean
-  editTitle: string
   onSelect: () => void
-  onStartEdit: () => void
-  onEditChange: (v: string) => void
-  onCommitEdit: () => void
-  onCancelEdit: () => void
-  onDelete: () => void
 }
 
-function SessionItem({
-  session,
-  isActive,
-  isEditing,
-  editTitle,
-  onSelect,
-  onStartEdit,
-  onEditChange,
-  onCommitEdit,
-  onCancelEdit,
-  onDelete,
-}: SessionItemProps) {
+/**
+ * One row in the All-chats list. Uses the shared `useSessionRowActions`
+ * hook for rename + delete state so the UX matches `<ChatSidebarGroup>`
+ * exactly (kebab → Popover menu → AlertDialog confirm).
+ */
+function SessionItem({ session, isActive, onSelect }: SessionItemProps) {
+  const actions = useSessionRowActions(session)
+  const queryClient = useQueryClient()
+  // U15 fallback label — see ChatSidebarGroup.useSessionLabel for the same
+  // logic. Kept inline here rather than extracted to a shared module
+  // because the two surfaces have different label-style requirements
+  // (size, truncation) and the helper is 6 lines.
+  const label = useMemo(() => {
+    if (session.title) return session.title
+    const cached = queryClient.getQueryData<SessionMessagesResponse>([
+      'chat-session-messages',
+      session.id,
+    ])
+    const firstUser = cached?.messages?.find((m: Message) => m.role === 'user')
+    const preview = firstUser?.content?.trim()
+    if (preview) {
+      return preview.length > FALLBACK_TITLE_CHARS
+        ? `${preview.slice(0, FALLBACK_TITLE_CHARS).trimEnd()}…`
+        : preview
+    }
+    return FALLBACK_PLACEHOLDER
+  }, [session.id, session.title, queryClient])
+
   return (
     <li>
       <div
@@ -93,60 +89,37 @@ function SessionItem({
           isActive ? 'bg-accent text-accent-foreground' : 'hover:bg-muted text-foreground'
         )}
         onClick={() => {
-          if (!isEditing) onSelect()
+          if (!actions.isEditing) onSelect()
         }}
         aria-current={isActive ? 'page' : undefined}
         role="button"
         tabIndex={0}
-        aria-label={`Chat session: ${session.title}`}
+        aria-label={`Chat session: ${label}`}
         onKeyDown={(e) => {
-          if (e.key === 'Enter' && !isEditing) onSelect()
+          if (e.key === 'Enter' && !actions.isEditing) onSelect()
         }}
       >
         <MessageSquareIcon
           className="h-3.5 w-3.5 shrink-0 text-muted-foreground"
           aria-hidden="true"
         />
-        {isEditing ? (
+        {actions.isEditing ? (
           <div
             className="flex flex-1 items-center gap-1"
             onClick={(e) => e.stopPropagation()}
             onKeyDown={(e) => e.stopPropagation()}
           >
-            <Input
-              value={editTitle}
-              onChange={(e) => onEditChange(e.target.value)}
-              className="h-6 flex-1 px-1.5 text-xs"
-              autoFocus
-              maxLength={100}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') onCommitEdit()
-                if (e.key === 'Escape') onCancelEdit()
-              }}
-              aria-label="Rename session"
+            <SessionEditInput
+              initialTitle={session.title ?? ''}
+              value={actions.editTitle}
+              onChange={actions.setEditTitle}
+              onCommit={actions.commitEdit}
+              onCancel={actions.cancelEdit}
             />
-            <Button
-              size="icon"
-              variant="ghost"
-              className="h-5 w-5 shrink-0"
-              onClick={onCommitEdit}
-              aria-label="Confirm rename"
-            >
-              <CheckIcon className="h-3 w-3" />
-            </Button>
-            <Button
-              size="icon"
-              variant="ghost"
-              className="h-5 w-5 shrink-0"
-              onClick={onCancelEdit}
-              aria-label="Cancel rename"
-            >
-              <XIcon className="h-3 w-3" />
-            </Button>
           </div>
         ) : (
           <>
-            <span className="flex-1 truncate text-xs">{session.title}</span>
+            <span className="flex-1 truncate text-xs">{label}</span>
             {session.message_count > 0 && (
               <span
                 className="ml-auto shrink-0 rounded-full bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground"
@@ -155,33 +128,16 @@ function SessionItem({
                 {session.message_count}
               </span>
             )}
-            <div
-              className="ml-1 hidden shrink-0 items-center gap-0.5 group-hover:flex"
-              onClick={(e) => e.stopPropagation()}
-              onKeyDown={(e) => e.stopPropagation()}
-            >
-              <Button
-                size="icon"
-                variant="ghost"
-                className="h-5 w-5"
-                onClick={onStartEdit}
-                aria-label={`Rename: ${session.title}`}
-              >
-                <PencilIcon className="h-3 w-3" />
-              </Button>
-              <Button
-                size="icon"
-                variant="ghost"
-                className="h-5 w-5 text-destructive hover:bg-destructive/10"
-                onClick={onDelete}
-                aria-label={`Delete: ${session.title}`}
-              >
-                <Trash2Icon className="h-3 w-3" />
-              </Button>
-            </div>
+            <SessionRowKebab session={session} actions={actions} />
           </>
         )}
       </div>
+      <SessionDeleteDialog
+        open={actions.deleteOpen}
+        onOpenChange={actions.setDeleteOpen}
+        onConfirm={actions.confirmDelete}
+        title={label}
+      />
     </li>
   )
 }
@@ -197,13 +153,9 @@ export interface SessionListProps {
 }
 
 export function SessionList({ onSelect }: SessionListProps = {}) {
-  const { sessionId, setSessionId, abortStream } = useSelectedSession()
-  const queryClient = useQueryClient()
+  const { sessionId, setSessionId } = useSelectedSession()
 
   const [search, setSearch] = useState('')
-  const [editingId, setEditingId] = useState<string | null>(null)
-  const [editTitle, setEditTitle] = useState('')
-  const [deletingId, setDeletingId] = useState<string | null>(null)
 
   const { data, isLoading } = useQuery({
     queryKey: ['chat-sessions'],
@@ -212,65 +164,25 @@ export function SessionList({ onSelect }: SessionListProps = {}) {
     refetchOnWindowFocus: true,
   })
 
-  const createMutation = useMutation({
-    mutationFn: () => sessionsApi.create('New chat'),
-    onSuccess: (session) => {
-      queryClient.invalidateQueries({ queryKey: ['chat-sessions'] })
-      setSessionId(session.id)
-      setEditingId(session.id)
-      setEditTitle(session.title)
-    },
-    onError: () => toast.error('Failed to create session.'),
-  })
+  // U15 lazy creation: the "+" button just clears any active selection
+  // so the URL lands on `/chat`, where the empty-hero composer kicks in.
+  // No POST /sessions until the user actually sends their first message.
+  // The Sheet still wants to close after the user taps "+"; the parent
+  // shows it via the `onSelect` callback (a slight overloading — the
+  // callback's contract is "panel can dismiss now", with the id passed
+  // for backwards compatibility when an actual row was picked).
+  const handleNewChat = () => {
+    setSessionId(null, { replace: true })
+    onSelect?.('')
+  }
 
-  const renameMutation = useMutation({
-    mutationFn: ({ id, title }: { id: string; title: string }) => sessionsApi.rename(id, title),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['chat-sessions'] })
-      setEditingId(null)
-    },
-    onError: () => toast.error('Failed to rename session.'),
-  })
-
-  const deleteMutation = useMutation({
-    mutationFn: (id: string) => sessionsApi.delete(id),
-    onSuccess: (_, deletedId) => {
-      queryClient.invalidateQueries({ queryKey: ['chat-sessions'] })
-      if (sessionId === deletedId) {
-        // Cancel any in-flight stream bound to the session we just deleted
-        // before clearing the selection so no stale tokens or completion
-        // events arrive after the session is gone.
-        abortStream()
-        setSessionId(null)
-      }
-      setDeletingId(null)
-      toast.success('Session deleted.')
-    },
-    onError: () => toast.error('Failed to delete session.'),
-  })
-
-  const startEdit = useCallback((session: ChatSession) => {
-    setEditingId(session.id)
-    setEditTitle(session.title)
-  }, [])
-
-  const commitEdit = useCallback(
-    (id: string) => {
-      const trimmed = editTitle.trim()
-      if (!trimmed) {
-        setEditingId(null)
-        return
-      }
-      renameMutation.mutate({ id, title: trimmed })
-    },
-    [editTitle, renameMutation]
-  )
-
-  const cancelEdit = useCallback(() => setEditingId(null), [])
-
-  const sessions: ChatSession[] = data?.items ?? []
+  const sessions: ChatSession[] = data?.sessions ?? []
+  // U15 search compares against the title when present; null titles are
+  // matched against the falsy default so they don't blow up `.toLowerCase`.
   const filtered = search.trim()
-    ? sessions.filter((s) => s.title.toLowerCase().includes(search.toLowerCase()))
+    ? sessions.filter((s) =>
+        (s.title ?? '').toLowerCase().includes(search.toLowerCase())
+      )
     : sessions
 
   return (
@@ -284,8 +196,7 @@ export function SessionList({ onSelect }: SessionListProps = {}) {
           variant="ghost"
           className="h-6 w-6"
           aria-label="New chat session"
-          disabled={createMutation.isPending}
-          onClick={() => createMutation.mutate()}
+          onClick={handleNewChat}
         >
           <PlusIcon className="h-3.5 w-3.5" />
         </Button>
@@ -328,42 +239,15 @@ export function SessionList({ onSelect }: SessionListProps = {}) {
                 key={session.id}
                 session={session}
                 isActive={session.id === sessionId}
-                isEditing={editingId === session.id}
-                editTitle={editTitle}
                 onSelect={() => {
                   setSessionId(session.id)
                   onSelect?.(session.id)
                 }}
-                onStartEdit={() => startEdit(session)}
-                onEditChange={setEditTitle}
-                onCommitEdit={() => commitEdit(session.id)}
-                onCancelEdit={cancelEdit}
-                onDelete={() => setDeletingId(session.id)}
               />
             ))}
           </ul>
         )}
       </ScrollArea>
-      <AlertDialog open={!!deletingId} onOpenChange={(o) => !o && setDeletingId(null)}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Delete session?</AlertDialogTitle>
-            <AlertDialogDescription>
-              All messages in this session will be permanently deleted. This action cannot be
-              undone.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={() => deletingId && deleteMutation.mutate(deletingId)}
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-            >
-              Delete
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
     </div>
   )
 }

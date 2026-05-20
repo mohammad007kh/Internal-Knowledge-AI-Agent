@@ -34,8 +34,14 @@ export function useLogin() {
 
 /**
  * Logout mutation.
- * Clears the in-memory access token and invalidates all queries so any
- * cached user data is dropped.
+ *
+ * Clears the in-memory access token, drops all cached queries, then hard-
+ * navigates to /login. A full-page navigation (rather than `router.replace`)
+ * is deliberate: it guarantees every bit of React/auth/query state is wiped
+ * and lets the middleware re-run against the now-cleared session cookie, so
+ * there's no window where the chat page is mounted without a session. Runs
+ * in `onSettled`, so the user is logged out + redirected even if the server
+ * logout call itself fails.
  */
 export function useLogout() {
   const { clearAccessToken } = useAuth()
@@ -45,6 +51,11 @@ export function useLogout() {
     onSettled: () => {
       clearAccessToken()
       qc.clear()
+      if (typeof window !== 'undefined') {
+        // `replace`, not `href =` / `assign`, so the back button can't return
+        // to the now-session-less authenticated page.
+        window.location.replace('/login')
+      }
     },
   })
 }

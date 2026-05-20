@@ -17,6 +17,8 @@ class SyncJobResponse(BaseModel):
     status: SyncStatus
     started_at: datetime | None = None
     finished_at: datetime | None = None
+    # U16 — only populated when status='cancelled'.
+    cancelled_at: datetime | None = None
     error_message: str | None = None
     documents_synced: int = 0
     chunks_created: int = 0

@@ -99,6 +99,19 @@ class RedisUnavailableError(AppError):
     title = "Service Unavailable"
 
 
+class ConnectorTestFailedError(AppError):
+    """Raised when a connector live-probe fails during a credential rotation.
+
+    The PATCH /sources/{id}/credentials handler maps this to 422 so the modal
+    stays open with the connector error.  The detail is sanitised by the
+    raising service — never embed a connection string or password here.
+    """
+
+    status_code = 422
+    error_type = "connector_test_failed"
+    title = "Unprocessable Entity"
+
+
 class EmbeddingDimensionError(ValueError):
     """Raised when an embedding vector has an unexpected number of dimensions."""
 

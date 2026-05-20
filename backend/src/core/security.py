@@ -158,7 +158,9 @@ async def revoke_refresh_token(token: str, db: AsyncSession) -> None:
 # ---------------------------------------------------------------------------
 
 
-def set_refresh_cookie(response: Response, token: str) -> None:
+def set_refresh_cookie(
+    response: Response, token: str, *, remember_me: bool = False
+) -> None:
     """Attach an httpOnly refresh-token cookie to *response*.
 
     Cookie attributes
@@ -167,15 +169,21 @@ def set_refresh_cookie(response: Response, token: str) -> None:
     samesite : "strict"
     secure   : True  — HTTPS only
     path     : /api/v1/auth  — limits exposure to auth endpoints
-    max_age  : ``REFRESH_TOKEN_EXPIRE_DAYS`` days in seconds
+    max_age  : ``REFRESH_TOKEN_EXPIRE_DAYS`` days in seconds, or
+               ``REFRESH_TOKEN_REMEMBER_ME_DAYS`` when ``remember_me`` is True
     """
+    days = (
+        settings.REFRESH_TOKEN_REMEMBER_ME_DAYS
+        if remember_me
+        else settings.REFRESH_TOKEN_EXPIRE_DAYS
+    )
     response.set_cookie(
         key="refresh_token",
         value=token,
         httponly=True,
         samesite="strict",
         secure=settings.COOKIE_SECURE,
-        max_age=settings.REFRESH_TOKEN_EXPIRE_DAYS * 86400,
+        max_age=days * 86400,
         path="/api/v1/auth",
     )
 
@@ -185,18 +193,26 @@ def clear_refresh_cookie(response: Response) -> None:
     response.delete_cookie(key="refresh_token", path="/api/v1/auth")
 
 
-def set_csrf_cookie(response: Response, token: str) -> None:
+def set_csrf_cookie(
+    response: Response, token: str, *, remember_me: bool = False
+) -> None:
     """Attach a non-httpOnly CSRF cookie readable by JavaScript.
 
     The client must echo this value in an ``X-CSRF-Token`` header on
-    state-changing requests.
+    state-changing requests. Lifetime tracks the refresh cookie so the
+    two expire together.
     """
+    days = (
+        settings.REFRESH_TOKEN_REMEMBER_ME_DAYS
+        if remember_me
+        else settings.REFRESH_TOKEN_EXPIRE_DAYS
+    )
     response.set_cookie(
         key="csrf_token",
         value=token,
         httponly=False,
         samesite="strict",
         secure=settings.COOKIE_SECURE,
-        max_age=settings.REFRESH_TOKEN_EXPIRE_DAYS * 86400,
+        max_age=days * 86400,
         path="/",
     )

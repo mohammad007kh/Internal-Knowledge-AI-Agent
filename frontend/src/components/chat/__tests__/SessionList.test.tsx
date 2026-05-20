@@ -8,8 +8,12 @@ import { SessionList } from '../SessionList'
 vi.mock('@/lib/api-client', () => ({
   apiClient: {
     get: vi.fn().mockResolvedValue({
+      // Backend envelope is `{sessions, total}` (see
+      // backend/src/schemas/chat.py::ChatSessionListResponse). The previous
+      // mock used `items` which silently returned undefined — fixed alongside
+      // the U15 lazy-creation work.
       data: {
-        items: [
+        sessions: [
           {
             id: 's1',
             title: 'Project alpha',
@@ -90,20 +94,25 @@ test('filters sessions by search', async () => {
   expect(screen.getByText('Security review')).toBeInTheDocument()
 })
 
-test('new session button fires create mutation', async () => {
+// U15 lazy creation: the "+" button no longer fires POST /sessions. The
+// row is created server-side on the first user message, so clicking the
+// "+" is now a pure navigation (clear active selection → `/chat`).
+test('new session button does not POST /api/v1/chat/sessions (U15 lazy creation)', async () => {
   const { apiClient } = await import('@/lib/api-client')
+  ;(apiClient.post as ReturnType<typeof vi.fn>).mockClear()
   render(<SessionList />, { wrapper })
   await screen.findByText('Project alpha')
   await userEvent.click(screen.getByRole('button', { name: /new chat session/i }))
-  expect(apiClient.post).toHaveBeenCalledWith('/api/v1/chat/sessions', { title: 'New chat' })
+  expect(apiClient.post).not.toHaveBeenCalled()
 })
 
 test('shows delete confirmation dialog', async () => {
   render(<SessionList />, { wrapper })
   await screen.findByText('Project alpha')
-  const item = screen.getByRole('button', { name: /chat session: project alpha/i })
-  await userEvent.hover(item)
-  const deleteBtn = await screen.findByRole('button', { name: /delete: project alpha/i })
+  // Open the kebab menu, then click Delete in the popover.
+  const kebab = await screen.findByRole('button', { name: /open menu: project alpha/i })
+  await userEvent.click(kebab)
+  const deleteBtn = await screen.findByRole('menuitem', { name: /delete: project alpha/i })
   await userEvent.click(deleteBtn)
   expect(
     screen.getByText(/all messages in this session will be permanently deleted/i)
@@ -113,9 +122,9 @@ test('shows delete confirmation dialog', async () => {
 test('Escape closes rename mode', async () => {
   render(<SessionList />, { wrapper })
   await screen.findByText('Project alpha')
-  const item = screen.getByRole('button', { name: /chat session: project alpha/i })
-  await userEvent.hover(item)
-  await userEvent.click(await screen.findByRole('button', { name: /rename: project alpha/i }))
+  const kebab = await screen.findByRole('button', { name: /open menu: project alpha/i })
+  await userEvent.click(kebab)
+  await userEvent.click(await screen.findByRole('menuitem', { name: /rename: project alpha/i }))
   expect(screen.getByRole('textbox', { name: /rename session/i })).toBeInTheDocument()
   await userEvent.keyboard('{Escape}')
   expect(screen.queryByRole('textbox', { name: /rename session/i })).not.toBeInTheDocument()

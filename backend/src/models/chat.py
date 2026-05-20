@@ -5,7 +5,7 @@ import uuid
 from datetime import datetime
 from enum import StrEnum
 
-from sqlalchemy import Boolean, DateTime, Enum, ForeignKey, String, Text
+from sqlalchemy import Boolean, DateTime, Enum, ForeignKey, Integer, String, Text
 from sqlalchemy.dialects.postgresql import JSONB as _JSONB
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -38,10 +38,13 @@ class ChatSession(Base):
         nullable=False,
         index=True,
     )
-    title: Mapped[str] = mapped_column(
+    # Nullable since U15: lazy chat creation defers row insert until the
+    # user sends their first message.  The titler still fills this in on the
+    # first turn synchronously; a NULL title means "use the first user
+    # message as a preview" on the sidebar fallback.
+    title: Mapped[str | None] = mapped_column(
         Text,
-        nullable=False,
-        server_default="New conversation",
+        nullable=True,
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
@@ -114,6 +117,11 @@ class ChatMessage(Base):
     is_partial: Mapped[bool] = mapped_column(
         Boolean, nullable=False, server_default=expression.false()
     )
+    # User feedback on assistant messages — +1 thumbs up, -1 thumbs down.
+    # NULL means no feedback given. Used by the admin analytics surface to
+    # compute per-source average-feedback signals.
+    feedback_rating: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    feedback_comment: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     session: Mapped[ChatSession] = relationship(
         "ChatSession",

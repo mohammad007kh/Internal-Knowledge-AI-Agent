@@ -2,8 +2,13 @@
 
 Supported file types
 --------------------
-* ``pdf``      — extracted via PyPDF2
-* ``docx``     — extracted via python-docx
+* ``pdf``      — structure-aware extraction via ``unstructured`` (pdfminer.six
+                 backend, ``strategy='fast'``).  Falls back to PyPDF2 page-text
+                 dump on parser failure.
+* ``docx``     — structure-aware extraction via ``unstructured`` — preserves
+                 tables (as HTML), headings, headers, footers and list
+                 bullets.  Falls back to python-docx paragraph-only dump on
+                 parser failure.
 * ``xlsx``     — plain-text representation (CSV-like) via openpyxl
 * ``csv``      — decoded as UTF-8 text
 * ``txt``      — decoded as UTF-8 text
@@ -369,8 +374,32 @@ class FileUploadConnector(BaseConnector):
 
     @staticmethod
     def _parse_pdf(data: bytes) -> str:
-        """Extract text from PDF bytes using PyPDF2."""
+        """Extract structured text from PDF bytes via ``unstructured``.
+
+        Uses ``strategy='fast'`` which routes through pdfminer.six — preserves
+        reading order (incl. multi-column layouts) and surfaces table cells
+        as individual elements.  No OCR is performed; scanned / image-only
+        PDFs are still effectively unparseable here.
+
+        Falls back to the legacy PyPDF2 page-text dump on any failure so a
+        single bad file cannot break the ingestion pipeline.
+        """
         import io  # noqa: PLC0415
+
+        try:
+            from unstructured.partition.pdf import partition_pdf  # noqa: PLC0415
+            from unstructured.staging.base import elements_to_md  # noqa: PLC0415
+
+            elements = partition_pdf(file=io.BytesIO(data), strategy="fast")
+            rendered = elements_to_md(elements)
+            if rendered.strip():
+                return rendered
+        except Exception:  # noqa: BLE001
+            logger.warning(
+                "FileUploadConnector: unstructured PDF parser failed; "
+                "falling back to PyPDF2 page-text dump.",
+                exc_info=True,
+            )
 
         import PyPDF2  # type: ignore[import-untyped]  # noqa: PLC0415
 
@@ -384,8 +413,32 @@ class FileUploadConnector(BaseConnector):
 
     @staticmethod
     def _parse_docx(data: bytes) -> str:
-        """Extract text from DOCX bytes using python-docx."""
+        """Extract structured text from DOCX bytes via ``unstructured``.
+
+        Captures content python-docx alone could not see: tables (rendered
+        as HTML), headers & footers, list bullets, and headings (rendered
+        as ``# Heading``).  Output is Markdown / Markdown-with-HTML-tables,
+        which is well-tolerated by the downstream chunker and LLM.
+
+        Falls back to the legacy paragraph-only dump on any failure so a
+        single bad file cannot break the ingestion pipeline.
+        """
         import io  # noqa: PLC0415
+
+        try:
+            from unstructured.partition.docx import partition_docx  # noqa: PLC0415
+            from unstructured.staging.base import elements_to_md  # noqa: PLC0415
+
+            elements = partition_docx(file=io.BytesIO(data))
+            rendered = elements_to_md(elements)
+            if rendered.strip():
+                return rendered
+        except Exception:  # noqa: BLE001
+            logger.warning(
+                "FileUploadConnector: unstructured DOCX parser failed; "
+                "falling back to python-docx paragraph dump.",
+                exc_info=True,
+            )
 
         import docx  # type: ignore[import-untyped]  # noqa: PLC0415
 

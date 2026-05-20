@@ -22,7 +22,7 @@ os.environ.setdefault("MINIO_SECRET_KEY", "testsecret")
 os.environ.setdefault("ENCRYPTION_KEY", "dGVzdGVuY3J5cHRpb25rZXkxMjM0NTY3ODk=")
 
 from datetime import UTC, datetime
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
 import pytest
@@ -52,6 +52,7 @@ def _make_user(**overrides) -> User:
         role=UserRole.admin,
         is_active=True,
         must_change_password=False,
+        last_login_at=None,
         created_at=datetime.now(UTC),
         updated_at=datetime.now(UTC),
     )
@@ -143,49 +144,123 @@ def non_admin_client(mock_user_service: AsyncMock):
 # ===================================================================
 
 
+def _patch_user_repo(repo: MagicMock):
+    """Patch ``src.api.v1.users.UserRepository`` so ``UserRepository(db)`` → *repo*."""
+    return patch("src.api.v1.users.UserRepository", return_value=repo)
+
+
+@pytest.fixture()
+def fake_user_repo() -> MagicMock:
+    """A stand-in :class:`UserRepository` with async query methods stubbed."""
+    repo = MagicMock()
+    repo.list_paginated = AsyncMock(return_value=[])
+    repo.count_users = AsyncMock(return_value=0)
+    repo.set_active = AsyncMock(return_value=None)
+    repo.get_by_id = AsyncMock(return_value=None)
+    repo.update = AsyncMock(return_value=None)
+    return repo
+
+
 class TestListUsers:
-    """GET /users"""
+    """GET /users — paginated, includes deactivated users by default."""
 
-    def test_list_users_success(
-        self, client: TestClient, mock_user_service: AsyncMock, admin_user: User
+    def test_list_users_includes_deactivated_by_default(
+        self, client: TestClient, fake_user_repo: MagicMock
     ):
-        user_a = _make_user(email="a@example.com", role=UserRole.user)
-        user_b = _make_user(email="b@example.com", role=UserRole.admin)
-        mock_user_service.list_users.return_value = ([user_a, user_b], 2)
+        active = _make_user(email="active@example.com", role=UserRole.user, is_active=True)
+        inactive = _make_user(
+            email="gone@example.com", role=UserRole.user, is_active=False
+        )
+        fake_user_repo.list_paginated.return_value = [active, inactive]
+        fake_user_repo.count_users.return_value = 2
 
-        resp = client.get("/users?limit=10&offset=0")
+        with _patch_user_repo(fake_user_repo):
+            resp = client.get("/users")
 
         assert resp.status_code == 200
         body = resp.json()
+        assert body["page"] == 1
+        assert body["page_size"] == 50
         assert body["total"] == 2
-        assert body["limit"] == 10
-        assert body["offset"] == 0
-        assert len(body["items"]) == 2
-        mock_user_service.list_users.assert_awaited_once()
+        emails = {u["email"] for u in body["items"]}
+        assert emails == {"active@example.com", "gone@example.com"}
+        # default status filter is "all"
+        fake_user_repo.list_paginated.assert_awaited_once_with(
+            status="all", limit=50, offset=0
+        )
+        fake_user_repo.count_users.assert_awaited_once_with(status="all")
 
-    def test_list_users_default_pagination(
-        self, client: TestClient, mock_user_service: AsyncMock
+    def test_list_users_status_active_excludes_deactivated(
+        self, client: TestClient, fake_user_repo: MagicMock
     ):
-        mock_user_service.list_users.return_value = ([], 0)
+        fake_user_repo.list_paginated.return_value = [
+            _make_user(email="active@example.com", is_active=True)
+        ]
+        fake_user_repo.count_users.return_value = 1
 
-        resp = client.get("/users")
+        with _patch_user_repo(fake_user_repo):
+            resp = client.get("/users?status=active")
+
+        assert resp.status_code == 200
+        fake_user_repo.list_paginated.assert_awaited_once_with(
+            status="active", limit=50, offset=0
+        )
+        fake_user_repo.count_users.assert_awaited_once_with(status="active")
+
+    def test_list_users_status_inactive_only_deactivated(
+        self, client: TestClient, fake_user_repo: MagicMock
+    ):
+        fake_user_repo.list_paginated.return_value = [
+            _make_user(email="gone@example.com", is_active=False)
+        ]
+        fake_user_repo.count_users.return_value = 1
+
+        with _patch_user_repo(fake_user_repo):
+            resp = client.get("/users?status=inactive")
 
         assert resp.status_code == 200
         body = resp.json()
-        assert body["limit"] == 50
-        assert body["offset"] == 0
-        assert body["total"] == 0
-        assert body["items"] == []
+        assert all(u["is_active"] is False for u in body["items"])
+        fake_user_repo.list_paginated.assert_awaited_once_with(
+            status="inactive", limit=50, offset=0
+        )
+
+    def test_list_users_pagination_offset(
+        self, client: TestClient, fake_user_repo: MagicMock
+    ):
+        # total is the unfiltered-by-page count; page 2 → offset (2-1)*10 = 10.
+        fake_user_repo.list_paginated.return_value = [
+            _make_user(email="page2-a@example.com")
+        ]
+        fake_user_repo.count_users.return_value = 11
+
+        with _patch_user_repo(fake_user_repo):
+            resp = client.get("/users?page=2&page_size=10")
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["page"] == 2
+        assert body["page_size"] == 10
+        assert body["total"] == 11
+        assert len(body["items"]) == 1
+        fake_user_repo.list_paginated.assert_awaited_once_with(
+            status="all", limit=10, offset=10
+        )
+
+    def test_list_users_invalid_status_returns_422(self, client: TestClient):
+        resp = client.get("/users?status=bogus")
+        assert resp.status_code == 422
 
     def test_list_users_empty_result(
-        self, client: TestClient, mock_user_service: AsyncMock
+        self, client: TestClient, fake_user_repo: MagicMock
     ):
-        mock_user_service.list_users.return_value = ([], 0)
-
-        resp = client.get("/users")
+        with _patch_user_repo(fake_user_repo):
+            resp = client.get("/users")
 
         assert resp.status_code == 200
-        assert resp.json()["items"] == []
+        body = resp.json()
+        assert body["items"] == []
+        assert body["total"] == 0
 
     def test_list_users_non_admin_returns_403(
         self, non_admin_client: TestClient
@@ -438,6 +513,215 @@ class TestDeactivateUser:
         target_id = uuid4()
 
         resp = non_admin_client.delete(f"/users/{target_id}")
+
+        assert resp.status_code == 403
+
+
+# ===================================================================
+# PATCH /users/{user_id}  (activate / deactivate toggle)
+# ===================================================================
+
+
+class TestUpdateUser:
+    """PATCH /users/{user_id} — admin update of ``full_name`` / ``is_active``.
+
+    Deactivation delegates to :meth:`UserService.deactivate_user` so the
+    self-lock-out guard and refresh-token revocation apply; no-op requests
+    do no work and emit no audit row.
+    """
+
+    def test_reactivate_flips_is_active_and_audits(
+        self, client: TestClient, fake_user_repo: MagicMock
+    ):
+        target_id = uuid4()
+        inactive = _make_user(id=target_id, role=UserRole.user, is_active=False)
+        reactivated = _make_user(id=target_id, role=UserRole.user, is_active=True)
+        # 1st get_by_id → target (inactive); 2nd → refreshed (active).
+        fake_user_repo.get_by_id.side_effect = [inactive, reactivated]
+        fake_user_repo.set_active.return_value = reactivated
+
+        with (
+            _patch_user_repo(fake_user_repo),
+            patch("src.api.v1.users.emit_audit", new=AsyncMock()) as emit,
+        ):
+            resp = client.patch(f"/users/{target_id}", json={"is_active": True})
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["is_active"] is True
+        fake_user_repo.set_active.assert_awaited_once_with(target_id, True)
+        emit.assert_awaited_once()
+        assert emit.await_args.kwargs["action"] == "user.reactivate"
+        assert emit.await_args.kwargs["resource_type"] == "user"
+        assert emit.await_args.kwargs["resource_id"] == target_id
+
+    def test_deactivate_via_patch_revokes_tokens_and_audits_once(
+        self,
+        client: TestClient,
+        fake_user_repo: MagicMock,
+        mock_user_service: AsyncMock,
+    ):
+        target_id = uuid4()
+        active = _make_user(id=target_id, role=UserRole.user, is_active=True)
+        deactivated = _make_user(id=target_id, role=UserRole.user, is_active=False)
+        fake_user_repo.get_by_id.side_effect = [active, deactivated]
+        mock_user_service.deactivate_user.return_value = None
+
+        with (
+            _patch_user_repo(fake_user_repo),
+            patch("src.api.v1.users.emit_audit", new=AsyncMock()) as emit,
+        ):
+            resp = client.patch(f"/users/{target_id}", json={"is_active": False})
+
+        assert resp.status_code == 200
+        assert resp.json()["is_active"] is False
+        # Delegation reaches UserService (which revokes refresh tokens).
+        mock_user_service.deactivate_user.assert_awaited_once()
+        # ...and the route does NOT call set_active itself for the false case.
+        fake_user_repo.set_active.assert_not_called()
+        # Exactly one audit row — not double-logged.
+        emit.assert_awaited_once()
+        assert emit.await_args.kwargs["action"] == "user.deactivate"
+
+    def test_self_deactivate_via_patch_returns_403(
+        self,
+        client: TestClient,
+        fake_user_repo: MagicMock,
+        mock_user_service: AsyncMock,
+        admin_user: User,
+    ):
+        # Admin targets their own (active) account → service raises Forbidden.
+        fake_user_repo.get_by_id.return_value = _make_user(
+            id=admin_user.id, role=UserRole.admin, is_active=True
+        )
+        mock_user_service.deactivate_user.side_effect = ForbiddenError(
+            "Cannot deactivate your own account."
+        )
+
+        with (
+            _patch_user_repo(fake_user_repo),
+            patch("src.api.v1.users.emit_audit", new=AsyncMock()) as emit,
+        ):
+            resp = client.patch(
+                f"/users/{admin_user.id}", json={"is_active": False}
+            )
+
+        assert resp.status_code == 403
+        emit.assert_not_awaited()
+        fake_user_repo.set_active.assert_not_called()
+
+    def test_noop_patch_active_on_active_user(
+        self,
+        client: TestClient,
+        fake_user_repo: MagicMock,
+        mock_user_service: AsyncMock,
+    ):
+        target_id = uuid4()
+        fake_user_repo.get_by_id.return_value = _make_user(
+            id=target_id, role=UserRole.user, is_active=True
+        )
+
+        with (
+            _patch_user_repo(fake_user_repo),
+            patch("src.api.v1.users.emit_audit", new=AsyncMock()) as emit,
+        ):
+            resp = client.patch(f"/users/{target_id}", json={"is_active": True})
+
+        assert resp.status_code == 200
+        assert resp.json()["is_active"] is True
+        emit.assert_not_awaited()
+        fake_user_repo.set_active.assert_not_called()
+        mock_user_service.deactivate_user.assert_not_awaited()
+
+    def test_noop_patch_inactive_on_inactive_user(
+        self,
+        client: TestClient,
+        fake_user_repo: MagicMock,
+        mock_user_service: AsyncMock,
+    ):
+        target_id = uuid4()
+        fake_user_repo.get_by_id.return_value = _make_user(
+            id=target_id, role=UserRole.user, is_active=False
+        )
+
+        with (
+            _patch_user_repo(fake_user_repo),
+            patch("src.api.v1.users.emit_audit", new=AsyncMock()) as emit,
+        ):
+            resp = client.patch(f"/users/{target_id}", json={"is_active": False})
+
+        assert resp.status_code == 200
+        assert resp.json()["is_active"] is False
+        emit.assert_not_awaited()
+        fake_user_repo.set_active.assert_not_called()
+        mock_user_service.deactivate_user.assert_not_awaited()
+
+    def test_update_full_name_audits(
+        self, client: TestClient, fake_user_repo: MagicMock
+    ):
+        target_id = uuid4()
+        before = _make_user(id=target_id, role=UserRole.user, full_name="Old Name")
+        after = _make_user(id=target_id, role=UserRole.user, full_name="New Name")
+        fake_user_repo.get_by_id.side_effect = [before, after]
+
+        with (
+            _patch_user_repo(fake_user_repo),
+            patch("src.api.v1.users.emit_audit", new=AsyncMock()) as emit,
+        ):
+            resp = client.patch(
+                f"/users/{target_id}", json={"full_name": "New Name"}
+            )
+
+        assert resp.status_code == 200
+        assert resp.json()["full_name"] == "New Name"
+        fake_user_repo.update.assert_awaited_once_with(target_id, full_name="New Name")
+        emit.assert_awaited_once()
+        assert emit.await_args.kwargs["action"] == "user.update"
+
+    def test_update_full_name_noop_when_unchanged(
+        self, client: TestClient, fake_user_repo: MagicMock
+    ):
+        target_id = uuid4()
+        fake_user_repo.get_by_id.return_value = _make_user(
+            id=target_id, role=UserRole.user, full_name="Same Name"
+        )
+
+        with (
+            _patch_user_repo(fake_user_repo),
+            patch("src.api.v1.users.emit_audit", new=AsyncMock()) as emit,
+        ):
+            resp = client.patch(
+                f"/users/{target_id}", json={"full_name": "Same Name"}
+            )
+
+        assert resp.status_code == 200
+        emit.assert_not_awaited()
+        fake_user_repo.update.assert_not_awaited()
+
+    def test_reactivate_unknown_user_returns_404(
+        self, client: TestClient, fake_user_repo: MagicMock
+    ):
+        fake_user_repo.get_by_id.return_value = None
+
+        with _patch_user_repo(fake_user_repo):
+            resp = client.patch(f"/users/{uuid4()}", json={"is_active": True})
+
+        assert resp.status_code == 404
+
+    def test_update_user_noop_returns_current(
+        self, client: TestClient, fake_user_repo: MagicMock
+    ):
+        target_id = uuid4()
+        fake_user_repo.get_by_id.return_value = _make_user(id=target_id, is_active=True)
+
+        with _patch_user_repo(fake_user_repo):
+            resp = client.patch(f"/users/{target_id}", json={})
+
+        assert resp.status_code == 200
+        fake_user_repo.set_active.assert_not_called()
+
+    def test_update_user_non_admin_returns_403(self, non_admin_client: TestClient):
+        resp = non_admin_client.patch(f"/users/{uuid4()}", json={"is_active": True})
 
         assert resp.status_code == 403
 

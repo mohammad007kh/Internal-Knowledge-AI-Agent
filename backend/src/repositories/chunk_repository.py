@@ -89,13 +89,22 @@ class ChunkRepository:
         # bind is typed with ``Vector``; we additionally ``CAST(:qvec AS
         # vector)`` so pgvector picks the right operator class even if the
         # adapter doesn't kick in (e.g. raw asyncpg fast-path).
+        # Cast all UUID-column comparisons at the SQL level — chunks.source_id
+        # and chunks.embedder_id are Postgres UUID columns, and asyncpg's
+        # prepared-statement plan rejects ``uuid = character varying`` no
+        # matter how we type the bind.  Explicit ``CAST(:bind AS uuid[])`` /
+        # ``CAST(:bind AS uuid)`` in the SQL forces the right operator class
+        # and lets us keep binds as plain strings (much simpler to log /
+        # debug than asyncpg-typed UUID arrays).
         embedder_clause = ""
         extra_binds: list[object] = []
         if embedder_id is not None:
-            embedder_clause = " AND c.embedder_id = :embedder_id"
+            embedder_clause = " AND c.embedder_id = CAST(:embedder_id AS uuid)"
             extra_binds.append(
                 bindparam("embedder_id", value=str(embedder_id))
             )
+
+        source_id_strs = [str(sid) for sid in source_ids]
 
         stmt = text(
             f"""
@@ -105,13 +114,13 @@ class ChunkRepository:
                 c.chunk_text,
                 c.embedding <=> CAST(:qvec AS vector)  AS score
             FROM chunks c
-            WHERE c.source_id = ANY(:source_ids){embedder_clause}
+            WHERE c.source_id = ANY(CAST(:source_ids AS uuid[])){embedder_clause}
             ORDER BY score ASC
             LIMIT :limit
             """
         ).bindparams(
             bindparam("qvec", value=query_embedding, type_=Vector()),
-            bindparam("source_ids", value=source_ids),
+            bindparam("source_ids", value=source_id_strs),
             bindparam("limit", value=limit),
             *extra_binds,
         )

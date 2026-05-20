@@ -1,21 +1,14 @@
 'use client'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
-import { apiClient } from '@/lib/api-client'
-import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { MessageSquarePlusIcon, SparklesIcon } from 'lucide-react'
-import { toast } from 'sonner'
+import { useCallback } from 'react'
 import { ChatInputBar } from './ChatInputBar'
 import { ClarificationCard } from './ClarificationCard'
 import { GuardrailCard } from './GuardrailCard'
 import { MessageThread } from './MessageThread'
 import { useSelectedSession } from './SelectedSessionContext'
 import { useChat } from './useChat'
-
-interface CreatedSession {
-  id: string
-  title: string
-}
 
 /**
  * Single-pane chat surface.
@@ -27,13 +20,28 @@ interface CreatedSession {
  * which mirrors the ChatGPT/Claude.ai mental model and gives the message
  * canvas full width.
  */
-export function ChatLayout() {
-  const { sessionId, setSessionId } = useSelectedSession()
-  const queryClient = useQueryClient()
+interface ChatLayoutProps {
+  /**
+   * Initial sessionId, threaded straight from a server-component page's
+   * `params` so SSR renders the correct surface on the very first paint
+   * (no flicker between empty-hero and message-thread on hard refresh).
+   *
+   * When omitted (e.g. `/chat` with no segment), falls back to the URL-
+   * derived value from `useSelectedSession()`.  The context remains the
+   * authority for `setSessionId` / `abortStream` on every code path —
+   * this prop only seeds the initial render.
+   */
+  sessionId?: string
+}
+
+export function ChatLayout({ sessionId: propSessionId }: ChatLayoutProps = {}) {
+  const { sessionId: ctxSessionId, setSessionId } = useSelectedSession()
+  const sessionId = propSessionId ?? ctxSessionId
   const {
     send,
     abort,
     isPending,
+    isPendingNewSession,
     streamingToken,
     isStreaming,
     optimisticMessages,
@@ -43,23 +51,35 @@ export function ChatLayout() {
     dismissGuardrail,
   } = useChat({ sessionId })
 
-  const createMutation = useMutation({
-    mutationFn: async (): Promise<CreatedSession> => {
-      const res = await apiClient.post<CreatedSession>('/api/v1/chat/sessions', {
-        title: 'New chat',
-      })
-      return res.data
+  // U15 lazy creation: `send` is now safe to call with a null `sessionId`.
+  // The hook routes the request to the `'new'` sentinel, and the backend
+  // creates the row inline and announces its real UUID via
+  // `event: session_created`. The hook handles the URL swap and cache
+  // patching internally, so this component just hands off the text.
+  const handleSend = useCallback(
+    (text: string) => {
+      if (!text.trim()) return
+      send(text)
     },
-    onSuccess: (session) => {
-      queryClient.invalidateQueries({ queryKey: ['chat-sessions'] })
-      setSessionId(session.id)
-    },
-    onError: () => toast.error('Failed to create session.'),
-  })
+    [send]
+  )
+
+  // The hero "Start a new chat" button is now a pure navigation: the row
+  // doesn't exist until the user types and sends, so all this does is
+  // ensure the URL is `/chat` (clearing any prior session selection).
+  // Using `replace` so the empty-state surface doesn't leave a history
+  // entry between the previously-selected chat and the next one created
+  // on first send.
+  const handleStartNewChat = useCallback(() => {
+    setSessionId(null, { replace: true })
+  }, [setSessionId])
 
   // First-time canvas: replace the muted "Select or create a session" line
   // with a centered hero + prominent primary CTA so new users have an
   // unambiguous next step. The sidebar "+" still works for power users.
+  // We leave the hero up while the user is composing (no optimistic message,
+  // no stream) so the auto-create-on-send flow takes over the moment they
+  // submit — at that point the optimistic bubble flips us into the thread.
   const showEmptyHero = !sessionId && optimisticMessages.length === 0 && !isStreaming
 
   return (
@@ -79,13 +99,13 @@ export function ChatLayout() {
               </p>
             </div>
             <Button
+              type="button"
               size="lg"
               className="mt-2 gap-2"
-              disabled={createMutation.isPending}
-              onClick={() => createMutation.mutate()}
+              onClick={handleStartNewChat}
             >
               <MessageSquarePlusIcon className="h-4 w-4" aria-hidden />
-              {createMutation.isPending ? 'Creating…' : 'Start a new chat'}
+              Start a new chat
             </Button>
           </Card>
         </div>
@@ -94,15 +114,16 @@ export function ChatLayout() {
           sessionId={sessionId}
           streamingToken={streamingToken}
           isStreaming={isStreaming}
+          isPending={isPending}
           extraMessages={optimisticMessages}
-          onSend={send}
+          onSend={handleSend}
         />
       )}
       {clarification && (
         <ClarificationCard
           question={clarification.question}
           onDismiss={dismissClarification}
-          onReply={(answer) => send(answer)}
+          onReply={(answer) => handleSend(answer)}
           disabled={isPending}
         />
       )}
@@ -110,11 +131,19 @@ export function ChatLayout() {
         <GuardrailCard message={guardrailMessage} onDismiss={dismissGuardrail} />
       )}
       <ChatInputBar
-        onSend={send}
+        onSend={handleSend}
         onStop={abort}
-        disabled={isPending && !isStreaming}
+        // `isPending && !isStreaming` covers the steady-state brief window
+        // between submit and the first SSE frame. `isPendingNewSession` is
+        // the U15 lazy-create gate that stays latched from a null-session
+        // submit until the `event: session_created` SSE frame lands — without
+        // it, a double-Enter during the assistant's first-token stream would
+        // re-enable the send button and fire a SECOND
+        // POST /sessions/new/messages, creating a second orphan row.
+        disabled={(isPending && !isStreaming) || isPendingNewSession}
         isStreaming={isStreaming}
         sessionId={sessionId}
+        allowEmptySession
       />
     </div>
   )

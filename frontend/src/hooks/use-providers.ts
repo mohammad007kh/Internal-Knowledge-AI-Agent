@@ -38,5 +38,8 @@ export function useProviders() {
 export function useProvider(key: string | null | undefined): ProviderSpec | undefined {
   const { data } = useProviders()
   if (!key || !data) return undefined
-  return data.providers.find((p) => p.key === key)
+  // Defensive: legacy backends may have shipped a payload without
+  // `providers`. Treat a missing array as "no match" instead of crashing.
+  const providers = data.providers ?? []
+  return providers.find((p) => p.key === key)
 }

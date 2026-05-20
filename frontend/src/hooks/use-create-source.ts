@@ -1,6 +1,7 @@
 'use client'
 
-import { apiClient, parseErrorResponse } from '@/lib/api-client'
+import { apiClient } from '@/lib/api-client'
+import { extractApiErrorMessage } from '@/lib/api-error'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 
 /**
@@ -55,6 +56,13 @@ export interface CreateSourcePayload {
    * to the active embedder — the UI surfaces this as read-only.
    */
   embedder_id?: string | null
+  /**
+   * When true, the backend stamps a placeholder name + description on the
+   * row and schedules an AI-naming pass to rewrite both after first
+   * ingestion. The form submits an empty `name` / `description` alongside
+   * this flag — the server is the source of truth for the placeholder.
+   */
+  auto_name_and_description?: boolean
 }
 
 export interface CreatedSource {
@@ -78,7 +86,10 @@ async function createSource(payload: CreateSourcePayload): Promise<CreatedSource
     const { data } = await apiClient.post<CreatedSource>('/api/v1/sources', payload)
     return data
   } catch (error: unknown) {
-    throw parseErrorResponse(error)
+    // Surface the backend's RFC-7807 `detail` (incl. the nested
+    // `detail.detail` shape FastAPI emits for `HTTPException(detail={...})`)
+    // rather than axios's generic "Request failed with status code …".
+    throw new Error(extractApiErrorMessage(error))
   }
 }
 

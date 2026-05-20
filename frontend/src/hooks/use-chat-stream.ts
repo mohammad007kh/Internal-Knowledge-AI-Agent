@@ -25,14 +25,30 @@ export interface StreamCitation {
  * - `guardrail_blocked`— request blocked by safety policy (SSE `guardrail_blocked`)
  * - `error`            — stream errored or fetch failed
  */
-export type ChatStreamMessageType =
-  | 'normal'
-  | 'clarification'
-  | 'guardrail_blocked'
-  | 'error'
+export type ChatStreamMessageType = 'normal' | 'clarification' | 'guardrail_blocked' | 'error'
+
+/**
+ * Sentinel passed as the `sessionId` path segment when the caller wants the
+ * backend to lazy-create a chat session as part of the first message turn
+ * (U15). The backend responds with an `event: session_created` SSE frame
+ * carrying the real UUID before any tokens flow.
+ */
+export const NEW_SESSION_SENTINEL = 'new'
 
 export interface UseChatStreamReturn {
-  sendMessage: (sessionId: string, query: string, sourceIds?: string[]) => Promise<void>
+  /**
+   * Send a message to a chat session.
+   *
+   * `sessionId` accepts either a real UUID or the `'new'` sentinel (U15
+   * lazy-creation). On the sentinel path the backend creates the row inline
+   * and emits `event: session_created` as the first frame; the resulting id
+   * surfaces via `lastCreatedSessionId` so the consumer can swap the URL.
+   */
+  sendMessage: (
+    sessionId: string,
+    query: string,
+    sourceIds?: string[],
+  ) => Promise<void>
   abortStream: () => void
   isStreaming: boolean
   currentResponse: string
@@ -43,14 +59,30 @@ export interface UseChatStreamReturn {
   errorMessage: string | null
   lastMessageId: string | null
   /**
+   * Title produced by the backend on the first user turn of a session.
+   *
+   * Emitted via SSE `event: title` at the START of the stream, before any
+   * tokens. Backend has already PATCHed the session title before emitting,
+   * so the DB is the source of truth — consumers use this purely to
+   * optimistically refresh React Query caches for instant sidebar updates.
+   *
+   * Reset to `null` on every `sendMessage()` call.
+   */
+  lastTitle: string | null
+  /**
+   * Session id minted by the backend on the lazy-creation path
+   * (U15: `sendMessage('new', …)`). `null` when the caller targeted an
+   * existing session. Reset on every `sendMessage()` call.
+   */
+  lastCreatedSessionId: string | null
+  /**
    * Clears local stream state — useful after the caller has persisted the
    * final assistant message into the query cache and wants a fresh buffer.
    */
   reset: () => void
 }
 
-const API_BASE =
-  process.env.NEXT_PUBLIC_API_URL?.replace(/\/$/, '') ?? 'http://localhost:8000'
+const API_BASE = process.env.NEXT_PUBLIC_API_URL?.replace(/\/$/, '') ?? 'http://localhost:8000'
 
 interface SseFrame {
   event: string
@@ -106,12 +138,12 @@ export function useChatStream(): UseChatStreamReturn {
   const [currentResponse, setCurrentResponse] = useState('')
   const [citations, setCitations] = useState<StreamCitation[]>([])
   const [messageType, setMessageType] = useState<ChatStreamMessageType>('normal')
-  const [clarificationQuestion, setClarificationQuestion] = useState<string | null>(
-    null
-  )
+  const [clarificationQuestion, setClarificationQuestion] = useState<string | null>(null)
   const [guardrailMessage, setGuardrailMessage] = useState<string | null>(null)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const [lastMessageId, setLastMessageId] = useState<string | null>(null)
+  const [lastTitle, setLastTitle] = useState<string | null>(null)
+  const [lastCreatedSessionId, setLastCreatedSessionId] = useState<string | null>(null)
 
   const controllerRef = useRef<AbortController | null>(null)
 
@@ -136,6 +168,8 @@ export function useChatStream(): UseChatStreamReturn {
     setGuardrailMessage(null)
     setErrorMessage(null)
     setLastMessageId(null)
+    setLastTitle(null)
+    setLastCreatedSessionId(null)
   }, [])
 
   const sendMessage = useCallback(
@@ -155,6 +189,8 @@ export function useChatStream(): UseChatStreamReturn {
       setGuardrailMessage(null)
       setErrorMessage(null)
       setLastMessageId(null)
+      setLastTitle(null)
+      setLastCreatedSessionId(null)
 
       const token = getToken()
       const url = `${API_BASE}/api/v1/chat/sessions/${sessionId}/messages`
@@ -173,7 +209,39 @@ export function useChatStream(): UseChatStreamReturn {
         })
 
         if (!response.ok) {
-          throw new Error(`Stream request failed with status ${response.status}`)
+          // Surface backend error details when present (e.g. FastAPI `detail`,
+          // RFC7807 `title`/`detail`). Falling back to a generic message keeps
+          // the UI honest when the body is empty or unparseable.
+          const fallback = `Stream request failed with status ${response.status}`
+          let errorText = fallback
+          try {
+            const contentType = response.headers.get('content-type') ?? ''
+            if (
+              contentType.includes('application/json') ||
+              contentType.includes('application/problem+json')
+            ) {
+              const body = (await response.json()) as {
+                detail?: unknown
+                title?: unknown
+                message?: unknown
+              }
+              const detail =
+                typeof body.detail === 'string'
+                  ? body.detail
+                  : typeof body.title === 'string'
+                    ? body.title
+                    : typeof body.message === 'string'
+                      ? body.message
+                      : null
+              if (detail) errorText = detail
+            } else {
+              const text = await response.text()
+              if (text.trim()) errorText = text.trim().slice(0, 500)
+            }
+          } catch {
+            errorText = fallback
+          }
+          throw new Error(errorText)
         }
         if (!response.body) {
           throw new Error('Stream response has no body')
@@ -182,6 +250,10 @@ export function useChatStream(): UseChatStreamReturn {
         const reader = response.body.getReader()
         const decoder = new TextDecoder()
         let buffer = ''
+        // Track whether the server emitted a frame that the consumer interprets
+        // as terminal. If the connection closes cleanly without one, we must
+        // synthesize an error so the UI doesn't get stuck mid-stream.
+        let sawTerminalEvent = false
 
         // Drain the stream frame by frame. SSE frames are delimited by "\n\n".
         // Chunks arriving from the network may split mid-frame, so we buffer
@@ -199,33 +271,60 @@ export function useChatStream(): UseChatStreamReturn {
             const frame = parseSseFrame(raw)
             if (!frame) continue
 
+            // Event names below match the backend's StreamEventType enum
+            // (backend/src/schemas/chat.py) — `delta` for tokens,
+            // `clarification` for clarification asks, `done` for stream
+            // completion, `error` for failures.  Anything else falls through
+            // to the no-op default for forward compatibility.
             switch (frame.event) {
-              case 'token': {
-                const payload = safeJsonParse<{ delta?: string }>(frame.data)
-                if (payload?.delta) {
-                  setCurrentResponse((prev) => prev + payload.delta)
+              case 'delta': {
+                const payload = safeJsonParse<{ token?: string }>(frame.data)
+                if (payload?.token) {
+                  setCurrentResponse((prev) => prev + payload.token)
                 }
                 break
               }
               case 'citations': {
-                const payload = safeJsonParse<{ citations?: StreamCitation[] }>(
-                  frame.data
-                )
+                const payload = safeJsonParse<{ citations?: StreamCitation[] }>(frame.data)
                 if (payload?.citations) {
                   setCitations(payload.citations)
                 }
                 break
               }
-              case 'clarification_needed': {
+              case 'clarification': {
                 const payload = safeJsonParse<{ question?: string }>(frame.data)
                 setMessageType('clarification')
                 setClarificationQuestion(payload?.question ?? '')
+                sawTerminalEvent = true
                 break
               }
               case 'guardrail_blocked': {
                 const payload = safeJsonParse<{ message?: string }>(frame.data)
                 setMessageType('guardrail_blocked')
                 setGuardrailMessage(payload?.message ?? 'Request blocked by policy.')
+                sawTerminalEvent = true
+                break
+              }
+              case 'title': {
+                // Auto-generated session title from the first user turn.
+                // Backend persists via PATCH BEFORE emitting this frame, so
+                // the DB is canonical; this state exists only so the
+                // consumer can optimistically refresh the sidebar cache.
+                const payload = safeJsonParse<{ title?: string }>(frame.data)
+                if (payload?.title) {
+                  setLastTitle(payload.title)
+                }
+                break
+              }
+              case 'session_created': {
+                // U15 lazy creation: backend created the chat_sessions row
+                // inline and is announcing its real UUID before any tokens
+                // flow. Consumer is expected to swap `/chat` → `/chat/<id>`
+                // and seed the sidebar cache.
+                const payload = safeJsonParse<{ session_id?: string }>(frame.data)
+                if (payload?.session_id) {
+                  setLastCreatedSessionId(payload.session_id)
+                }
                 break
               }
               case 'done': {
@@ -233,12 +332,14 @@ export function useChatStream(): UseChatStreamReturn {
                 if (payload?.message_id) {
                   setLastMessageId(payload.message_id)
                 }
+                sawTerminalEvent = true
                 break
               }
               case 'error': {
                 const payload = safeJsonParse<{ message?: string }>(frame.data)
                 setMessageType('error')
                 setErrorMessage(payload?.message ?? 'Stream error')
+                sawTerminalEvent = true
                 break
               }
               default:
@@ -246,6 +347,15 @@ export function useChatStream(): UseChatStreamReturn {
                 break
             }
           }
+        }
+
+        // Reader drained without ever seeing a terminal frame: the server
+        // closed the connection mid-flight (e.g. backend exception swallowed
+        // by a bare except). Force the consumer into the same error state a
+        // real `error` frame would have produced so the UI recovers.
+        if (!sawTerminalEvent) {
+          setMessageType('error')
+          setErrorMessage('Stream closed unexpectedly')
         }
       } catch (err) {
         // AbortError is the normal path for user-triggered cancellation.
@@ -277,6 +387,8 @@ export function useChatStream(): UseChatStreamReturn {
     guardrailMessage,
     errorMessage,
     lastMessageId,
+    lastTitle,
+    lastCreatedSessionId,
     reset,
   }
 }

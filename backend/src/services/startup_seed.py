@@ -57,13 +57,25 @@ async def run_startup_seeding() -> None:
 
     Wraps every logical step so a single failure does not abort the rest
     of the seeding pipeline.  Safe to call on every boot.
+
+    Ends with :func:`verify_all_stages_configured` — a post-seed assertion
+    that every slot listed in :data:`STAGES` ended up with a row whose
+    ``ai_model_id`` is non-NULL.  The check logs a loud ``ERROR`` listing
+    the missing slot names (rather than raising) so a misconfigured stage
+    is visible in container logs at boot time instead of silently falling
+    through to the resolver's default-AIModel path on the first request.
     """
     try:
         async with AsyncSessionLocal() as session:
             await _bootstrap_openai_ai_model(session)
             await _bootstrap_openai_embedder(session)
             await ensure_default_stage_configs(session)
+            await _backfill_missing_api_keys(session)
             await session.commit()
+            # Verify AFTER the commit so the assertion runs against the
+            # final, durable state. Wrapped separately so a verification
+            # failure cannot roll back the seed work above.
+            await verify_all_stages_configured(session)
     except Exception:  # noqa: BLE001 — startup must not fail on seed errors
         logger.warning("startup seeding failed (continuing)", exc_info=True)
 
@@ -266,6 +278,61 @@ async def ensure_default_stage_configs(session: AsyncSession) -> None:
         )
 
 
+async def verify_all_stages_configured(session: AsyncSession) -> list[str]:
+    """Assert every slot in :data:`STAGES` has a usable LLMConfiguration row.
+
+    "Usable" means:
+
+    * A row exists for the slot, **and**
+    * ``ai_model_id`` is non-NULL (the row is linked to an AIModel).
+
+    Slots that fail either gate are collected, logged at ``ERROR`` level
+    (so the operator sees a single bright "STARTUP CHECK FAILED" line in
+    container logs), and returned so callers / tests can inspect them.
+
+    This is the ARCH-A startup assertion: previously a misconfigured stage
+    would silently flow through the resolver to a default model, which
+    masked the 9-of-10 dead-rows bug for months.  After this check, any
+    such regression trips a clear error at boot.
+
+    Does NOT raise — :func:`run_startup_seeding` is supposed to be
+    non-fatal per the lifespan contract.  The caller decides whether to
+    treat the returned list as a hard failure.
+
+    Returns:
+        Sorted list of slot names that failed the check.  Empty list
+        means every stage is configured correctly.
+    """
+    rows = (await session.execute(select(LLMConfiguration))).scalars().all()
+    by_slot: dict[str, LLMConfiguration] = {r.slot_name: r for r in rows}
+    missing: list[str] = []
+    unlinked: list[str] = []
+    for stage in STAGES:
+        existing = by_slot.get(stage)
+        if existing is None:
+            missing.append(stage)
+        elif existing.ai_model_id is None:
+            unlinked.append(stage)
+
+    bad = sorted(missing + unlinked)
+    if bad:
+        logger.error(
+            "startup check FAILED: %d/%d stage slots are not usable "
+            "(missing=%r unlinked=%r). Admin overrides on these slots will "
+            "be ignored until an AI Model is linked via /admin/llm-settings.",
+            len(bad),
+            len(STAGES),
+            sorted(missing),
+            sorted(unlinked),
+        )
+    else:
+        logger.info(
+            "startup check OK: all %d stage slots are linked to an AIModel",
+            len(STAGES),
+        )
+    return bad
+
+
 async def _pick_default_ai_model(session: AsyncSession) -> AIModel | None:
     """Return the AIModel row used for fresh stage seeds.
 
@@ -282,3 +349,73 @@ async def _pick_default_ai_model(session: AsyncSession) -> AIModel | None:
     return (
         await session.execute(select(AIModel).limit(1))
     ).scalar_one_or_none()
+
+
+# --------------------------------------------------------------------------- #
+# Self-healing API-key backfill                                               #
+# --------------------------------------------------------------------------- #
+
+
+async def _backfill_missing_api_keys(session: AsyncSession) -> None:
+    """Heal rows that were created before ``OPENAI_API_KEY`` was configured.
+
+    The bootstrap helpers above only run when their tables are empty.  If
+    an admin sets ``OPENAI_API_KEY`` *after* the first bootstrap (very
+    common during iterative ``.env`` editing), existing OpenAI rows stay
+    keyless and embed/sync calls fail with ``openai.OpenAIError``.  This
+    pass writes the env key to any ``embedders`` / ``ai_models`` row whose
+    ``provider == 'openai'`` AND whose ``api_key_encrypted IS NULL``.
+
+    Idempotent — running on every boot is a no-op once all OpenAI rows
+    have keys.  A failure on one row never blocks the others.
+    """
+    api_key = (settings.OPENAI_API_KEY or "").strip()
+    if not api_key:
+        return
+
+    try:
+        encrypted = encrypt(api_key)
+    except Exception:  # noqa: BLE001
+        logger.warning(
+            "startup seed: encrypt(OPENAI_API_KEY) failed during backfill",
+            exc_info=True,
+        )
+        return
+
+    targets: tuple[tuple[type, str], ...] = (
+        (Embedder, "embedders"),
+        (AIModel, "ai_models"),
+    )
+    for model_cls, table_name in targets:
+        try:
+            rows = (
+                await session.execute(
+                    select(model_cls).where(
+                        model_cls.api_key_encrypted.is_(None),
+                        model_cls.provider == "openai",
+                    )
+                )
+            ).scalars().all()
+        except Exception:  # noqa: BLE001
+            logger.warning(
+                "startup seed: backfill SELECT failed for %s",
+                table_name,
+                exc_info=True,
+            )
+            continue
+
+        for row in rows:
+            try:
+                row.api_key_encrypted = encrypted
+                logger.info(
+                    "startup seed: backfilled api_key on %s row id=%s name=%r",
+                    table_name,
+                    row.id,
+                    row.name,
+                )
+            except Exception:  # noqa: BLE001
+                logger.warning(
+                    "startup seed: backfill UPDATE failed for %s row",
+                    table_name,
+                    exc_info=True,
+                )

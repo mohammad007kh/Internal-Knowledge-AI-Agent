@@ -38,3 +38,4 @@ class AgentState(TypedDict, total=False):
     generated_sql: dict[str, str]
     reflector_feedback: str | None
     reflector_retries: int
+    query_analyzer_degraded: bool

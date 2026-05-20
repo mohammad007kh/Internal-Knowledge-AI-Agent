@@ -7,6 +7,7 @@ single row.  Callers MUST never include API keys in *metadata*.
 
 from __future__ import annotations
 
+import hashlib
 import ipaddress
 import logging
 import uuid
@@ -20,6 +21,43 @@ logger = logging.getLogger(__name__)
 
 
 _REDACTED_KEYS = frozenset({"api_key", "api_key_encrypted", "password", "secret"})
+
+
+def mask_email(email: str) -> tuple[str, str]:
+    """Return ``(masked, sha256_hex)`` for *email*.
+
+    The masked form keeps the first two characters of the local-part plus
+    the full domain so support staff can sanity-check forensics without
+    PII accumulating in plaintext (e.g. ``ab***@example.com``). The hash
+    is a deterministic sha256 of the case-folded, stripped email so two
+    failures from the same account correlate without re-storing the raw
+    address.
+
+    A pepper is mixed in when ``settings.AUDIT_EMAIL_PEPPER`` is configured;
+    otherwise the bare normalized email is hashed. The pepper is optional
+    because it only frustrates rainbow-table attacks against a leaked
+    audit log — the hash itself is already not reversible without one.
+
+    Defensive against malformed input (no ``@`` → masked = ``"***"``,
+    hash still computed on the full normalized string).
+    """
+    normalized = (email or "").strip().casefold()
+    pepper = ""
+    try:  # pragma: no cover — settings access path is exercised indirectly
+        from src.core.config import settings as _settings  # noqa: PLC0415
+
+        pepper = getattr(_settings, "AUDIT_EMAIL_PEPPER", "") or ""
+    except Exception:  # noqa: BLE001
+        pepper = ""
+    digest = hashlib.sha256((pepper + normalized).encode("utf-8")).hexdigest()
+
+    if "@" in normalized:
+        local, _, domain = normalized.partition("@")
+        prefix = local[:2] if local else ""
+        masked = f"{prefix}***@{domain}" if prefix else f"***@{domain}"
+    else:
+        masked = "***"
+    return masked, digest
 
 
 def _client_ip(request: Request | None) -> str | None:

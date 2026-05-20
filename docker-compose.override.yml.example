@@ -1,0 +1,36 @@
+# Development overrides: bind mounts for hot-reload
+# This file is automatically merged by `docker compose up`
+# Do NOT commit secrets or prod-only settings here.
+#
+# To remap host ports (avoid clashes with other projects), set
+# HOST_DB_PORT / HOST_BACKEND_PORT / HOST_FRONTEND_PORT / HOST_REDIS_PORT
+# / HOST_MINIO_API_PORT / HOST_MINIO_CONSOLE_PORT / HOST_LANGFUSE_PORT
+# in .env — see .env.example.
+#
+# UID/GID override: the backend image runs as uid=1000(appuser) by
+# default. On Linux hosts where the developer's host uid is NOT 1000,
+# bind-mounted /app/src would be owned by the host uid and unreadable
+# inside the container. Set HOST_UID / HOST_GID in .env (defaults to 1000)
+# to match the host user, e.g.: `echo "HOST_UID=$(id -u)" >> .env`.
+# On Docker Desktop (macOS / Windows) ownership is virtualised and uid=1000
+# is fine — the override is only needed on native Linux.
+services:
+  backend:
+    user: "${HOST_UID:-1000}:${HOST_GID:-1000}"
+    volumes:
+      - ./backend/src:/app/src
+
+  frontend:
+    volumes:
+      - ./frontend/src:/app/src
+      - ./frontend/public:/app/public
+
+  worker:
+    user: "${HOST_UID:-1000}:${HOST_GID:-1000}"
+    volumes:
+      - ./backend/src:/app/src
+
+  beat:
+    user: "${HOST_UID:-1000}:${HOST_GID:-1000}"
+    volumes:
+      - ./backend/src:/app/src

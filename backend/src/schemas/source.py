@@ -101,6 +101,17 @@ class DatabaseConnectionConfig(BaseModel):
       * SQL  → ``{connection_string, query, ssl_mode?}`` for ``DatabaseConnector``
       * Mongo → ``{uri, database, collection}`` for ``MongoDBConnector``
 
+    For SQL dialects ``query`` is OPTIONAL. The studying agent enumerates
+    the schema on its own (``study_schema``), and chat questions are handled
+    by the ``text_to_query`` node which generates a SELECT from the question
+    + schema doc at query time — neither path needs a pre-stored query.
+    A query value, if supplied, is used only by the legacy "extract every
+    row as a document" path (``SqlDatabaseConnector.extract_documents``).
+
+    Read-only is enforced independently by ``is_safe_sql`` in the
+    text_to_query node, which rejects any non-SELECT statement at execution
+    time. The MongoDB ``collection`` field is required.
+
     Credentials are URL-quoted at translation time before being placed into
     any connection string (see :func:`SourceService._build_database_config`).
     """
@@ -113,7 +124,7 @@ class DatabaseConnectionConfig(BaseModel):
     database: str = Field(..., min_length=1, max_length=255)
     username: str = Field(default="", max_length=255)
     password: str = Field(default="", max_length=4096)
-    # SQL-only fields
+    # SQL-only fields. ``query`` is required for SQL dialects.
     query: str | None = None
     ssl_mode: Literal["disable", "require"] | None = None
     # MongoDB-only field
@@ -121,15 +132,24 @@ class DatabaseConnectionConfig(BaseModel):
 
     @model_validator(mode="after")
     def _enforce_per_dialect_shape(self) -> DatabaseConnectionConfig:
-        """Enforce SQL vs MongoDB field requirements after parse."""
+        """Enforce per-dialect field requirements after parse.
+
+        MongoDB: ``collection`` is required (the connector needs to know
+        which collection to read).
+
+        SQL dialects: no per-dialect required fields beyond the base
+        connection params. ``query`` is OPTIONAL — see class docstring.
+        An empty/whitespace-only ``query`` is normalised to ``None`` so
+        the connector's ``extract_documents`` path can short-circuit
+        cleanly instead of running ``SELECT  ;``.
+        """
         if self.db_type == "mongodb":
             if not self.collection or not self.collection.strip():
                 raise ValueError("'collection' is required for MongoDB sources.")
-        else:  # SQL dialects
-            if not self.query or not self.query.strip():
-                raise ValueError(
-                    "'query' is required for SQL database sources."
-                )
+            return self
+        # SQL branch — empty query → None so downstream paths don't see "".
+        if self.query is not None and not self.query.strip():
+            object.__setattr__(self, "query", None)
         return self
 
 
@@ -158,7 +178,11 @@ class SourceCreateRequest(BaseModel):
 
     model_config = ConfigDict(str_strip_whitespace=True)
 
-    name: str = Field(..., min_length=1, max_length=255)
+    # When ``auto_name_and_description`` is true the admin asked the AI to
+    # write the name+description after ingestion; ``name`` may be empty on the
+    # wire (we store ``"Untitled source"`` as a placeholder server-side). When
+    # false, the user typed a name and the legacy validation applies.
+    name: str = Field(default="", max_length=255)
     source_type: str
     connection: dict[str, Any] | None = None
     # Legacy single-file shape — kept for back-compat.
@@ -170,6 +194,7 @@ class SourceCreateRequest(BaseModel):
     sync_schedule: str | None = None
     retrieval_mode: str = "vector_only"
     citations_enabled: bool = True
+    auto_name_and_description: bool = False
 
     @field_validator("name")
     @classmethod
@@ -177,6 +202,21 @@ class SourceCreateRequest(BaseModel):
         if "/" in v:
             raise ValueError("Source name must not contain '/'.")
         return v
+
+    @model_validator(mode="after")
+    def _require_name_unless_auto(self) -> SourceCreateRequest:
+        """``name`` is required UNLESS the admin opted into AI auto-naming.
+
+        Splitting this out of the field-level validator lets us cross-reference
+        ``auto_name_and_description`` — Pydantic doesn't expose sibling fields
+        inside ``@field_validator``.
+        """
+        if not self.auto_name_and_description and not self.name.strip():
+            raise ValueError(
+                "name is required (or set auto_name_and_description=true to "
+                "have the assistant generate one after ingestion)."
+            )
+        return self
 
     @field_validator("source_type")
     @classmethod
@@ -212,7 +252,13 @@ class SourceCreateRequest(BaseModel):
 
 
 class SourcePublicResponse(BaseModel):
-    """Public source representation — never exposes connection_config or file_storage_path."""
+    """Public source representation — never exposes connection_config or file_storage_path.
+
+    ``is_active`` semantics: "approved/available to users". New sources default
+    to ``False`` so admins must explicitly approve them after review.
+    ``deleted_at IS None`` means the source is not soft-deleted; admin lists
+    only return non-deleted rows.
+    """
 
     id: str
     name: str
@@ -225,12 +271,32 @@ class SourcePublicResponse(BaseModel):
     last_synced_at: str | None
     status: str
     citations_enabled: bool
+    is_active: bool = False
+    deleted_at: datetime | None = None
+    # AI auto-naming bookkeeping — surfaces "Naming…" placeholder in the UI
+    # while pending and lets the admin distinguish AI-written from user-typed
+    # values.
+    name_status: str = "user_set"
+    description_status: str = "user_set"
+    auto_name_and_description: bool = False
     created_at: str
     updated_at: str
 
 
+_SOURCE_MODES: frozenset[str] = frozenset({"snapshot", "live"})
+
+
 class SourceUpdate(BaseModel):
-    """Request body for PATCH /sources/{id} — all fields optional."""
+    """Request body for PATCH /sources/{id} — all fields optional.
+
+    Mirrors every editable field on the Source model so admin edits (Regenerate
+    name+description, citation toggles, sync-mode changes) are persisted
+    instead of silently dropped. Pydantic's default behavior of ignoring
+    unknown fields is intentionally preserved — adding ``extra="forbid"`` would
+    break older clients that send fields not listed here. To extend this
+    schema, add the field below and forward it from
+    :meth:`SourceService.update_source`.
+    """
 
     model_config = ConfigDict(str_strip_whitespace=True)
 
@@ -239,11 +305,79 @@ class SourceUpdate(BaseModel):
         min_length=1,
         max_length=255,
     )
+    description: str | None = Field(
+        None,
+        max_length=2000,
+        description="Free-text description shown in the admin UI and chat picker.",
+    )
+    citations_enabled: bool | None = None
+    retrieval_mode: str | None = None
+    sync_mode: str | None = None
+    sync_schedule: str | None = Field(
+        None,
+        description="Cron string. Required when sync_mode='scheduled'.",
+    )
+    source_mode: str | None = None
+    is_active: bool | None = None
     config: dict[str, Any] | None = Field(
         None,
         description="Full replacement of the connection config when provided.",
     )
-    is_active: bool | None = None
+
+    @field_validator("name")
+    @classmethod
+    def _name_no_slash(cls, v: str | None) -> str | None:
+        """Source names must not contain '/' (matches SourceCreateRequest)."""
+        if v is not None and "/" in v:
+            raise ValueError("Source name must not contain '/'.")
+        return v
+
+    @field_validator("retrieval_mode")
+    @classmethod
+    def _validate_retrieval_mode(cls, v: str | None) -> str | None:
+        if v is not None and v not in _RETRIEVAL_MODES:
+            raise ValueError(f"Invalid retrieval_mode: {v}")
+        return v
+
+    @field_validator("sync_mode")
+    @classmethod
+    def _validate_sync_mode(cls, v: str | None) -> str | None:
+        if v is not None and v not in _SYNC_MODES:
+            raise ValueError(f"Invalid sync_mode: {v}")
+        return v
+
+    @field_validator("source_mode")
+    @classmethod
+    def _validate_source_mode(cls, v: str | None) -> str | None:
+        if v is not None and v not in _SOURCE_MODES:
+            raise ValueError(f"Invalid source_mode: {v}")
+        return v
+
+    @field_validator("sync_schedule")
+    @classmethod
+    def _validate_sync_schedule(cls, v: str | None) -> str | None:
+        # Accept None (omitted) or a non-empty string. Full cron parsing is
+        # deferred to the scheduler — this only catches blank-string drift
+        # from the wire.
+        if v is not None and not v.strip():
+            raise ValueError("sync_schedule must not be blank when provided.")
+        return v
+
+    @model_validator(mode="after")
+    def _require_schedule_when_scheduled(self) -> SourceUpdate:
+        """Mirror the create-time invariant: scheduled sync needs a cron string.
+
+        See ``api/v1/sources.py`` create handler — this enforces the same
+        rule on the PATCH path so admins can't move a source into the
+        ``scheduled`` mode without supplying a cron expression.
+        """
+        if self.sync_mode == "scheduled" and (
+            self.sync_schedule is None or not self.sync_schedule.strip()
+        ):
+            raise ValueError(
+                "sync_schedule (cron) required when sync_mode='scheduled'."
+            )
+        return self
 
 
 # ---------------------------------------------------------------------------
@@ -255,6 +389,18 @@ class SourceResponse(BaseModel):
     """Full source representation returned by the API.
 
     ``config_encrypted`` is deliberately absent (FR-020).
+
+    Field semantics:
+      * ``is_active`` — admin approval flag ("approved/available to users").
+        Defaults to ``False`` for newly created rows; admin must explicitly
+        flip it after review.
+      * ``deleted_at`` — soft-delete marker. ``None`` means the source is
+        active in the system (not soft-deleted).
+
+    All wizard-collected fields are mirrored here so the frontend detail
+    page can render the source without a second round-trip. Optional fields
+    default to None / sensible defaults so older rows missing the columns
+    (pre-T-004 schema) still validate.
     """
 
     model_config = ConfigDict(from_attributes=True)
@@ -264,12 +410,87 @@ class SourceResponse(BaseModel):
     source_type: SourceType
     owner_id: uuid.UUID
     is_active: bool
+    deleted_at: datetime | None = None
     created_at: datetime
     updated_at: datetime
+    # Wizard-collected fields (T-004+)
+    description: str | None = None
+    source_mode: str = "snapshot"
+    retrieval_mode: str = "vector_only"
+    sync_mode: str = "manual"
+    sync_schedule: str | None = None
+    last_synced_at: datetime | None = None
+    next_sync_due_at: datetime | None = None
+    status: str = "pending"
+    citations_enabled: bool = True
+    # Embedder pinned at creation (immutable once chunks exist).
+    embedder_id: uuid.UUID | None = None
+    # AI auto-naming bookkeeping — drives the "Naming…" shimmer + Regenerate
+    # affordance in the admin UI.
+    name_status: str = "user_set"
+    description_status: str = "user_set"
+    auto_name_and_description: bool = False
+    # DB-source studying-agent (Phase 1 Wave 1) — null for non-DB sources.
+    schema_status: str | None = None
+    drift_signal_count: int = 0
+    last_studied_at: datetime | None = None
+    # SchemaStudy-derived fields (DB sources). Populated by the detail
+    # endpoint by joining the latest SchemaStudy. Stay null for non-DB
+    # sources or sources whose studying agent has not yet run. The list
+    # endpoint omits these to avoid an N+1 fetch — the admin sources table
+    # falls back to ``schema_status`` for the high-level pip strip.
+    study_state: str | None = None
+    tables_documented: int | None = None
+    tables_partial: int | None = None
+    last_error_phase: str | None = None
+    last_error_message: str | None = None
+    # Owner email (U10) — joined on ``Source.owner_id`` by the detail
+    # endpoint so the Overview footer can render "Created … by alice@" with
+    # no second fetch. ``None`` when the owner row is missing (shouldn't
+    # happen for a live source, but the join is LEFT so we degrade gracefully).
+    owner_email: str | None = None
+    # Studying-agent schema summary (U10) — the one-line natural-language
+    # description the studying agent stores inside the persisted
+    # SchemaDocument JSON (``summary`` key) of the latest *completed*
+    # SchemaStudy. ``None`` when no study has completed or the JSON has no
+    # ``summary``. Surfaced here so the DB Overview hero can render it
+    # without hitting the schema-document endpoint.
+    schema_summary: str | None = None
+    # Connection health (Slice A) — orthogonal to ``is_active``. Lets the
+    # admin UI render "Last tested 4 min ago — succeeded" without keeping
+    # client state, and lets the chat picker hide unreachable sources
+    # while admins still see them in /admin/sources.
+    connection_status: str = "unknown"
+    connection_last_checked_at: datetime | None = None
+    connection_last_error: str | None = None
+    # FX35b: the most recent sync_job for this source. Populated by the
+    # source-detail endpoint after model_validate (sync_jobs is a separate
+    # table; SQLAlchemy doesn't auto-include it). Frontend's SourceDetail
+    # extends SourceListItem and the lifecycle pipeline always reads
+    # `latest_job` — without this field the detail page sees None and
+    # derivePhase falls through to its no-job branch, even when the source
+    # has multiple success sync_jobs.
+    latest_job: SyncJobResponse | None = None
 
 
 class SourceListItem(BaseModel):
-    """Slim representation used inside paginated lists."""
+    """Slim representation used inside paginated lists.
+
+    ``is_active`` here means "approved/available to users". Soft-deleted rows
+    (``deleted_at IS NOT NULL``) are filtered out by the listing endpoint and
+    therefore never appear in this shape.
+
+    Ingestion-clarity fields (``status``, ``last_synced_at``, ``description``,
+    ``source_mode``, ``sync_mode``, ``document_count``, ``chunk_count``,
+    ``has_upload``) power the four-stage admin sources strip
+    (Uploaded / Parsed / Chunked / Approved). They mirror what
+    :class:`SourceResponse` already exposes so the table can render without
+    a per-row round-trip.
+
+    ``has_upload`` is derived server-side from
+    ``Source.file_storage_path IS NOT NULL`` — the path itself is never
+    exposed (see :class:`Source` model docstring).
+    """
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -277,8 +498,46 @@ class SourceListItem(BaseModel):
     name: str
     source_type: SourceType
     is_active: bool
+    deleted_at: datetime | None = None
     created_at: datetime
     latest_job: SyncJobResponse | None = None
+    # Ingestion-clarity fields (T-107)
+    status: str | None = None
+    last_synced_at: datetime | None = None
+    description: str | None = None
+    source_mode: str | None = None
+    sync_mode: str | None = None
+    document_count: int = 0
+    chunk_count: int = 0
+    has_upload: bool = False
+    # AI auto-naming bookkeeping — drives the "Naming…" shimmer in the admin
+    # sources table. Defaults preserve backwards-compatible behaviour for
+    # rows created before the columns existed.
+    name_status: str = "user_set"
+    description_status: str = "user_set"
+    auto_name_and_description: bool = False
+    # DB-source studying-agent (Phase 1 Wave 1) — null for non-DB sources.
+    schema_status: str | None = None
+    drift_signal_count: int = 0
+    last_studied_at: datetime | None = None
+    # Owner — admins triage by who created the source. Email is rendered;
+    # the UUID is included for stable cross-reference.
+    owner_id: uuid.UUID | None = None
+    # Embedder pinned at creation; surfaced so the detail page can show
+    # which embedder powers retrieval.
+    embedder_id: uuid.UUID | None = None
+    # SchemaStudy-derived fields (DB sources). Populated by joining the
+    # latest SchemaStudy at list / detail time. None for non-DB sources or
+    # sources that haven't yet been studied.
+    study_state: str | None = None
+    tables_documented: int | None = None
+    tables_partial: int | None = None
+    last_error_phase: str | None = None
+    last_error_message: str | None = None
+    # Connection health (Slice A) — see :class:`SourceResponse` for context.
+    connection_status: str = "unknown"
+    connection_last_checked_at: datetime | None = None
+    connection_last_error: str | None = None
 
 
 class PaginatedSources(BaseModel):

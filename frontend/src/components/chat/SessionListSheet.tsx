@@ -1,19 +1,11 @@
 'use client'
 
 import { Button } from '@/components/ui/button'
-import { Sheet, SheetContent, SheetTitle } from '@/components/ui/sheet'
-import { apiClient } from '@/lib/api-client'
-import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { Sheet, SheetContent, SheetDescription, SheetTitle } from '@/components/ui/sheet'
 import { PlusIcon } from 'lucide-react'
 import { useEffect } from 'react'
-import { toast } from 'sonner'
 import { useSelectedSession } from './SelectedSessionContext'
 import { SessionList } from './SessionList'
-
-interface CreatedSession {
-  id: string
-  title: string
-}
 
 export interface SessionListSheetProps {
   open: boolean
@@ -28,7 +20,6 @@ export interface SessionListSheetProps {
  */
 export function SessionListSheet({ open, onOpenChange }: SessionListSheetProps) {
   const { setSessionId } = useSelectedSession()
-  const queryClient = useQueryClient()
 
   useEffect(() => {
     const handler = (event: KeyboardEvent) => {
@@ -49,20 +40,14 @@ export function SessionListSheet({ open, onOpenChange }: SessionListSheetProps) 
     return () => window.removeEventListener('keydown', handler)
   }, [open, onOpenChange])
 
-  const createMutation = useMutation({
-    mutationFn: async (): Promise<CreatedSession> => {
-      const res = await apiClient.post<CreatedSession>('/api/v1/chat/sessions', {
-        title: 'New chat',
-      })
-      return res.data
-    },
-    onSuccess: (session) => {
-      queryClient.invalidateQueries({ queryKey: ['chat-sessions'] })
-      setSessionId(session.id)
-      onOpenChange(false)
-    },
-    onError: () => toast.error('Failed to create session.'),
-  })
+  // U15 lazy creation: the "New chat" CTA no longer fires POST /sessions.
+  // It just clears the active session so the URL is `/chat`, where the
+  // empty-hero composer kicks in — the row is only persisted once the
+  // user sends their first message.
+  const handleNewChat = () => {
+    setSessionId(null, { replace: true })
+    onOpenChange(false)
+  }
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
@@ -73,12 +58,18 @@ export function SessionListSheet({ open, onOpenChange }: SessionListSheetProps) 
               right-side "X" close button is rendered by SheetContent. */}
           <div className="flex items-center justify-between border-b border-border px-4 py-3 pr-12">
             <SheetTitle className="text-base">Chats</SheetTitle>
+            {/* Required by Radix Dialog a11y contract — without it the
+                primitive logs `Missing Description or aria-describedby` to
+                the console. The list itself conveys the panel's purpose
+                visually so we hide the description from sighted users. */}
+            <SheetDescription className="sr-only">
+              Browse, search, rename, and delete your chat sessions.
+            </SheetDescription>
             <Button
               size="sm"
               variant="default"
               className="gap-1.5"
-              disabled={createMutation.isPending}
-              onClick={() => createMutation.mutate()}
+              onClick={handleNewChat}
             >
               <PlusIcon className="h-3.5 w-3.5" aria-hidden />
               New chat

@@ -25,6 +25,9 @@ export interface Message {
 }
 
 export interface SessionMessagesResponse {
-  session: { id: string; title: string; source_ids: string[] }
+  // `title` is nullable since U15 (lazy creation): a freshly-created session
+  // may not have a title yet — the sidebar falls back to a preview of the
+  // first user message in that window.
+  session: { id: string; title: string | null; source_ids: string[] }
   messages: Message[]
 }

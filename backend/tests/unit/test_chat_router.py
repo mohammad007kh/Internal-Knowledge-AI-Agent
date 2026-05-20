@@ -30,6 +30,7 @@ from src.api.v1.chat import (  # noqa: E402
     _get_chat_session_service,
     _get_db_session_factory,
     _get_pipeline,
+    _get_title_generator,
     _get_tracing,
     router,
 )
@@ -69,7 +70,7 @@ def _make_user(
 def _make_session(
     session_id: uuid.UUID = SESSION_ID,
     user_id: uuid.UUID = USER_ID,
-    title: str = "Test session",
+    title: str | None = "Test session",
 ) -> MagicMock:
     _now = datetime(2024, 1, 1, 0, 0, 0, tzinfo=UTC)
     s = MagicMock()
@@ -157,6 +158,14 @@ def mock_chat_session_service() -> AsyncMock:
 
 
 @pytest.fixture()
+def mock_title_generator() -> AsyncMock:
+    """Default: returns None so existing tests are unaffected by the titler hook."""
+    svc = AsyncMock()
+    svc.generate_title = AsyncMock(return_value=None)
+    return svc
+
+
+@pytest.fixture()
 def client(
     current_user: User,
     db: AsyncMock,
@@ -165,6 +174,7 @@ def client(
     mock_pipeline: AsyncMock,
     mock_tracing: MagicMock,
     mock_chat_session_service: AsyncMock,
+    mock_title_generator: AsyncMock,
 ) -> Generator[TestClient, None, None]:
     app = FastAPI()
     register_exception_handlers(app)
@@ -179,6 +189,7 @@ def client(
     app.dependency_overrides[_get_pipeline] = lambda: mock_pipeline
     app.dependency_overrides[_get_tracing] = lambda: mock_tracing
     app.dependency_overrides[_get_chat_session_service] = lambda: mock_chat_session_service
+    app.dependency_overrides[_get_title_generator] = lambda: mock_title_generator
 
     with TestClient(app, raise_server_exceptions=False) as tc:
         yield tc
@@ -593,6 +604,55 @@ class TestSendMessage:
             query="Trace me",
         )
 
+    def test_send_message_empty_final_answer_skips_persist_and_emits_error(
+        self,
+        client: TestClient,
+        mock_session_repo: AsyncMock,
+        mock_message_repo: AsyncMock,
+        mock_pipeline: AsyncMock,
+        mock_tracing: MagicMock,
+    ) -> None:
+        """Pipeline ending with empty final_answer must NOT INSERT a NULL row.
+
+        Reproduces the bug where ``content`` (NOT NULL) crashes with
+        ``NotNullViolationError`` and the SSE stream closes without a
+        terminal frame, locking the frontend textarea.
+        """
+        session_obj = _make_session()
+        mock_session_repo.get.return_value = session_obj
+
+        user_msg = _make_message(role=MessageRole.USER, content="Hello")
+        # Single side-effect — the assistant persist must NOT be called.
+        mock_message_repo.create.side_effect = [user_msg]
+
+        async def _empty_events(  # noqa: ARG001
+            state: object, *, config: object, version: object
+        ) -> AsyncGenerator[Never, None]:
+            return
+            yield
+
+        mock_pipeline.astream_events = _empty_events
+
+        resp = client.post(
+            f"/chat/sessions/{SESSION_ID}/messages",
+            json={"query": "Hello"},
+        )
+
+        assert resp.status_code == 200
+        # Exactly one create call — the user message.  No assistant persist.
+        assert mock_message_repo.create.await_count == 1
+        first_call = mock_message_repo.create.call_args_list[0]
+        assert first_call.kwargs.get("role") == MessageRole.USER
+
+        # SSE body must contain a terminal error frame, not a done frame.
+        body = resp.text
+        assert "error" in body
+        assert "empty_response" in body
+        assert "\"event\":\"done\"" not in body
+
+        # Trace must still be ended so Langfuse doesn't leak open spans.
+        mock_tracing.end_trace.assert_called_once()
+
     def test_send_message_sse_headers(
         self,
         client: TestClient,
@@ -623,3 +683,333 @@ class TestSendMessage:
 
         assert resp.headers.get("cache-control") == "no-cache"
         assert resp.headers.get("x-accel-buffering") == "no"
+
+
+# ---------------------------------------------------------------------------
+# Auto-titling — gates and SSE wiring
+# ---------------------------------------------------------------------------
+
+
+class TestAutoTitling:
+    """POST /chat/sessions/{id}/messages — first-turn auto-title behaviour."""
+
+    @staticmethod
+    def _empty_pipeline_events() -> "Any":
+        async def _events(  # noqa: ARG001
+            state: object, *, config: object, version: object
+        ) -> AsyncGenerator[Never, None]:
+            return
+            yield
+        return _events
+
+    def test_auto_titles_when_session_title_is_new_chat(
+        self,
+        client: TestClient,
+        mock_session_repo: AsyncMock,
+        mock_message_repo: AsyncMock,
+        mock_pipeline: AsyncMock,
+        mock_title_generator: AsyncMock,
+    ) -> None:
+        """When session.title == 'New chat' and titler returns a string,
+        the session is renamed AND the first SSE frame is event: title."""
+        session_obj = _make_session(title="New chat")
+        mock_session_repo.get.return_value = session_obj
+
+        user_msg = _make_message(role=MessageRole.USER, content="Tell me about Q3")
+        assistant_msg = _make_message(role=MessageRole.ASSISTANT, content="OK")
+        mock_message_repo.create.side_effect = [user_msg, assistant_msg]
+
+        mock_title_generator.generate_title = AsyncMock(return_value="Q3 EMEA growth")
+        mock_pipeline.astream_events = self._empty_pipeline_events()
+
+        resp = client.post(
+            f"/chat/sessions/{SESSION_ID}/messages",
+            json={"query": "Tell me about Q3"},
+        )
+
+        assert resp.status_code == 200
+        # Titler was actually invoked
+        mock_title_generator.generate_title.assert_awaited_once_with("Tell me about Q3")
+        # Session was renamed in the request-scoped DB session
+        mock_session_repo.rename.assert_awaited_once()
+        rename_args = mock_session_repo.rename.call_args
+        assert rename_args.args[1] == SESSION_ID
+        assert rename_args.args[2] == "Q3 EMEA growth"
+        # SSE body's first data frame carries the title event. Format is
+        # the SSE wire shape ``event: <name>\ndata: <json>\n\n``.
+        body = resp.text
+        assert 'event: title' in body
+        assert '"title": "Q3 EMEA growth"' in body
+        # Title frame must precede the terminal stream frame. With an empty
+        # pipeline output (mock produces no events), the new chat-stream
+        # contract emits ``event: error`` (empty_response) rather than a
+        # silent ``done`` — better UX. Either is a valid terminal.
+        terminal_index = (
+            body.index('event: error') if 'event: error' in body
+            else body.index('event: done')
+        )
+        assert body.index('event: title') < terminal_index
+
+    def test_no_titler_call_when_title_already_set(
+        self,
+        client: TestClient,
+        mock_session_repo: AsyncMock,
+        mock_message_repo: AsyncMock,
+        mock_pipeline: AsyncMock,
+        mock_title_generator: AsyncMock,
+    ) -> None:
+        """User-renamed sessions must skip the titler entirely."""
+        session_obj = _make_session(title="My custom title")
+        mock_session_repo.get.return_value = session_obj
+
+        user_msg = _make_message(role=MessageRole.USER, content="hi")
+        assistant_msg = _make_message(role=MessageRole.ASSISTANT, content="hello")
+        mock_message_repo.create.side_effect = [user_msg, assistant_msg]
+        mock_pipeline.astream_events = self._empty_pipeline_events()
+
+        resp = client.post(
+            f"/chat/sessions/{SESSION_ID}/messages",
+            json={"query": "hi"},
+        )
+
+        assert resp.status_code == 200
+        mock_title_generator.generate_title.assert_not_awaited()
+        mock_session_repo.rename.assert_not_awaited()
+        assert '"event":"title"' not in resp.text
+
+    def test_no_title_event_when_titler_returns_none(
+        self,
+        client: TestClient,
+        mock_session_repo: AsyncMock,
+        mock_message_repo: AsyncMock,
+        mock_pipeline: AsyncMock,
+        mock_title_generator: AsyncMock,
+    ) -> None:
+        """Timeout / refusal / empty: silent fallback — no rename, no SSE frame."""
+        session_obj = _make_session(title="New chat")
+        mock_session_repo.get.return_value = session_obj
+
+        user_msg = _make_message(role=MessageRole.USER, content="hi")
+        assistant_msg = _make_message(role=MessageRole.ASSISTANT, content="hello")
+        mock_message_repo.create.side_effect = [user_msg, assistant_msg]
+
+        mock_title_generator.generate_title = AsyncMock(return_value=None)
+        mock_pipeline.astream_events = self._empty_pipeline_events()
+
+        resp = client.post(
+            f"/chat/sessions/{SESSION_ID}/messages",
+            json={"query": "hi"},
+        )
+
+        assert resp.status_code == 200
+        mock_title_generator.generate_title.assert_awaited_once()
+        mock_session_repo.rename.assert_not_awaited()
+        assert '"event":"title"' not in resp.text
+
+    def test_titler_exception_falls_back_silently(
+        self,
+        client: TestClient,
+        mock_session_repo: AsyncMock,
+        mock_message_repo: AsyncMock,
+        mock_pipeline: AsyncMock,
+        mock_title_generator: AsyncMock,
+    ) -> None:
+        """If the titler itself raises, the chat path must continue uninterrupted."""
+        session_obj = _make_session(title="New chat")
+        mock_session_repo.get.return_value = session_obj
+
+        user_msg = _make_message(role=MessageRole.USER, content="hi")
+        assistant_msg = _make_message(role=MessageRole.ASSISTANT, content="hello")
+        mock_message_repo.create.side_effect = [user_msg, assistant_msg]
+
+        mock_title_generator.generate_title = AsyncMock(
+            side_effect=RuntimeError("titler exploded")
+        )
+        mock_pipeline.astream_events = self._empty_pipeline_events()
+
+        resp = client.post(
+            f"/chat/sessions/{SESSION_ID}/messages",
+            json={"query": "hi"},
+        )
+
+        assert resp.status_code == 200
+        mock_session_repo.rename.assert_not_awaited()
+        assert 'event: title' not in resp.text
+        # A terminal frame still fires — chat is never broken by the titler.
+        # Empty pipeline output now correctly emits ``event: error``
+        # (empty_response) instead of a silent ``done``; either is a valid
+        # terminal that proves the stream wasn't aborted by the titler crash.
+        terminal_present = (
+            'event: error' in resp.text or 'event: done' in resp.text
+        )
+        assert terminal_present
+
+
+# ---------------------------------------------------------------------------
+# Lazy session creation — POST /sessions/new/messages (U15)
+# ---------------------------------------------------------------------------
+
+
+class TestLazySessionCreation:
+    """POST /chat/sessions/new/messages — lazy-create on first message."""
+
+    @staticmethod
+    def _empty_pipeline_events() -> "Any":
+        async def _events(  # noqa: ARG001
+            state: object, *, config: object, version: object
+        ) -> AsyncGenerator[Never, None]:
+            return
+            yield
+        return _events
+
+    def test_new_sentinel_creates_session_and_persists_user_message(
+        self,
+        client: TestClient,
+        mock_message_repo: AsyncMock,
+        mock_pipeline: AsyncMock,
+        mock_chat_session_service: AsyncMock,
+    ) -> None:
+        """POST /sessions/new/messages must invoke create_session AND
+        persist the user message under the freshly-minted session id."""
+        new_session = _make_session(title=None)
+        new_session.source_ids = []
+        mock_chat_session_service.create_session.return_value = new_session
+        mock_chat_session_service.get_source_ids_for_session.return_value = []
+
+        user_msg = _make_message(role=MessageRole.USER, content="Hello")
+        assistant_msg = _make_message(role=MessageRole.ASSISTANT, content="Hi")
+        mock_message_repo.create.side_effect = [user_msg, assistant_msg]
+        mock_pipeline.astream_events = self._empty_pipeline_events()
+
+        resp = client.post("/chat/sessions/new/messages", json={"query": "Hello"})
+
+        assert resp.status_code == 200
+        # Service-level create was called with the caller's user id and a
+        # ``None`` title (lazy-creation contract).
+        mock_chat_session_service.create_session.assert_awaited_once()
+        create_kwargs = mock_chat_session_service.create_session.call_args.kwargs
+        assert create_kwargs.get("user_id") == str(USER_ID)
+        assert create_kwargs.get("title") is None
+        # User message persisted under the new session id.
+        first_create_call = mock_message_repo.create.call_args_list[0]
+        assert first_create_call.kwargs.get("role") == MessageRole.USER
+        assert first_create_call.kwargs.get("content") == "Hello"
+        assert first_create_call.kwargs.get("chat_session_id") == new_session.id
+
+    def test_new_sentinel_emits_session_created_as_first_frame(
+        self,
+        client: TestClient,
+        mock_message_repo: AsyncMock,
+        mock_pipeline: AsyncMock,
+        mock_chat_session_service: AsyncMock,
+        mock_title_generator: AsyncMock,
+    ) -> None:
+        """``event: session_created`` must precede ``event: title`` and
+        all subsequent pipeline frames."""
+        new_session = _make_session(title=None)
+        new_session.source_ids = []
+        mock_chat_session_service.create_session.return_value = new_session
+        mock_chat_session_service.get_source_ids_for_session.return_value = []
+
+        user_msg = _make_message(role=MessageRole.USER, content="Tell me about Q3")
+        assistant_msg = _make_message(role=MessageRole.ASSISTANT, content="OK")
+        mock_message_repo.create.side_effect = [user_msg, assistant_msg]
+        mock_title_generator.generate_title = AsyncMock(return_value="Q3 EMEA growth")
+        mock_pipeline.astream_events = self._empty_pipeline_events()
+
+        resp = client.post(
+            "/chat/sessions/new/messages",
+            json={"query": "Tell me about Q3"},
+        )
+
+        assert resp.status_code == 200
+        body = resp.text
+        # Both frames present.
+        assert "event: session_created" in body
+        assert f'"session_id": "{new_session.id}"' in body
+        assert "event: title" in body
+        # Strict ordering: session_created BEFORE title, both BEFORE the
+        # terminal frame (which is `error` for an empty pipeline output,
+        # same as the existing auto-titling tests).
+        sc_idx = body.index("event: session_created")
+        title_idx = body.index("event: title")
+        terminal_idx = (
+            body.index("event: error") if "event: error" in body
+            else body.index("event: done")
+        )
+        assert sc_idx < title_idx < terminal_idx
+
+    def test_new_sentinel_titler_failure_still_emits_session_created(
+        self,
+        client: TestClient,
+        mock_message_repo: AsyncMock,
+        mock_pipeline: AsyncMock,
+        mock_chat_session_service: AsyncMock,
+        mock_title_generator: AsyncMock,
+    ) -> None:
+        """If the titler raises / returns None, the lazy-create handshake
+        still fires — only the ``title`` frame is suppressed."""
+        new_session = _make_session(title=None)
+        new_session.source_ids = []
+        mock_chat_session_service.create_session.return_value = new_session
+        mock_chat_session_service.get_source_ids_for_session.return_value = []
+
+        user_msg = _make_message(role=MessageRole.USER, content="hi")
+        assistant_msg = _make_message(role=MessageRole.ASSISTANT, content="hello")
+        mock_message_repo.create.side_effect = [user_msg, assistant_msg]
+        mock_title_generator.generate_title = AsyncMock(
+            side_effect=RuntimeError("titler exploded")
+        )
+        mock_pipeline.astream_events = self._empty_pipeline_events()
+
+        resp = client.post("/chat/sessions/new/messages", json={"query": "hi"})
+
+        assert resp.status_code == 200
+        body = resp.text
+        # session_created MUST still be present.
+        assert "event: session_created" in body
+        # title MUST NOT have leaked into the stream.
+        assert "event: title" not in body
+
+    def test_new_sentinel_routes_source_ids_through_permission_filter(
+        self,
+        client: TestClient,
+        mock_message_repo: AsyncMock,
+        mock_pipeline: AsyncMock,
+        mock_chat_session_service: AsyncMock,
+    ) -> None:
+        """source_ids on the request body MUST be permission-filtered by
+        the service before the row is committed."""
+        new_session = _make_session(title=None)
+        new_session.source_ids = ["src-A"]  # filter dropped src-B
+        mock_chat_session_service.create_session.return_value = new_session
+        mock_chat_session_service.get_source_ids_for_session.return_value = []
+
+        user_msg = _make_message(role=MessageRole.USER, content="hi")
+        assistant_msg = _make_message(role=MessageRole.ASSISTANT, content="ok")
+        mock_message_repo.create.side_effect = [user_msg, assistant_msg]
+        mock_pipeline.astream_events = self._empty_pipeline_events()
+
+        resp = client.post(
+            "/chat/sessions/new/messages",
+            json={"query": "hi", "source_ids": ["src-A", "src-B"]},
+        )
+
+        assert resp.status_code == 200
+        # The service receives the caller-supplied list; it owns the
+        # permission filter internally.  We assert the wiring, not the
+        # filter logic (covered by ChatSessionService unit tests).
+        create_kwargs = mock_chat_session_service.create_session.call_args.kwargs
+        assert create_kwargs.get("source_ids") == ["src-A", "src-B"]
+
+    def test_non_uuid_non_sentinel_session_id_returns_422(
+        self,
+        client: TestClient,
+    ) -> None:
+        """Any path segment that is neither a UUID nor ``"new"`` must
+        422 before reaching the pipeline."""
+        resp = client.post(
+            "/chat/sessions/not-a-uuid/messages",
+            json={"query": "hi"},
+        )
+        assert resp.status_code == 422

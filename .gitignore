@@ -51,6 +51,15 @@ node_modules/
 out/
 frontend/dist/
 frontend/build/
+# TS incremental build cache (per-machine, churns on every type-check)
+*.tsbuildinfo
+
+# =============================================================
+# Claude Code local state (not project source)
+# =============================================================
+.claude/worktrees/
+.claude/scheduled_tasks.lock
+.claude/settings.local.json
 
 # =============================================================
 # Environment Variables (CRITICAL — never commit secrets)
@@ -100,6 +109,26 @@ backend/alembic/versions/__pycache__/
 playwright-report/
 test-results/
 frontend/e2e/.auth/
+# Playwright HTML report output (was committed by accident — held a stray
+# screenshot from an unrelated app). Keep it out of the tree.
+frontend/e2e/report/
+# pytest run logs — leak local Windows user paths in stack traces.
+backend/pytest_out*.txt
+backend/pytest_output*.txt
+# stray test-output dumps at the repo root (leak local paths).
+test_*_out.txt
+
+# Local Docker Compose dev override (hot-reload bind mounts + UID remap).
+# docker compose auto-merges this file, so it must NOT be committed — a
+# public `docker compose up` should run clean built images. Copy
+# docker-compose.override.yml.example to opt into hot-reload locally.
+docker-compose.override.yml
+
+# =============================================================
+# Conversation/reference scratch (not project source)
+# =============================================================
+# ReferenceImage holds screenshots shared during dev conversations only.
+docs/ReferenceImage/
 
 # =============================================================
 # SpecKit (internal AI agent scaffolding - not part of project source)

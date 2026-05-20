@@ -89,7 +89,21 @@ async def guardrail_output(
     """
     answer: str = state.get("final_answer", "") or ""
     if not answer:
-        return {}
+        # Belt-and-suspenders: enforce the invariant that the pipeline always
+        # exits with a non-empty `final_answer`. The chat router's persist
+        # path writes this to a NOT NULL column; a bare empty answer here
+        # would cascade into an IntegrityError at the API layer.
+        logger.warning(
+            "guardrail_output: empty final_answer for session=%s — "
+            "substituting fallback message",
+            state.get("session_id"),
+        )
+        return {
+            "final_answer": (
+                "I'm sorry, I wasn't able to generate a response. "
+                "Please try rephrasing your question."
+            ),
+        }
 
     session_id_raw = state.get("session_id")
     session_id: uuid.UUID | None = None

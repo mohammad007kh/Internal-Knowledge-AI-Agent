@@ -304,3 +304,154 @@ async def test_async_context_manager_calls_connect_disconnect() -> None:
         async with conn:
             mock_connect.assert_called_once()
         mock_disconnect.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# Structure-aware DOCX / PDF parsing  (unstructured upgrade)
+# ---------------------------------------------------------------------------
+
+
+def _build_docx_with_table_and_heading() -> bytes:
+    """Generate a tiny in-memory DOCX containing a heading + a 3x2 table."""
+    import io  # noqa: PLC0415
+
+    import docx  # type: ignore[import-untyped]  # noqa: PLC0415
+
+    document = docx.Document()
+    document.add_heading("Project Skills", level=1)
+    document.add_paragraph("Resume profile body text.")
+
+    table = document.add_table(rows=3, cols=2)
+    table.cell(0, 0).text = "Skill"
+    table.cell(0, 1).text = "Years"
+    table.cell(1, 0).text = "Python"
+    table.cell(1, 1).text = "5"
+    table.cell(2, 0).text = "Rust"
+    table.cell(2, 1).text = "2"
+
+    buf = io.BytesIO()
+    document.save(buf)
+    return buf.getvalue()
+
+
+def _build_plain_docx() -> bytes:
+    """Generate a paragraph-only DOCX (no tables, no headings)."""
+    import io  # noqa: PLC0415
+
+    import docx  # type: ignore[import-untyped]  # noqa: PLC0415
+
+    document = docx.Document()
+    document.add_paragraph("Just a plain paragraph for sanity checks.")
+
+    buf = io.BytesIO()
+    document.save(buf)
+    return buf.getvalue()
+
+
+def _build_pdf_with_table_and_heading() -> bytes:
+    """Generate a tiny PDF containing a heading + a 3x2 table via reportlab."""
+    import io  # noqa: PLC0415
+
+    from reportlab.lib import colors  # type: ignore[import-untyped]  # noqa: PLC0415
+    from reportlab.lib.pagesizes import letter  # type: ignore[import-untyped]  # noqa: PLC0415
+    from reportlab.lib.styles import getSampleStyleSheet  # type: ignore[import-untyped]  # noqa: PLC0415
+    from reportlab.platypus import (  # type: ignore[import-untyped]  # noqa: PLC0415
+        Paragraph,
+        SimpleDocTemplate,
+        Spacer,
+        Table,
+        TableStyle,
+    )
+
+    buf = io.BytesIO()
+    pdf = SimpleDocTemplate(buf, pagesize=letter)
+    styles = getSampleStyleSheet()
+
+    story = [
+        Paragraph("Project Skills Header", styles["Heading1"]),
+        Paragraph("Resume profile body text.", styles["BodyText"]),
+        Spacer(1, 12),
+        Table(
+            [["Skill", "Years"], ["Python", "5"], ["Rust", "2"]],
+            style=TableStyle([("GRID", (0, 0), (-1, -1), 0.5, colors.black)]),
+        ),
+    ]
+    pdf.build(story)
+    return buf.getvalue()
+
+
+def _build_plain_pdf() -> bytes:
+    """Generate a paragraph-only PDF via reportlab."""
+    import io  # noqa: PLC0415
+
+    from reportlab.lib.pagesizes import letter  # type: ignore[import-untyped]  # noqa: PLC0415
+    from reportlab.lib.styles import getSampleStyleSheet  # type: ignore[import-untyped]  # noqa: PLC0415
+    from reportlab.platypus import Paragraph, SimpleDocTemplate  # type: ignore[import-untyped]  # noqa: PLC0415
+
+    buf = io.BytesIO()
+    pdf = SimpleDocTemplate(buf, pagesize=letter)
+    styles = getSampleStyleSheet()
+    pdf.build([Paragraph("Just a plain paragraph for sanity checks.", styles["BodyText"])])
+    return buf.getvalue()
+
+
+def test_parse_docx_extracts_table_cells() -> None:
+    """Real-CV regression: skills/projects in tables must reach the bot."""
+    parsed = FileUploadConnector._parse_docx(_build_docx_with_table_and_heading())
+    for cell in ("Skill", "Years", "Python", "5", "Rust", "2"):
+        assert cell in parsed, f"Table cell '{cell}' missing from parsed DOCX"
+
+
+def test_parse_docx_extracts_heading_text() -> None:
+    parsed = FileUploadConnector._parse_docx(_build_docx_with_table_and_heading())
+    assert "Project Skills" in parsed
+
+
+def test_parse_docx_plain_doc_still_works() -> None:
+    """Heading-less / table-less DOCX: legacy happy path must keep working."""
+    parsed = FileUploadConnector._parse_docx(_build_plain_docx())
+    assert "Just a plain paragraph" in parsed
+
+
+def test_parse_docx_falls_back_when_unstructured_fails() -> None:
+    """If the new parser raises, the legacy python-docx path is used."""
+    docx_bytes = _build_plain_docx()
+
+    with patch(
+        "unstructured.partition.docx.partition_docx",
+        side_effect=RuntimeError("simulated parser failure"),
+    ):
+        parsed = FileUploadConnector._parse_docx(docx_bytes)
+
+    assert "Just a plain paragraph" in parsed
+
+
+def test_parse_pdf_extracts_table_cells() -> None:
+    parsed = FileUploadConnector._parse_pdf(_build_pdf_with_table_and_heading())
+    # Each cell appears as its own element under strategy='fast' — that's fine,
+    # the words just need to be retrievable downstream.
+    for cell in ("Skill", "Years", "Python", "Rust"):
+        assert cell in parsed, f"Table cell '{cell}' missing from parsed PDF"
+
+
+def test_parse_pdf_extracts_heading_text() -> None:
+    parsed = FileUploadConnector._parse_pdf(_build_pdf_with_table_and_heading())
+    assert "Project Skills Header" in parsed
+
+
+def test_parse_pdf_plain_pdf_still_works() -> None:
+    parsed = FileUploadConnector._parse_pdf(_build_plain_pdf())
+    assert "Just a plain paragraph" in parsed
+
+
+def test_parse_pdf_falls_back_when_unstructured_fails() -> None:
+    """If the new parser raises, the legacy PyPDF2 path is used."""
+    pdf_bytes = _build_plain_pdf()
+
+    with patch(
+        "unstructured.partition.pdf.partition_pdf",
+        side_effect=RuntimeError("simulated parser failure"),
+    ):
+        parsed = FileUploadConnector._parse_pdf(pdf_bytes)
+
+    assert "Just a plain paragraph" in parsed

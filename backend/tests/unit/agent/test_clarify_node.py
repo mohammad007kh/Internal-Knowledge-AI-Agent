@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import json
 import uuid
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -74,17 +74,23 @@ async def test_span_emitted(base_state, mock_langfuse) -> None:
 
 
 @pytest.mark.asyncio
-async def test_handle_clarification_calls_interrupt(base_state) -> None:
-    base_state["clarification_question"] = "Which product do you mean?"
-    with patch(
-        "src.agent.nodes.clarify.interrupt", return_value="I mean the Pro plan"
-    ) as mock_interrupt:
-        result = await handle_clarification(base_state)
-    mock_interrupt.assert_called_once_with("Which product do you mean?")
-    assert result["query"] == "I mean the Pro plan"
-    assert result["requires_clarification"] is False
-    assert result["clarification_question"] is None
-    assert len(result["messages"]) == 1
+async def test_handle_clarification_returns_question_as_final_answer() -> None:
+    result = await handle_clarification(
+        {"clarification_question": "What do you mean by foo?"}
+    )
+    assert result == {
+        "final_answer": "What do you mean by foo?",
+        "sources": [],
+    }
+
+
+@pytest.mark.asyncio
+async def test_handle_clarification_falls_back_when_question_missing() -> None:
+    result = await handle_clarification({})
+    assert result == {
+        "final_answer": "Could you please clarify your question?",
+        "sources": [],
+    }
 
 
 # ---------------------------------------------------------------------------

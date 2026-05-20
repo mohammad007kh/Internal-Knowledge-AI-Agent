@@ -19,9 +19,6 @@ import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
-from langchain_core.messages import HumanMessage
-from langgraph.types import interrupt
-
 from src.agent.state import AgentState
 from src.prompts import load_prompt
 
@@ -190,16 +187,20 @@ async def check_clarification(
 
 
 async def handle_clarification(state: AgentState) -> dict[str, Any]:
-    """Surface the clarification question to the user via interrupt() and resume."""
+    """Surface the LLM-generated clarification question as the final answer.
+
+    LangGraph's ``interrupt()`` is not picked up inside ``astream_events``
+    streaming consumers under ``MemorySaver`` — it pauses silently,
+    leaving ``final_answer=None``, which now trips the empty-answer
+    guard added in ``chat.py``.  Returning the question as a normal
+    terminal answer makes the semantics consistent with every other
+    terminal node in the graph: the user sees the question text, can
+    reply with their next message, and the assistant row gets persisted
+    normally.
+    """
     question = (
         state.get("clarification_question")
         or "Could you please clarify your question?"
     )
-    logger.info("handle_clarification: surfacing question to user")
-    clarification_answer: str = interrupt(question)
-    return {
-        "messages": [HumanMessage(content=clarification_answer)],
-        "query": clarification_answer,
-        "requires_clarification": False,
-        "clarification_question": None,
-    }
+    logger.info("handle_clarification: returning question as terminal answer")
+    return {"final_answer": question, "sources": []}

@@ -1,11 +1,18 @@
 'use client'
 
+import { ActionCell } from '@/app/(admin)/admin/sources/_components/ActionCell'
+import { DatabaseStudyStrip } from '@/app/(admin)/admin/sources/_components/DatabaseStudyStrip'
+import { IngestionStrip } from '@/app/(admin)/admin/sources/_components/IngestionStrip'
+import { PendingNamePill } from '@/app/(admin)/admin/sources/_components/PendingNamePill'
+import { SourceActionCell } from '@/app/(admin)/admin/sources/_components/SourceActionCell'
 import { SourceRowCard } from '@/app/(admin)/admin/sources/_components/SourceRowCard'
 import {
   SourcesToolbar,
   type StatusFilter,
   type TypeGroup,
 } from '@/app/(admin)/admin/sources/_components/SourcesToolbar'
+import { derivePhase } from '@/app/(admin)/admin/sources/_components/sourcePhase'
+import { sourceKindOf } from '@/app/(admin)/admin/sources/[id]/_components/sourceTypeMatrix'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -29,12 +36,15 @@ import {
 } from '@/components/ui/table'
 import { formatRelative } from '@/features/sources/format'
 import {
+  sourcesKeys,
   useDeleteSource,
   useListSources,
   useTriggerSync,
 } from '@/features/sources/hooks/useSources'
 import { SourceModeBadge, getSourceTypeMeta } from '@/features/sources/source-ui'
-import type { SourceListItem, SourceStatus, SourceType } from '@/lib/api/sources'
+import { updateSourceApi } from '@/lib/api/sources'
+import type { SourceListItem, SourceType } from '@/lib/api/sources'
+import { useQueryClient } from '@tanstack/react-query'
 import { getErrorMessage } from '@/lib/errors'
 import { cn } from '@/lib/utils'
 import {
@@ -50,24 +60,6 @@ import Link from 'next/link'
 import { useDeferredValue, useMemo, useState } from 'react'
 import { toast } from 'sonner'
 
-const DATABASE_TYPES: readonly SourceType[] = ['postgresql', 'mysql', 'mssql', 'mongodb']
-const FILE_TYPES: readonly SourceType[] = [
-  'pdf',
-  'docx',
-  'xlsx',
-  'csv',
-  'txt',
-  'markdown',
-  'file_upload',
-]
-const WEB_TYPES: readonly SourceType[] = ['web_url']
-const INTEGRATION_TYPES: readonly SourceType[] = [
-  'confluence',
-  'sharepoint',
-  'google_drive',
-  'notion',
-]
-
 const TYPE_GROUP_LABEL: Record<Exclude<TypeGroup, 'all'>, string> = {
   database: 'Database',
   file: 'Files',
@@ -75,60 +67,43 @@ const TYPE_GROUP_LABEL: Record<Exclude<TypeGroup, 'all'>, string> = {
   integration: 'Integration',
 }
 
-const STATUS_DOT_CLASS: Record<string, string> = {
-  pending: 'bg-zinc-400',
-  syncing: 'bg-blue-500 animate-pulse',
-  running: 'bg-blue-500 animate-pulse',
-  ready: 'bg-emerald-500',
-  completed: 'bg-emerald-500',
-  success: 'bg-emerald-500',
-  error: 'bg-red-500',
-  failed: 'bg-red-500',
-  disabled: 'bg-zinc-300 dark:bg-zinc-600',
-}
-
-const STATUS_TEXT_CLASS: Record<string, string> = {
-  pending: 'text-zinc-600 dark:text-zinc-300',
-  syncing: 'text-blue-700 dark:text-blue-300',
-  running: 'text-blue-700 dark:text-blue-300',
-  ready: 'text-emerald-700 dark:text-emerald-300',
-  completed: 'text-emerald-700 dark:text-emerald-300',
-  success: 'text-emerald-700 dark:text-emerald-300',
-  error: 'text-red-700 dark:text-red-300',
-  failed: 'text-red-700 dark:text-red-300',
-  disabled: 'text-zinc-500 dark:text-zinc-400',
-}
-
-function getTypeGroup(type: SourceType | string): Exclude<TypeGroup, 'all'> | 'other' {
-  if ((DATABASE_TYPES as readonly string[]).includes(type)) return 'database'
-  if ((FILE_TYPES as readonly string[]).includes(type)) return 'file'
-  if ((WEB_TYPES as readonly string[]).includes(type)) return 'web'
-  if ((INTEGRATION_TYPES as readonly string[]).includes(type)) return 'integration'
-  return 'other'
-}
-
-function StatusDot({ status }: { status: SourceStatus | string | undefined | null }) {
-  const value = (status ?? 'pending') as string
-  const dot = STATUS_DOT_CLASS[value] ?? STATUS_DOT_CLASS.disabled
-  const text = STATUS_TEXT_CLASS[value] ?? STATUS_TEXT_CLASS.disabled
-  return (
-    <span className="inline-flex items-center gap-2 text-xs font-medium">
-      <span className={cn('h-2 w-2 rounded-full', dot)} aria-hidden />
-      <span className={cn('capitalize', text)}>{value}</span>
-    </span>
-  )
+/**
+ * Map a source type onto a toolbar filter group.
+ *
+ * Delegates to `sourceKindOf` — the single source of truth for "what coarse
+ * kind is this type" (FX6/FX8). The backend StrEnum emits `'database'` (not a
+ * per-dialect string), `'file_upload'`, `'web_url'`, `'confluence'`,
+ * `'sharepoint'`; `sourceKindOf` already handles every value plus the
+ * forward-compat dialect extras. The only mapping wrinkle: `sourceKindOf`
+ * names SaaS connectors `'connector'` while the toolbar calls that group
+ * `'integration'`.
+ */
+export function getTypeGroup(type: SourceType | string): Exclude<TypeGroup, 'all'> {
+  const kind = sourceKindOf(type as SourceType)
+  return kind === 'connector' ? 'integration' : kind
 }
 
 function TypePill({ type }: { type: SourceType | string }) {
   const meta = getSourceTypeMeta(type)
   const group = getTypeGroup(type)
-  const groupLabel = group === 'other' ? meta.label : TYPE_GROUP_LABEL[group]
-  const showSubLabel = group !== 'other' && groupLabel !== meta.label
+  const groupLabel = TYPE_GROUP_LABEL[group]
+  // Only append a sub-label when it's a *real* refinement of the group —
+  // e.g. group "Database" + dialect "PostgreSQL". For the consolidated
+  // source types ('database'/'web_url'/'file_upload'/'confluence'/
+  // 'sharepoint') meta.label is just a near-dupe of the group ("database",
+  // "Web URL"), so showing it produced redundant noise like "Database·
+  // database". Compare case-insensitively and skip when one contains the
+  // other.
+  const a = groupLabel.toLowerCase()
+  const b = meta.label.toLowerCase()
+  const showSubLabel = a !== b && !a.includes(b) && !b.includes(a)
   return (
-    <span className="inline-flex items-center gap-2 rounded-md border bg-muted/40 px-2 py-1 text-xs">
-      <meta.icon className="h-3.5 w-3.5 text-muted-foreground" aria-hidden />
+    <span className="inline-flex items-center gap-1.5 rounded-md border bg-muted/40 px-2 py-1 text-xs">
+      <meta.icon className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
       <span className="font-medium text-foreground">{groupLabel}</span>
-      {showSubLabel ? <span className="text-muted-foreground">· {meta.label}</span> : null}
+      {showSubLabel ? (
+        <span className="text-muted-foreground">· {meta.label}</span>
+      ) : null}
     </span>
   )
 }
@@ -268,8 +243,30 @@ function SourcesEmpty({ filtered, onClearFilters }: SourcesEmptyProps) {
   )
 }
 
-export function SourcesTable() {
-  const { data, isLoading } = useListSources()
+interface SourcesTableProps {
+  /**
+   * Optional canned dataset for visual QA / `?demo=db-states` mode. When
+   * provided, the table renders these rows instead of the live API result and
+   * skips polling. Wave 1D ships the demo set so designers can audit every
+   * DB-source state without having to seed a real database.
+   */
+  demoSources?: readonly SourceListItem[]
+}
+
+export function SourcesTable({ demoSources }: SourcesTableProps = {}) {
+  // Read without polling first to compute whether any row is in `running`
+  // phase. Then re-subscribe with `pollWhileRunning` so the verb column
+  // transitions out of "Working on it…" promptly. Both calls share a single
+  // React Query cache entry (same query key), so this is one network request.
+  const queryClient = useQueryClient()
+  const { data: pollingProbe } = useListSources()
+  const probeSources = useMemo(() => pollingProbe?.items ?? [], [pollingProbe?.items])
+  const hasRunningRow = useMemo(
+    () => probeSources.some((s) => derivePhase(s) === 'running'),
+    [probeSources]
+  )
+
+  const { data, isLoading } = useListSources({ pollWhileRunning: hasRunningRow })
   const deleteMutation = useDeleteSource()
   const syncMutation = useTriggerSync()
 
@@ -281,7 +278,10 @@ export function SourcesTable() {
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all')
 
   const deferredSearch = useDeferredValue(search)
-  const sources = useMemo(() => data?.items ?? [], [data?.items])
+  const sources = useMemo<readonly SourceListItem[]>(
+    () => demoSources ?? data?.items ?? [],
+    [demoSources, data?.items]
+  )
 
   const filtersActive =
     deferredSearch.trim().length > 0 || typeFilter !== 'all' || statusFilter !== 'all'
@@ -311,6 +311,47 @@ export function SourcesTable() {
     syncMutation.mutate(id, {
       onSuccess: () => toast.success('Sync started'),
       onError: (err) => toast.error(getErrorMessage(err) || 'Sync failed'),
+    })
+  }
+
+  // Approve = flip is_active=true. The verb cell's "Approve & ingest"
+  // button calls this; the row's IngestionStrip immediately reflects the
+  // new state via the React Query invalidation below.
+  // useUpdateSource is keyed by sourceId so we can't share one instance
+  // across rows — call updateSourceApi directly and invalidate the list
+  // ourselves.
+  async function handleApprove(id: string) {
+    try {
+      await updateSourceApi(id, { is_active: true })
+      await queryClient.invalidateQueries({ queryKey: sourcesKeys.list() })
+      await queryClient.invalidateQueries({ queryKey: sourcesKeys.detail(id) })
+      toast.success('Source approved — now available to users')
+    } catch (err) {
+      toast.error(getErrorMessage(err) || 'Approval failed')
+    }
+  }
+
+  // DB-source "Re-study" / "Schema drift detected · Re-study" branch.
+  // The studying-agent endpoint isn't wired yet; for now route to the same
+  // sync trigger which the worker treats as a re-study request for DB
+  // sources. When the dedicated POST /sources/{id}/study endpoint lands
+  // this handler swaps to it without changing the verb-cell contract.
+  function handleStudy(id: string) {
+    syncMutation.mutate(id, {
+      onSuccess: () => toast.success('Schema study queued'),
+      onError: (err) =>
+        toast.error(getErrorMessage(err) || 'Failed to queue schema study'),
+    })
+  }
+
+  // "Retry" on the failure branches of the verb cell. Identical to a
+  // Sync trigger today — the worker re-runs the pipeline and clears the
+  // failure on success. View-error opens the popover the verb cell
+  // already manages locally; we don't need a handler for it at this level.
+  function handleRetry(id: string) {
+    syncMutation.mutate(id, {
+      onSuccess: () => toast.success('Retry started'),
+      onError: (err) => toast.error(getErrorMessage(err) || 'Retry failed'),
     })
   }
 
@@ -370,31 +411,34 @@ export function SourcesTable() {
               <SourceRowCard
                 key={source.id}
                 source={source}
-                isSyncing={syncMutation.isPending && syncMutation.variables === source.id}
-                onSync={handleSyncOne}
                 onDelete={setDeletingId}
+                onApprove={handleApprove}
+                onSync={handleSyncOne}
+                onStudy={handleStudy}
+                onRetry={handleRetry}
               />
             ))}
           </div>
 
-          {/* Desktop table */}
-          <div className="hidden overflow-hidden rounded-md border sm:block">
-            <Table>
-              <TableHeader className="sticky top-0 z-10 bg-card/95 backdrop-blur supports-[backdrop-filter]:bg-card/75">
+          {/* Desktop table. Kept compact so it fits the page on a laptop with
+              the sidebar expanded — modest min-widths, `overflow-x-auto` only
+              as a safety net for very narrow viewports. */}
+          <div className="hidden overflow-x-auto rounded-md border sm:block">
+            <Table className="w-full">
+              <TableHeader className="bg-card/95 backdrop-blur supports-[backdrop-filter]:bg-card/75">
                 <TableRow>
-                  <TableHead className="min-w-[220px]">Name</TableHead>
+                  <TableHead className="min-w-[200px]">Name</TableHead>
                   <TableHead>Type</TableHead>
-                  <TableHead>Status</TableHead>
                   <TableHead>Mode</TableHead>
-                  <TableHead className="text-right">Documents</TableHead>
-                  <TableHead>Last synced</TableHead>
+                  <TableHead>Next step</TableHead>
+                  <TableHead className="min-w-[200px]">Ingestion</TableHead>
+                  <TableHead className="whitespace-nowrap">Last synced</TableHead>
                   <TableHead className="text-right">Actions</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {filtered.map((source) => {
                   const meta = getSourceTypeMeta(source.source_type)
-                  const documents = source.latest_job?.documents_indexed
                   const isRowSyncing =
                     syncMutation.isPending && syncMutation.variables === source.id
 
@@ -408,16 +452,34 @@ export function SourcesTable() {
                           >
                             <meta.icon className="h-3.5 w-3.5" />
                           </span>
-                          <div className="min-w-0">
-                            <Link
-                              href={`/admin/sources/${source.id}`}
-                              className="block truncate font-medium hover:underline"
-                            >
-                              {source.name}
-                            </Link>
-                            <p className="truncate text-xs text-muted-foreground">
-                              {source.description?.trim() ? source.description : meta.label}
-                            </p>
+                          {/* Title clamp: in `table-layout: auto`, a nowrap
+                              link inside a <td> sets the cell's min content
+                              width to the unwrapped string. The wrapper's
+                              max-w + the link's max-w + truncate keep the
+                              Name column from pushing the other columns
+                              off-screen on a long source name. The full
+                              name surfaces via `title=` and on the detail
+                              page; the description lives only on the detail
+                              page now (it was unbounded here and ate the
+                              whole row — see FX14). */}
+                          <div className="min-w-0 max-w-[260px]">
+                            {source.name_status === 'pending_ai' ? (
+                              <Link
+                                href={`/admin/sources/${source.id}`}
+                                className="block hover:underline"
+                                aria-label={`Naming in progress for source ${source.id}`}
+                              >
+                                <PendingNamePill />
+                              </Link>
+                            ) : (
+                              <Link
+                                href={`/admin/sources/${source.id}`}
+                                className="block truncate font-medium hover:underline"
+                                title={source.name}
+                              >
+                                {source.name}
+                              </Link>
+                            )}
                           </div>
                         </div>
                       </TableCell>
@@ -425,13 +487,23 @@ export function SourcesTable() {
                         <TypePill type={source.source_type} />
                       </TableCell>
                       <TableCell>
-                        <StatusDot status={source.status} />
-                      </TableCell>
-                      <TableCell>
                         <SourceModeBadge mode={source.source_mode} />
                       </TableCell>
-                      <TableCell className="text-right tabular-nums">
-                        {typeof documents === 'number' ? documents.toLocaleString() : '—'}
+                      <TableCell>
+                        <SourceActionCell
+                          source={source}
+                          onApprove={handleApprove}
+                          onSync={handleSyncOne}
+                          onStudy={handleStudy}
+                          onRetry={handleRetry}
+                        />
+                      </TableCell>
+                      <TableCell>
+                        {getTypeGroup(source.source_type) === 'database' ? (
+                          <DatabaseStudyStrip source={source} />
+                        ) : (
+                          <IngestionStrip source={source} />
+                        )}
                       </TableCell>
                       <TableCell className="text-sm text-muted-foreground">
                         {formatRelative(source.last_synced_at)}

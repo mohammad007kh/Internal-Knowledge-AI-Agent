@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { ScrollArea } from '@/components/ui/scroll-area'
+import { sourcesKeys } from '@/features/sources/hooks/useSources'
 import { apiClient } from '@/lib/api-client'
 import { cn } from '@/lib/utils'
 import { useQuery } from '@tanstack/react-query'
@@ -13,7 +14,7 @@ import { useCallback, useState } from 'react'
 export interface SourceSummary {
   id: string
   name: string
-  type: string
+  source_type: string
   document_count: number
 }
 
@@ -29,7 +30,9 @@ interface SourceSelectorProps {
 }
 
 async function fetchSources(): Promise<SourceResponse> {
-  const res = await apiClient.get('/api/v1/sources?limit=100&status=ready')
+  // available_only=true restricts to admin-approved (is_active=true) sources.
+  // Soft-deleted rows are filtered out server-side regardless.
+  const res = await apiClient.get('/api/v1/sources?limit=100&available_only=true')
   return res.data
 }
 
@@ -89,7 +92,7 @@ function SourceListItem({ source, isSelected, toggle }: SourceListItemProps) {
       <div className="min-w-0 flex-1">
         <p className="truncate text-sm">{source.name}</p>
         <p className="text-xs text-muted-foreground">
-          {source.type} · {source.document_count} docs
+          {source.source_type} · {source.document_count} docs
         </p>
       </div>
     </div>
@@ -101,8 +104,13 @@ export function SourceSelector({ selectedIds, onChange, disabled }: SourceSelect
   const [open, setOpen] = useState(false)
   const [search, setSearch] = useState('')
 
+  // Key sits under sourcesKeys.list() so admin-side approval mutations
+  // (useUpdateSource invalidates ['sources', 'list']) bust this cache too.
+  // Previously the picker used a flat ['sources-list'] key — a different
+  // namespace — so newly approved sources didn't appear here until the
+  // 60s staleTime expired or the page was reloaded.
   const { data } = useQuery({
-    queryKey: ['sources-list'],
+    queryKey: [...sourcesKeys.list(), { availableOnly: true }] as const,
     queryFn: fetchSources,
     staleTime: 60_000,
     enabled: open,
@@ -129,8 +137,12 @@ export function SourceSelector({ selectedIds, onChange, disabled }: SourceSelect
       <PopoverTrigger asChild>
         <Button
           variant="outline"
-          size="sm"
-          className="h-7 gap-1.5 rounded-full text-xs"
+          // size="default" (h-10) aligns the trigger with the chat input row
+          // (textarea + send button are both 40px). Avoid size="sm" + h-10
+          // override — `sm` still emits its own `h-9` which Tailwind Merge
+          // discards, making the size prop misleading (FX15).
+          size="default"
+          className="gap-1.5 rounded-full px-3 text-xs"
           disabled={disabled}
           aria-label={
             selectedCount > 0

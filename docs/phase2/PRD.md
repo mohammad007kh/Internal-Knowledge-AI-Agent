@@ -19,7 +19,7 @@ Each section includes:
 - **Acceptance criteria** — how to verify it is done correctly
 
 The tech stack is fixed:
-- **Backend:** Python 3.14, FastAPI, SQLAlchemy (async), PostgreSQL + pgvector, Celery + Redis, MinIO
+- **Backend:** Python 3.12, FastAPI, SQLAlchemy (async), PostgreSQL + pgvector, Celery + Redis, MinIO
 - **Frontend:** Next.js 15 (App Router), React, TypeScript, Tailwind CSS v4, shadcn/ui, TanStack Query v5, Axios
 - **AI:** LangGraph, LangChain, OpenAI (default), Langfuse tracing
 - **DI:** `dependency-injector` library — all services wired via `Container` in `backend/src/core/container.py`

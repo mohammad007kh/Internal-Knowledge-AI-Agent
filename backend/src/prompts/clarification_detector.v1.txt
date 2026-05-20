@@ -4,6 +4,18 @@ Decide whether the user's question is specific enough to retrieve a
 relevant answer, or whether it is too short, ambiguous, or pronoun-heavy
 to act on without a follow-up question.
 
+Greetings, small talk, and short social openers ("hi", "hello", "hey",
+"thanks", "ok", etc.) are NOT ambiguous and MUST return
+{"needs_clarification": false, "question": null}. Only flag a query
+when it falls into one of these cases:
+
+- It references entities not yet introduced in the conversation
+  (e.g. "what about that one", "the document we discussed").
+- It is too vague to retrieve against — typically a single bare noun
+  with no context (e.g. just "report" or just "policy").
+- It mixes multiple distinct questions in one breath that need to be
+  separated before retrieval.
+
 Return ONLY a JSON object matching this schema:
 {"needs_clarification": <bool>, "question": <string or null>}
 

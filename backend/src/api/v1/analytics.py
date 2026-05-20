@@ -1,11 +1,20 @@
 """Analytics and detailed health-check router.
 
 Endpoints:
-  GET /admin/analytics/metrics      — aggregated platform metrics
-  GET /admin/analytics/activity     — recent system health events
-  GET /admin/analytics/queries      — daily query counts
-  GET /admin/analytics/top-sources  — top sources by usage
+  GET /admin/analytics/metrics      — aggregated platform metrics (legacy)
+  GET /admin/analytics/activity     — recent system health events (legacy)
+  GET /admin/analytics/queries      — daily query counts (legacy)
+  GET /admin/analytics/top-sources  — top sources by usage (legacy)
   GET /health/detail                — detailed service health checks
+
+  --- /admin/analytics redesign (v2) -----------------------------------
+  GET /analytics/overview           — six KPI scalars in one round-trip
+  GET /analytics/chat-volume        — daily user-message counts
+  GET /analytics/feedback-trend     — daily answered / up / down
+  GET /analytics/sync-activity      — daily sync success/failed + docs/chunks
+  GET /analytics/source-health      — by type / connection / status
+  GET /analytics/schema-studies     — by schema_status + recent failures
+  GET /analytics/needs-attention    — ≤8 sources that need triage
 """
 
 from __future__ import annotations
@@ -13,7 +22,7 @@ from __future__ import annotations
 import asyncio
 import time
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from typing import Annotated, Any
 
 import sqlalchemy as sa
 from fastapi import APIRouter, Depends, Query
@@ -27,10 +36,53 @@ from src.models.document import Document
 from src.models.source import Source
 from src.models.system_health_event import SystemHealthEvent
 from src.models.user import User, UserRole
+from src.repositories.analytics_repository import AnalyticsRepository, resolve_range
+from src.schemas.analytics import (
+    AnalyticsOverview,
+    ChatMessagesKpi,
+    ChatVolumePoint,
+    CountByKey,
+    FeedbackKpi,
+    FeedbackTrendPoint,
+    NeedsAttentionItem,
+    RecentSchemaFailure,
+    SchemaStudiesBreakdown,
+    SchemaStudiesKpi,
+    SourceHealthBreakdown,
+    SourcesKpi,
+    StatusCount,
+    SyncActivityPoint,
+    SyncKpi,
+    TypeCount,
+)
 
 router = APIRouter()
 
 AdminOnly = require_role(UserRole.admin)
+
+# range query param — shared across the v2 time-series + delta endpoints.
+RangeParam = Annotated[
+    str,
+    Query(pattern="^(24h|7d|30d|90d)$", description="Aggregation window."),
+]
+
+
+def _pct(numerator: int, denominator: int) -> float | None:
+    """Round((num - prev) / prev * 100) — null when denominator is zero."""
+    if denominator == 0:
+        return None
+    return round((numerator - denominator) / denominator * 100.0, 1)
+
+
+def _rate(numerator: int, denominator: int) -> float | None:
+    """numerator / denominator as a 0..1 fraction; null when denominator is 0."""
+    if denominator == 0:
+        return None
+    return round(numerator / denominator, 4)
+
+
+def _analytics_repo(db: AsyncSession = Depends(get_db)) -> AnalyticsRepository:
+    return AnalyticsRepository(db)
 
 # ---------------------------------------------------------------------------
 # Severity mapping helper
@@ -81,9 +133,12 @@ async def get_metrics(
     except Exception:  # noqa: BLE001
         active_users_7d = 0
 
-    # active_sources
+    # active_sources — non-deleted sources currently in the system. The
+    # historical filter was ``is_active = TRUE`` (which previously meant
+    # "not deleted"); after the is_active repurpose ("approved/available")
+    # the equivalent "exists" filter is ``deleted_at IS NULL``.
     active_sources_result = await db.execute(
-        sa.select(sa.func.count()).select_from(Source).where(Source.is_active.is_(True))
+        sa.select(sa.func.count()).select_from(Source).where(Source.deleted_at.is_(None))
     )
     active_sources: int = active_sources_result.scalar_one()
 
@@ -205,6 +260,154 @@ async def get_top_sources(
         }
         for row in rows
     ]
+
+
+# ---------------------------------------------------------------------------
+# 4b. /admin/analytics redesign (v2) — aggregation endpoints
+# ---------------------------------------------------------------------------
+
+
+@router.get(
+    "/analytics/overview",
+    summary="Analytics overview — six KPI scalars",
+    response_model=AnalyticsOverview,
+)
+async def analytics_overview(
+    range: RangeParam = "7d",
+    _: User = Depends(AdminOnly),
+    repo: AnalyticsRepository = Depends(_analytics_repo),
+) -> AnalyticsOverview:
+    """Bundle the six dashboard KPIs into a single round-trip."""
+    window = resolve_range(range)
+
+    chat = await repo.chat_messages_kpi(window)
+    fb = await repo.feedback_kpi(window)
+    src = await repo.sources_kpi()
+    syn = await repo.sync_kpi(window)
+    studies = await repo.schema_studies_kpi(window)
+    privileged = await repo.privileged_actions_today()
+
+    return AnalyticsOverview(
+        range=range,
+        chat_messages=ChatMessagesKpi(
+            count=chat["count"],
+            previous_count=chat["previous_count"],
+            delta_pct=_pct(chat["count"], chat["previous_count"]),
+        ),
+        feedback=FeedbackKpi(
+            up=fb["up"],
+            down=fb["down"],
+            rated=fb["rated"],
+            answered=fb["answered"],
+            up_rate=_rate(fb["up"], fb["rated"]),
+        ),
+        sources=SourcesKpi(
+            active=src["active"],
+            failed_connections=src["failed_connections"],
+            by_connection_status=[StatusCount(**s) for s in src["by_connection_status"]],
+        ),
+        sync=SyncKpi(
+            total=syn["total"],
+            success=syn["success"],
+            failed=syn["failed"],
+            success_rate=_rate(syn["success"], syn["total"]),
+        ),
+        schema_studies=SchemaStudiesKpi(
+            ready=studies["ready"],
+            failed=studies["failed"],
+            stale=studies["stale"],
+            by_state=[CountByKey(**b) for b in studies["by_state"]],
+        ),
+        privileged_actions_today=privileged,
+    )
+
+
+@router.get(
+    "/analytics/chat-volume",
+    summary="Daily user-message counts (gap-filled)",
+    response_model=list[ChatVolumePoint],
+)
+async def analytics_chat_volume(
+    range: RangeParam = "30d",
+    _: User = Depends(AdminOnly),
+    repo: AnalyticsRepository = Depends(_analytics_repo),
+) -> list[ChatVolumePoint]:
+    rows = await repo.chat_volume_daily(resolve_range(range))
+    return [ChatVolumePoint(**r) for r in rows]
+
+
+@router.get(
+    "/analytics/feedback-trend",
+    summary="Daily answered / thumbs-up / thumbs-down (gap-filled)",
+    response_model=list[FeedbackTrendPoint],
+)
+async def analytics_feedback_trend(
+    range: RangeParam = "30d",
+    _: User = Depends(AdminOnly),
+    repo: AnalyticsRepository = Depends(_analytics_repo),
+) -> list[FeedbackTrendPoint]:
+    rows = await repo.feedback_trend_daily(resolve_range(range))
+    return [FeedbackTrendPoint(**r) for r in rows]
+
+
+@router.get(
+    "/analytics/sync-activity",
+    summary="Daily sync success/failed + documents/chunks (gap-filled)",
+    response_model=list[SyncActivityPoint],
+)
+async def analytics_sync_activity(
+    range: RangeParam = "30d",
+    _: User = Depends(AdminOnly),
+    repo: AnalyticsRepository = Depends(_analytics_repo),
+) -> list[SyncActivityPoint]:
+    rows = await repo.sync_activity_daily(resolve_range(range))
+    return [SyncActivityPoint(**r) for r in rows]
+
+
+@router.get(
+    "/analytics/source-health",
+    summary="Source counts by type / connection-status / status",
+    response_model=SourceHealthBreakdown,
+)
+async def analytics_source_health(
+    _: User = Depends(AdminOnly),
+    repo: AnalyticsRepository = Depends(_analytics_repo),
+) -> SourceHealthBreakdown:
+    data = await repo.source_health()
+    return SourceHealthBreakdown(
+        by_type=[TypeCount(**t) for t in data["by_type"]],
+        by_connection_status=[StatusCount(**s) for s in data["by_connection_status"]],
+        by_status=[StatusCount(**s) for s in data["by_status"]],
+    )
+
+
+@router.get(
+    "/analytics/schema-studies",
+    summary="schema_status breakdown + recent failed studies",
+    response_model=SchemaStudiesBreakdown,
+)
+async def analytics_schema_studies(
+    _: User = Depends(AdminOnly),
+    repo: AnalyticsRepository = Depends(_analytics_repo),
+) -> SchemaStudiesBreakdown:
+    data = await repo.schema_studies_breakdown()
+    return SchemaStudiesBreakdown(
+        by_schema_status=[StatusCount(**s) for s in data["by_schema_status"]],
+        recent_failures=[RecentSchemaFailure(**r) for r in data["recent_failures"]],
+    )
+
+
+@router.get(
+    "/analytics/needs-attention",
+    summary="Sources that need triage (failed connection / sync / study)",
+    response_model=list[NeedsAttentionItem],
+)
+async def analytics_needs_attention(
+    _: User = Depends(AdminOnly),
+    repo: AnalyticsRepository = Depends(_analytics_repo),
+) -> list[NeedsAttentionItem]:
+    rows = await repo.needs_attention(limit=8)
+    return [NeedsAttentionItem(**r) for r in rows]
 
 
 # ---------------------------------------------------------------------------

@@ -76,3 +76,11 @@ test('shows placeholder when no sessionId', () => {
   render(<MessageThread sessionId={null} />, { wrapper })
   expect(screen.getByText(/select or create a session/i)).toBeInTheDocument()
 })
+
+test('shows pulsing dots when isPending and !isStreaming and !streamingToken', async () => {
+  render(<MessageThread sessionId="s1" isPending />, { wrapper })
+  // Wait for the initial messages query to settle so the thread renders, then
+  // assert the thinking-dots placeholder bubble is in the document.
+  expect(await screen.findByTestId('thinking-dots')).toBeInTheDocument()
+  expect(screen.getByLabelText(/assistant is thinking/i)).toBeInTheDocument()
+})

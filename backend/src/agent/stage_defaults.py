@@ -48,4 +48,7 @@ STAGE_DEFAULTS: dict[str, StageDefaults] = {
     # Safety guards — fully deterministic, very short verdicts.
     "input_guard": StageDefaults(temperature=0.0, max_tokens=256),
     "output_guard": StageDefaults(temperature=0.0, max_tokens=256),
+    # Auto-titler — short sidebar-style titles for new chat sessions.
+    # Mildly creative but bounded; ~30 tokens covers a 3–7 word title.
+    "titler": StageDefaults(temperature=0.3, max_tokens=30, custom_prompt=None),
 }

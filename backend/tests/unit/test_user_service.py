@@ -34,6 +34,7 @@ list_users
 
 from __future__ import annotations
 
+import hashlib
 import uuid
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
@@ -241,14 +242,19 @@ class TestAcceptInvitation:
     @pytest.mark.asyncio
     async def test_happy_path_creates_user(self, service, mocks) -> None:
         _, inv_repo, pw_svc, _, _ = mocks
-        invitation = _make_invitation(token="valid-tok")
+        raw_token = "valid-tok"
+        token_hash = hashlib.sha256(raw_token.encode()).hexdigest()
+        invitation = _make_invitation(token=token_hash)
         inv_repo.get_by_token.return_value = invitation
 
-        await service.accept_invitation("valid-tok", "Bob", VALID_PASSWORD)
+        # The caller passes the raw token; the service hashes it before
+        # touching the repository (the row stores sha256(raw)).
+        await service.accept_invitation(raw_token, "Bob", VALID_PASSWORD)
 
         pw_svc.validate_password_policy.assert_called_once_with(VALID_PASSWORD)
         pw_svc.hash_password.assert_called_once_with(VALID_PASSWORD)
-        inv_repo.mark_accepted.assert_awaited_once_with("valid-tok")
+        inv_repo.get_by_token.assert_awaited_once_with(token_hash)
+        inv_repo.mark_accepted.assert_awaited_once_with(token_hash)
 
     @pytest.mark.asyncio
     async def test_unknown_token_raises_not_found(self, service, mocks) -> None:

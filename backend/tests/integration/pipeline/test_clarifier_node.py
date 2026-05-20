@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import uuid
-from unittest.mock import patch
 
 from langchain_core.messages import HumanMessage
 
@@ -29,24 +28,18 @@ def _make_state(
     }
 
 
-async def test_handle_clarification_calls_interrupt_with_question() -> None:
-    """interrupt() is invoked with the clarification question from state."""
+async def test_handle_clarification_returns_question_as_final_answer() -> None:
+    """The clarification question is returned as the terminal answer."""
     q = "What specifically would you like to know?"
     state = _make_state(requires_clarification=True, question=q)
-    with patch("src.agent.nodes.clarify.interrupt") as mock_interrupt:
-        mock_interrupt.return_value = "I want to know about parental leave."
-        result = await handle_clarification(state)
-    mock_interrupt.assert_called_once_with(q)
-    assert result["query"] == "I want to know about parental leave."
-    assert result["requires_clarification"] is False
-    assert result["clarification_question"] is None
+    result = await handle_clarification(state)
+    assert result == {"final_answer": q, "sources": []}
 
 
 async def test_handle_clarification_uses_default_when_no_question() -> None:
     """Falls back to a non-empty generic question when clarification_question is None."""
     state = _make_state(requires_clarification=True, question=None)
-    with patch("src.agent.nodes.clarify.interrupt") as mock_interrupt:
-        mock_interrupt.return_value = "More context here."
-        await handle_clarification(state)
-    called_with: str = mock_interrupt.call_args[0][0]
-    assert len(called_with) > 0
+    result = await handle_clarification(state)
+    assert isinstance(result["final_answer"], str)
+    assert len(result["final_answer"]) > 0
+    assert result["sources"] == []

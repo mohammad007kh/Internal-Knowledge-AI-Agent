@@ -1,10 +1,17 @@
 'use client'
 
 import { ThemeToggle } from '@/components/theme-toggle'
-import { Sheet, SheetContent, SheetTitle, SheetTrigger } from '@/components/ui/sheet'
+import {
+  Sheet,
+  SheetClose,
+  SheetContent,
+  SheetDescription,
+  SheetTitle,
+  SheetTrigger,
+} from '@/components/ui/sheet'
 import { TooltipProvider } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
-import { MenuIcon } from 'lucide-react'
+import { MenuIcon, XIcon } from 'lucide-react'
 import Link from 'next/link'
 import type { ReactNode } from 'react'
 import { useSidebar } from './SidebarProvider'
@@ -69,7 +76,7 @@ export function Sidebar({ brand, brandSuffix, nav, footer, ariaLabel = 'Primary'
       <aside
         aria-label={ariaLabel}
         className={cn(
-          'hidden flex-col border-r border-border bg-card transition-[width] duration-200 ease-out md:flex',
+          'hidden flex-col border-r border-border bg-card transition-[width] duration-200 ease-out md:flex md:sticky md:top-0 md:h-screen',
           collapsed ? 'w-14' : 'w-60'
         )}
       >
@@ -112,7 +119,7 @@ export function MobileHeader({
 
   return (
     <TooltipProvider delayDuration={0}>
-      <header className="flex h-14 items-center border-b border-border bg-card px-4 md:hidden">
+      <header className="sticky top-0 z-30 flex h-14 items-center border-b border-border bg-card px-4 md:hidden">
         <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
           <SheetTrigger asChild>
             <button
@@ -123,8 +130,20 @@ export function MobileHeader({
               <MenuIcon className="h-5 w-5" />
             </button>
           </SheetTrigger>
-          <SheetContent side="left" className="w-72 max-w-[80vw] bg-card p-0">
+          <SheetContent
+            side="left"
+            className="w-72 max-w-[80vw] border border-border bg-card p-0 shadow-lg"
+          >
             <SheetTitle className="sr-only">{brand} navigation</SheetTitle>
+            <SheetDescription className="sr-only">
+              Primary navigation links for {brand}.
+            </SheetDescription>
+            <SheetClose
+              aria-label="Close navigation"
+              className="absolute right-3 top-3 z-10 inline-flex h-9 w-9 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              <XIcon className="h-5 w-5" aria-hidden />
+            </SheetClose>
             <div className="flex h-full flex-col">
               <div className="flex h-14 items-center border-b border-border px-4">
                 <span className="font-semibold text-card-foreground">{brand}</span>

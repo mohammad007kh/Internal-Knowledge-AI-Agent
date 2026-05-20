@@ -1,6 +1,7 @@
 from fastapi import APIRouter
 
 from src.api.v1.admin.ai_models import router as admin_ai_models_router
+from src.api.v1.admin.audit_log import router as admin_audit_log_router
 from src.api.v1.admin.embedders import router as admin_embedders_router
 from src.api.v1.admin.guardrails import router as admin_guardrails_router
 from src.api.v1.admin.llm_settings import router as admin_llm_settings_router
@@ -60,4 +61,9 @@ api_v1_router.include_router(
     admin_providers_router,
     prefix="/admin/providers",
     tags=["admin", "providers"],
+)
+api_v1_router.include_router(
+    admin_audit_log_router,
+    prefix="/admin/audit-log",
+    tags=["admin", "audit-log"],
 )

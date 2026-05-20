@@ -32,20 +32,25 @@ interface ProviderSelectProps {
 /**
  * For embedders, hide providers that explicitly do not offer a native
  * embedder (e.g. Anthropic). They can still be reached via openai-compatible.
+ *
+ * Both `llm_models` and `embedder_models` are normalised to `[]` defensively
+ * so a partially-populated payload from an older backend cannot crash the
+ * picker (see /admin/embedders regression).
  */
 function filterProviders(
-  providers: readonly ProviderSpec[],
+  providers: readonly ProviderSpec[] | undefined,
   kind: ProviderKind
 ): readonly ProviderSpec[] {
+  const list = providers ?? []
   if (kind === 'embedder') {
-    return providers.filter((p) => !p.embedder_unsupported && p.embedder_models.length > 0)
+    return list.filter((p) => !p.embedder_unsupported && (p.embedder_models ?? []).length > 0)
   }
-  return providers.filter((p) => p.llm_models.length > 0 || p.key === 'openai-compatible')
+  return list.filter((p) => (p.llm_models ?? []).length > 0 || p.key === 'openai-compatible')
 }
 
 export function ProviderSelect({ value, kind, disabled, onChange, id }: ProviderSelectProps) {
   const { data, isLoading } = useProviders()
-  const providers = data ? filterProviders(data.providers, kind) : []
+  const providers = filterProviders(data?.providers, kind)
 
   function handleChange(nextKey: string) {
     const provider = providers.find((p) => p.key === nextKey)
@@ -62,6 +67,9 @@ export function ProviderSelect({ value, kind, disabled, onChange, id }: Provider
         <SelectValue placeholder={isLoading ? 'Loading providers…' : 'Select a provider'} />
       </SelectTrigger>
       <SelectContent>
+        {providers.length === 0 && !isLoading ? (
+          <div className="px-2 py-1.5 text-xs text-muted-foreground">No providers available.</div>
+        ) : null}
         {providers.map((provider) => (
           <SelectItem key={provider.key} value={provider.key}>
             <div className="flex flex-col">

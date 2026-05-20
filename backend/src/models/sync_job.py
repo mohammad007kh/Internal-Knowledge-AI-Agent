@@ -46,7 +46,12 @@ class SyncJob(UUIDMixin, TimestampMixin, Base):
         index=True,
     )
     status: Mapped[SyncStatus] = mapped_column(
-        sa.Enum(SyncStatus, name="syncstatus", create_type=False),
+        sa.Enum(
+            SyncStatus,
+            name="syncstatus",
+            create_type=False,
+            values_callable=lambda enum_cls: [m.value for m in enum_cls],
+        ),
         nullable=False,
         default=SyncStatus.PENDING,
         server_default="pending",
@@ -57,6 +62,13 @@ class SyncJob(UUIDMixin, TimestampMixin, Base):
         nullable=True,
     )
     finished_at: Mapped[sa.DateTime | None] = mapped_column(
+        sa.TIMESTAMP(timezone=True),
+        nullable=True,
+    )
+    # U16 — stamped when a cooperative cancellation lands. Distinct from
+    # ``finished_at`` because the task did not complete its work; a separate
+    # column avoids overloading the success/failure timestamp.
+    cancelled_at: Mapped[sa.DateTime | None] = mapped_column(
         sa.TIMESTAMP(timezone=True),
         nullable=True,
     )
