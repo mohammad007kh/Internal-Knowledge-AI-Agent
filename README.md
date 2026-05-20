@@ -112,6 +112,11 @@ Start the stack:
 docker compose up -d
 ```
 
+> **Hot-reload (optional, for development):** `docker compose up` runs clean
+> built images by default. To bind-mount your local source for hot-reload, copy
+> the dev override first: `cp docker-compose.override.yml.example docker-compose.override.yml`
+> (the active override is gitignored).
+
 The backend runs `alembic upgrade head` automatically on startup. When all health checks pass:
 
 | Service        | URL                          |

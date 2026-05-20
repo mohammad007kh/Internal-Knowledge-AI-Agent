@@ -21,19 +21,27 @@ jobs:
         env:
           E2E_USER_EMAIL: ${{ secrets.E2E_USER_EMAIL }}
           E2E_USER_PASSWORD: ${{ secrets.E2E_USER_PASSWORD }}
+      # pnpm/action-setup MUST run before setup-node so the pnpm cache resolves.
+      # The pnpm version is read from frontend/package.json's "packageManager"
+      # field — no root package.json exists, so package_json_file is required.
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: frontend/package.json
       - uses: actions/setup-node@v4
         with:
           node-version: 20
+          cache: "pnpm"
+          cache-dependency-path: frontend/pnpm-lock.yaml
       - name: Install dependencies
-        run: cd frontend && npm ci
+        run: cd frontend && pnpm install --frozen-lockfile
       - name: Install Playwright browsers
-        run: cd frontend && npx playwright install --with-deps chromium
+        run: cd frontend && pnpm exec playwright install --with-deps chromium
       - name: Run E2E tests
         env:
           PLAYWRIGHT_BASE_URL: http://localhost:3000
           E2E_USER_EMAIL: ${{ secrets.E2E_USER_EMAIL }}
           E2E_USER_PASSWORD: ${{ secrets.E2E_USER_PASSWORD }}
-        run: cd frontend && npx playwright test
+        run: cd frontend && pnpm exec playwright test
       - name: Upload test results
         if: failure()
         uses: actions/upload-artifact@v4

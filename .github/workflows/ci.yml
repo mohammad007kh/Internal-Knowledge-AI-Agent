@@ -112,23 +112,31 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # pnpm/action-setup MUST run before setup-node so setup-node can find
+      # pnpm to resolve the dependency cache. The pnpm version is read from
+      # frontend/package.json's "packageManager" field — there is no root
+      # package.json, so package_json_file must point at the frontend one.
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: frontend/package.json
+
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
-          cache: "npm"
-          cache-dependency-path: frontend/package-lock.json
+          cache: "pnpm"
+          cache-dependency-path: frontend/pnpm-lock.yaml
 
       - name: Install dependencies
-        run: npm ci
+        run: pnpm install --frozen-lockfile
 
       - name: Lint (Biome)
-        run: npm run lint
+        run: pnpm lint
 
       - name: Type-check (tsc)
-        run: npx tsc --noEmit
+        run: pnpm exec tsc --noEmit
 
       - name: Unit tests (Vitest)
-        run: npm run test -- --coverage --reporter=verbose
+        run: pnpm test:unit -- --coverage --reporter=verbose
 
   # ──────────────────────────────────────────────────────────────────────────
   # Docker Compose: smoke test all 9 services start cleanly
