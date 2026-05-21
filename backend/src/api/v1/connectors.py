@@ -12,7 +12,9 @@ import uuid
 
 from fastapi import APIRouter, Depends, Query, status
 from fastapi.responses import Response
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.core.database import get_db
 from src.core.deps import require_role
 from src.models.user import User, UserRole
 from src.schemas.connector import (
@@ -33,11 +35,24 @@ AdminOnly = require_role(UserRole.admin)
 # ---------------------------------------------------------------------------
 
 
-def _get_connector_service() -> ConnectorService:
-    """Resolve :class:`ConnectorService` from the DI container."""
-    from src.core.container import Container  # noqa: PLC0415
+def _get_connector_service(
+    db: AsyncSession = Depends(get_db),
+) -> ConnectorService:
+    """Construct :class:`ConnectorService` bound to the request-scoped DB session.
 
-    return Container.connector_service()
+    The legacy ``Container.connector_service()`` resolver built the repo
+    against a *separate* :class:`AsyncSession` the route never committed, so
+    create / update / delete (and the ``last_tested_at`` write in
+    test-connection) flushed to a doomed session and were silently rolled back
+    at GC — same bug class as FX20. Binding the repo to ``Depends(get_db)``
+    lets the route's ``await db.commit()`` persist the change.
+    """
+    from src.core.config import settings  # noqa: PLC0415
+    from src.repositories.connector_repository import (  # noqa: PLC0415
+        ConnectorRepository,
+    )
+
+    return ConnectorService(repo=ConnectorRepository(db), settings=settings)
 
 
 # ---------------------------------------------------------------------------
@@ -77,9 +92,11 @@ async def create_connector(
     payload: ConnectorCreate,
     admin: User = Depends(AdminOnly),
     service: ConnectorService = Depends(_get_connector_service),
+    db: AsyncSession = Depends(get_db),
 ) -> ConnectorResponse:
     """Create a new connector owned by the authenticated admin."""
     connector = await service.create_connector(payload, owner_id=admin.id)
+    await db.commit()
     return ConnectorResponse.model_validate(connector)
 
 
@@ -108,9 +125,11 @@ async def update_connector(
     payload: ConnectorUpdate,
     admin: User = Depends(AdminOnly),
     service: ConnectorService = Depends(_get_connector_service),
+    db: AsyncSession = Depends(get_db),
 ) -> ConnectorResponse:
     """Update name, is_active, or config of a connector. Admin-only."""
     updated = await service.update_connector(connector_id, payload, owner_id=admin.id)
+    await db.commit()
     return ConnectorResponse.model_validate(updated)
 
 
@@ -123,9 +142,11 @@ async def delete_connector(
     connector_id: uuid.UUID,
     admin: User = Depends(AdminOnly),
     service: ConnectorService = Depends(_get_connector_service),
+    db: AsyncSession = Depends(get_db),
 ) -> Response:
     """Hard-delete a connector. Admin-only."""
     await service.delete_connector(connector_id, owner_id=admin.id)
+    await db.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
@@ -137,9 +158,13 @@ async def test_connector(
     connector_id: uuid.UUID,
     admin: User = Depends(AdminOnly),
     service: ConnectorService = Depends(_get_connector_service),
+    db: AsyncSession = Depends(get_db),
 ) -> dict:
     """Attempt a live connection using the stored (decrypted) config.
 
     Always returns ``{"success": bool, "message": str}``.
     """
-    return await service.test_connection(connector_id, owner_id=admin.id)
+    result = await service.test_connection(connector_id, owner_id=admin.id)
+    # test_connection writes last_tested_at — persist it.
+    await db.commit()
+    return result

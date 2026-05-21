@@ -13,7 +13,9 @@ import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.core.database import get_db
 from src.core.deps import require_role
 from src.core.exceptions import ConflictError, NotFoundError
 from src.models.user import User, UserRole
@@ -42,11 +44,31 @@ class PermissionListResponse(BaseModel):
 AdminOnly = require_role(UserRole.admin)
 
 
-def _get_permission_service() -> SourcePermissionService:
-    """Resolve :class:`SourcePermissionService` from the DI container."""
-    from src.core.container import Container  # noqa: PLC0415
+def _get_permission_service(
+    db: AsyncSession = Depends(get_db),
+) -> SourcePermissionService:
+    """Construct :class:`SourcePermissionService` bound to the request-scoped
+    DB session.
 
-    return Container.source_permission_service()
+    The legacy ``Container.source_permission_service()`` resolver built each
+    repo against a *separate* :class:`AsyncSession` (``providers.Factory`` over
+    ``AsyncSessionLocal``) that the route never committed, so ``grant`` /
+    ``revoke`` writes flushed to a doomed session and were silently rolled
+    back at GC — same bug class as FX20. Binding every repo to the request's
+    ``Depends(get_db)`` session lets the route's ``await db.commit()`` persist
+    the change.
+    """
+    from src.repositories.source_permission_repository import (  # noqa: PLC0415
+        SourcePermissionRepository,
+    )
+    from src.repositories.source_repository import SourceRepository  # noqa: PLC0415
+    from src.repositories.user_repository import UserRepository  # noqa: PLC0415
+
+    return SourcePermissionService(
+        source_permission_repo=SourcePermissionRepository(db),
+        source_repo=SourceRepository(db),
+        user_repo=UserRepository(db),
+    )
 
 
 # ------------------------------------------------------------------
@@ -64,6 +86,7 @@ async def grant_permission(
     body: GrantPermissionRequest,
     _admin: User = Depends(AdminOnly),
     svc: SourcePermissionService = Depends(_get_permission_service),
+    db: AsyncSession = Depends(get_db),
 ) -> None:
     """Grant *body.user_id* access to *source_id*."""
     try:
@@ -78,6 +101,7 @@ async def grant_permission(
             status_code=status.HTTP_409_CONFLICT,
             detail=str(exc),
         ) from exc
+    await db.commit()
 
 
 @router.delete(
@@ -90,6 +114,7 @@ async def revoke_permission(
     user_id: uuid.UUID,
     _admin: User = Depends(AdminOnly),
     svc: SourcePermissionService = Depends(_get_permission_service),
+    db: AsyncSession = Depends(get_db),
 ) -> None:
     """Revoke *user_id*'s access to *source_id*."""
     try:
@@ -99,6 +124,7 @@ async def revoke_permission(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=str(exc),
         ) from exc
+    await db.commit()
 
 
 @router.get(

@@ -47,11 +47,27 @@ _PAGE_SIZE_MAX = 200
 AdminOnly = require_role(UserRole.admin)
 
 
-def _get_permission_service() -> SourcePermissionService:
-    """Resolve :class:`SourcePermissionService` from the DI container."""
-    from src.core.container import Container  # noqa: PLC0415
+def _get_permission_service(
+    db: AsyncSession = Depends(get_db),
+) -> SourcePermissionService:
+    """Construct :class:`SourcePermissionService` bound to the request-scoped
+    DB session (read-only use here — ``list_my_sources``).
 
-    return Container.source_permission_service()
+    Mirrors the request-bound resolver in source_permissions.py; the legacy
+    ``Container.source_permission_service()`` built repos on a separate,
+    leaked :class:`AsyncSession`.
+    """
+    from src.repositories.source_permission_repository import (  # noqa: PLC0415
+        SourcePermissionRepository,
+    )
+    from src.repositories.source_repository import SourceRepository  # noqa: PLC0415
+    from src.repositories.user_repository import UserRepository  # noqa: PLC0415
+
+    return SourcePermissionService(
+        source_permission_repo=SourcePermissionRepository(db),
+        source_repo=SourceRepository(db),
+        user_repo=UserRepository(db),
+    )
 
 
 def _get_user_service(
