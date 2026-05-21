@@ -22,6 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.core.exceptions import NotFoundError
 from src.models.chunk import Chunk
 from src.models.document import Document
+from src.models.enums import SourceStatus
 from src.models.source import Source
 from src.models.sync_job import SyncJob
 from src.repositories.base_repository import BaseRepository
@@ -377,7 +378,7 @@ class SourceRepository(BaseRepository[Source]):
         stmt = (
             update(Source)
             .where(Source.id == source_id)
-            .values(status="ready", last_synced_at=last_synced_at)
+            .values(status=SourceStatus.READY, last_synced_at=last_synced_at)
         )
         await self._session.execute(stmt)
 

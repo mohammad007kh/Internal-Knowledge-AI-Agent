@@ -44,6 +44,7 @@ from typing import Any
 from src.connectors.factory import ConnectorFactory
 from src.core.config import settings
 from src.core.database import AsyncSessionLocal
+from src.models.enums import SourceStatus
 from src.repositories.schema_study_repository import SchemaStudyRepository
 from src.repositories.source_repository import SourceRepository
 from src.services.db_introspection.fingerprint import compute_fingerprint
@@ -261,7 +262,7 @@ async def _run(source_id: uuid.UUID) -> dict[str, Any]:
             await source_repo_success.set_schema_status(
                 source_id, "completed"
             )
-            await source_repo_success.set_status(source_id, "ready")
+            await source_repo_success.set_status(source_id, SourceStatus.READY)
             await success_session.commit()
 
         logger.info(

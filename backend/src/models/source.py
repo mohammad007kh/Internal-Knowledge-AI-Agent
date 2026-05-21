@@ -20,7 +20,7 @@ from sqlalchemy.dialects.postgresql import BYTEA, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from src.models.base import Base, SoftDeleteMixin, TimestampMixin, UUIDMixin
-from src.models.enums import SourceType
+from src.models.enums import ConnectionStatus, SourceStatus, SourceType
 
 if TYPE_CHECKING:
     from src.models.chunk import Chunk
@@ -93,7 +93,9 @@ class Source(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
     sync_mode: Mapped[str] = mapped_column(String, nullable=False, default="manual")
     sync_schedule: Mapped[str | None] = mapped_column(String, nullable=True)
     last_synced_at: Mapped[datetime | None] = mapped_column(nullable=True)
-    status: Mapped[str] = mapped_column(String, nullable=False, default="pending")
+    status: Mapped[str] = mapped_column(
+        String, nullable=False, default=SourceStatus.PENDING
+    )
     citations_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     # Internal MinIO object key — NEVER exposed in API responses
     file_storage_path: Mapped[str | None] = mapped_column(String, nullable=True)
@@ -156,7 +158,12 @@ class Source(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
         nullable=True,
         default=None,
         index=True,
-        doc="One of QUEUED, STUDYING, READY, STALE, FAILED — null pre-Phase-1 sources.",
+        doc=(
+            "Mirrors the latest study's lifecycle for the UI/list filters. "
+            "Emitted lowercase: studying | completed | failed — null for "
+            "pre-Phase-1 sources. (Distinct from SchemaStudy.state, which "
+            "uses the uppercase QUEUED/STUDYING/READY/STALE/FAILED vocabulary.)"
+        ),
     )
     drift_signal_count: Mapped[int] = mapped_column(
         Integer,
@@ -181,7 +188,7 @@ class Source(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
     connection_status: Mapped[str] = mapped_column(
         String(16),
         nullable=False,
-        default="unknown",
+        default=ConnectionStatus.UNKNOWN,
         server_default="unknown",
         index=True,
         doc=(

@@ -25,7 +25,7 @@ from pydantic import ValidationError
 from src.connectors.factory import ConnectorFactory
 from src.core.config import Settings
 from src.core.exceptions import ConflictError, NotFoundError
-from src.models.enums import SourceType
+from src.models.enums import ConnectionStatus, SourceStatus, SourceType
 from src.models.source import Source
 from src.repositories.source_repository import SourceRepository
 from src.schemas.source import (
@@ -204,7 +204,7 @@ class SourceService:
             config_encrypted=config_encrypted,
             file_storage_path=first_object_key,
             owner_id=owner_id,
-            status="pending",
+            status=SourceStatus.PENDING,
             name_status=name_status,
             description_status=description_status,
             auto_name_and_description=payload.auto_name_and_description,
@@ -548,7 +548,7 @@ class SourceService:
         updated = await self._repo.update(
             source_id,
             config_encrypted=new_encrypted,
-            connection_status="unknown",
+            connection_status=ConnectionStatus.UNKNOWN,
             connection_last_checked_at=_datetime.now(UTC),
             connection_last_error=None,
         )
@@ -708,7 +708,7 @@ class SourceService:
         try:
             await self._repo.update_connection_health(
                 source_id,
-                status="healthy" if success else "failed",
+                status=ConnectionStatus.HEALTHY if success else ConnectionStatus.FAILED,
                 error=None if success else truncated,
                 checked_at=datetime.now(UTC),
             )
