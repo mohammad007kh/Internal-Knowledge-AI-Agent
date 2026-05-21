@@ -145,18 +145,20 @@ async def _load_latest_study(
 def _build_chunk_dict(source: Source, text: str) -> dict[str, Any]:
     """Package the rendered text in the same shape `retrieve_context` emits.
 
-    The ``score`` field is set to 0.0 (perfect match) so the
-    ``render_system_prompt`` low-confidence detector doesn't gate the
-    grounded-answer branch on it.  ``chunk_id`` is namespaced with a
-    ``schema:`` prefix so persist / citation code can recognise the
-    synthetic origin if it ever wants to render a different citation
-    label.
+    Schema context is a *pinned* grounding channel, not a vector hit: it must
+    always be present for a studied DB source regardless of similarity. So we
+    deliberately omit the ``score`` key rather than fake a perfect-match
+    distance (the old ``score=0.0`` hack). ``render_system_prompt``'s
+    low-confidence detector uses ``chunk.get("score")`` and skips chunks whose
+    score is non-numeric, so a missing key cleanly excludes pinned schema
+    context from the mean-distance confidence signal. ``chunk_id`` is
+    namespaced with a ``schema:`` prefix so persist / citation code can
+    recognise the synthetic origin.
     """
     return {
         "chunk_id": f"schema:{source.id}",
         "source_id": str(source.id),
         "text": text,
-        "score": 0.0,
         "document_title": f"{source.name} — schema overview",
         "page_number": None,
         "source_name": source.name,
