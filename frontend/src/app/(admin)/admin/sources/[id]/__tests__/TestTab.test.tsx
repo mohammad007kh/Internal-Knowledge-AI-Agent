@@ -246,7 +246,7 @@ describe('TestTab — source-state warnings', () => {
         source_type: 'postgresql',
         source_mode: 'live',
         retrieval_mode: 'text_to_query',
-        schema_status: 'FAILED',
+        schema_status: 'failed',
       })
     )
     renderPage()

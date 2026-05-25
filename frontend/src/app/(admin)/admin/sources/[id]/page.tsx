@@ -903,6 +903,10 @@ export default function SourceDetailPage() {
               onClick={() => {
                 const jobId = stopSyncTargetJobId(source)
                 if (!jobId) {
+                  // The job finished (or was cancelled) between opening
+                  // this dialog and confirming. Acknowledge instead of
+                  // closing the modal silently (FX41).
+                  toast.info('Sync already finished — nothing to stop.')
                   setConfirmStopSync(false)
                   return
                 }

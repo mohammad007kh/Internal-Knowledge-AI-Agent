@@ -279,7 +279,7 @@ describe('SchemaViewer — FX18 four-state UX', () => {
       // The component should NOT fetch while schema_status is STUDYING.
       return Promise.resolve(makeResponse())
     })
-    renderViewer('src-1', makeSource({ schema_status: 'STUDYING' }))
+    renderViewer('src-1', makeSource({ schema_status: 'studying' }))
 
     const studying = screen.getByTestId('schema-studying-state')
     expect(studying).toHaveTextContent(
@@ -294,8 +294,8 @@ describe('SchemaViewer — FX18 four-state UX', () => {
     expect(fetchSpy).not.toHaveBeenCalled()
   })
 
-  it('QUEUED — also renders the studying spinner', () => {
-    renderViewer('src-1', makeSource({ schema_status: 'QUEUED' }))
+  it('queued (study_state=QUEUED) — also renders the studying spinner', () => {
+    renderViewer('src-1', makeSource({ schema_status: null, study_state: 'QUEUED' }))
     expect(screen.getByTestId('schema-studying-state')).toBeInTheDocument()
   })
 
@@ -303,7 +303,7 @@ describe('SchemaViewer — FX18 four-state UX', () => {
     renderViewer(
       'src-1',
       makeSource({
-        schema_status: 'FAILED',
+        schema_status: 'failed',
         last_error_phase: 'CONNECT',
         last_error_message: 'Could not reach host on port 5432.',
       }),
@@ -328,7 +328,7 @@ describe('SchemaViewer — FX18 four-state UX', () => {
       'src-7',
       makeSource({
         id: 'src-7',
-        schema_status: 'FAILED',
+        schema_status: 'failed',
         last_error_phase: 'INVENTORY',
         last_error_message: 'Permission denied to schema.',
       }),
@@ -344,7 +344,7 @@ describe('SchemaViewer — FX18 four-state UX', () => {
     getSchemaDocumentMock.mockResolvedValue(
       makeResponse(makeDoc({ tables: [] })),
     )
-    renderViewer('src-1', makeSource({ schema_status: 'READY' }))
+    renderViewer('src-1', makeSource({ schema_status: 'completed' }))
 
     const emptyDb = await screen.findByTestId(
       'schema-empty-database-state',
@@ -372,7 +372,7 @@ describe('SchemaViewer — FX18 four-state UX', () => {
       message: 'Request failed with status code 500',
     }
     getSchemaDocumentMock.mockRejectedValue(apiError)
-    renderViewer('src-1', makeSource({ schema_status: 'READY' }))
+    renderViewer('src-1', makeSource({ schema_status: 'completed' }))
 
     const failed = await screen.findByTestId('schema-failed-state')
     expect(

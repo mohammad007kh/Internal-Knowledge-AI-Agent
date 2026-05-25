@@ -147,12 +147,12 @@ describe('SourceActionCell — DB source verbs', () => {
     expect(onApprove).toHaveBeenCalledWith('src-db')
   })
 
-  it('renders "Queued for study" when schema_status is QUEUED', () => {
+  it('renders "Queued for study" when study_state is QUEUED (FX41)', () => {
     render(
       <SourceActionCell
         source={dbSource({
           is_active: true,
-          schema_status: 'QUEUED' as SchemaStatus,
+          schema_status: null,
           study_state: 'QUEUED' as StudyState,
         })}
       />
@@ -165,7 +165,7 @@ describe('SourceActionCell — DB source verbs', () => {
       <SourceActionCell
         source={dbSource({
           is_active: true,
-          schema_status: 'STUDYING' as SchemaStatus,
+          schema_status: 'studying',
           study_state: 'INVENTORY' as StudyState,
         })}
       />
@@ -178,7 +178,7 @@ describe('SourceActionCell — DB source verbs', () => {
       <SourceActionCell
         source={dbSource({
           is_active: true,
-          schema_status: 'STUDYING' as SchemaStatus,
+          schema_status: 'studying',
           study_state: 'SAMPLING' as StudyState,
         })}
       />
@@ -191,7 +191,7 @@ describe('SourceActionCell — DB source verbs', () => {
       <SourceActionCell
         source={dbSource({
           is_active: true,
-          schema_status: 'STUDYING' as SchemaStatus,
+          schema_status: 'studying',
           study_state: 'DESCRIBING' as StudyState,
         })}
       />
@@ -205,7 +205,7 @@ describe('SourceActionCell — DB source verbs', () => {
       <SourceActionCell
         source={dbSource({
           is_active: false,
-          schema_status: 'READY' as SchemaStatus,
+          schema_status: 'completed',
           study_state: 'READY' as StudyState,
           tables_documented: 12,
         })}
@@ -224,7 +224,7 @@ describe('SourceActionCell — DB source verbs', () => {
       <SourceActionCell
         source={dbSource({
           is_active: true,
-          schema_status: 'READY' as SchemaStatus,
+          schema_status: 'completed',
           study_state: 'READY' as StudyState,
           tables_documented: 12,
         })}
@@ -242,7 +242,7 @@ describe('SourceActionCell — DB source verbs', () => {
       <SourceActionCell
         source={dbSource({
           is_active: true,
-          schema_status: 'READY' as SchemaStatus,
+          schema_status: 'completed',
           study_state: 'READY_PARTIAL' as StudyState,
           tables_documented: 30,
           tables_partial: 4,
@@ -254,14 +254,15 @@ describe('SourceActionCell — DB source verbs', () => {
     expect(screen.getByText(/4 partial/)).toBeInTheDocument()
   })
 
-  it('renders "Re-study" CTA on STALE', () => {
+  it('renders "Re-study" CTA when drift_signal_count > 0 (FX41)', () => {
     render(
       <SourceActionCell
         source={dbSource({
           is_active: true,
-          schema_status: 'STALE' as SchemaStatus,
+          schema_status: 'completed',
           study_state: 'READY' as StudyState,
           tables_documented: 22,
+          drift_signal_count: 1,
         })}
       />
     )
@@ -275,7 +276,7 @@ describe('SourceActionCell — DB source verbs', () => {
       <SourceActionCell
         source={dbSource({
           is_active: false,
-          schema_status: 'FAILED' as SchemaStatus,
+          schema_status: 'failed',
           study_state: 'CONNECT_FAILED' as StudyState,
           last_error_phase: 'CONNECT',
           last_error_message: 'Timed out',
@@ -324,7 +325,7 @@ describe('SourceActionCell — DB source verbs', () => {
         source={dbSource({
           source_type: 'database',
           is_active: true,
-          schema_status: 'STUDYING' as SchemaStatus,
+          schema_status: 'studying',
           study_state: 'INVENTORY' as StudyState,
         })}
       />

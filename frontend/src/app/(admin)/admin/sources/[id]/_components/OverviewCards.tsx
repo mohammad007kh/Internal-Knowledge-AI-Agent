@@ -85,7 +85,8 @@ export function OverviewCallouts({ source, isDbSource, onRetrySync }: OverviewCa
   const latestJob = source.latest_job
   const jobFailed = latestJob?.status === 'failed'
   const studyPartial = source.study_state === 'READY_PARTIAL'
-  const schemaStale = isDbSource && source.schema_status === 'STALE'
+  // FX41 — drift lives on `drift_signal_count`, not schema_status.
+  const schemaStale = isDbSource && (source.drift_signal_count ?? 0) > 0
   if (!jobFailed && !studyPartial && !schemaStale) return null
 
   return (
@@ -347,11 +348,9 @@ export interface DatabaseOverviewProps {
 }
 
 const SCHEMA_STATUS_LABELS: Record<SchemaStatus, string> = {
-  READY: 'Documented',
-  STUDYING: 'Studying…',
-  STALE: 'May be stale',
-  FAILED: 'Study failed',
-  QUEUED: 'Queued',
+  studying: 'Studying…',
+  completed: 'Documented',
+  failed: 'Study failed',
 }
 
 function schemaStatusLabel(status: SchemaStatus | null | undefined): string {
@@ -524,7 +523,7 @@ function SchemaStatCard({
 }) {
   const status = source.schema_status
   const label = schemaStatusLabel(status)
-  const studying = status === 'STUDYING'
+  const studying = status === 'studying'
   const tablesLine =
     source.tables_documented !== null && source.tables_documented !== undefined
       ? `${source.tables_documented} table${source.tables_documented === 1 ? '' : 's'}${
@@ -689,7 +688,7 @@ function AgentTeaserBody({
   onViewSchema,
   onRestudySchema,
 }: AgentTeaserBodyProps) {
-  if (status === 'READY') {
+  if (status === 'completed') {
     const n =
       tablesDocumented !== null && tablesDocumented !== undefined ? tablesDocumented : 'several'
     return (
@@ -712,7 +711,7 @@ function AgentTeaserBody({
       </div>
     )
   }
-  if (status === 'FAILED') {
+  if (status === 'failed') {
     const phaseClause = lastErrorPhase ? ` at phase ${lastErrorPhase}` : ''
     const errorClause = lastErrorMessage ? `: ${lastErrorMessage}` : ''
     return (
@@ -725,17 +724,10 @@ function AgentTeaserBody({
       </div>
     )
   }
-  if (status === 'STALE') {
-    return (
-      <div className="space-y-2">
-        <p className="text-muted-foreground">
-          Drift detected — re-study to refresh the agent&apos;s view.
-        </p>
-        <RestudyButton onRestudySchema={onRestudySchema} />
-      </div>
-    )
-  }
-  // null / QUEUED / STUDYING
+  // FX41 — schema_status never emits 'stale'; drift surfaces in the header
+  // callout (driven by drift_signal_count). The fallback below handles the
+  // remaining null / studying states.
+  // null / studying
   return (
     <div className="space-y-2">
       <p className="text-muted-foreground">

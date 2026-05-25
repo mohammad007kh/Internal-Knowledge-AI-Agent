@@ -99,16 +99,19 @@ export interface SchemaViewerProps {
  */
 export function SchemaViewer({ sourceId, source }: SchemaViewerProps) {
   const schemaStatus = source?.schema_status ?? null
-  // STUDYING / QUEUED are short-circuited *before* the React Query result so
+  const studyState = source?.study_state ?? null
+  // Studying / queued are short-circuited *before* the React Query result so
   // the spinner appears immediately even on a cold cache. The parent page's
   // `useSource(..., { pollWhileRunning: 'auto' })` already polls every 3s
   // while these states are active, so the tab auto-flips when ready.
-  const isStudying = schemaStatus === 'STUDYING' || schemaStatus === 'QUEUED'
-  // FAILED is also short-circuited: we render the error UI from the source
+  // FX41 — schema_status is lowercase on the wire; the 'queued before any
+  // work' state lives on study_state (uppercase QUEUED).
+  const isStudying = schemaStatus === 'studying' || studyState === 'QUEUED'
+  // Failed is also short-circuited: we render the error UI from the source
   // detail's `last_error_*` fields and never hit the schema-document endpoint
   // (it would return either a stale doc from a previous successful run or a
   // 404 — neither is helpful here).
-  const isKnownFailed = schemaStatus === 'FAILED'
+  const isKnownFailed = schemaStatus === 'failed'
 
   // Don't fire the schema-document fetch while the studying agent is still
   // running or the last run failed — both branches render without needing

@@ -54,6 +54,7 @@ import {
   type UploadedFileRef,
   useCreateSource,
 } from '@/hooks/use-create-source'
+import { isDatabaseSource } from '@/app/(admin)/admin/sources/[id]/_components/sourceTypeMatrix'
 import { useUploadFile } from '@/hooks/use-upload-url'
 import { extractApiErrorMessage } from '@/lib/api-error'
 import {
@@ -348,7 +349,7 @@ export default function NewSourcePage() {
   const dbType = form.watch('db_type') ?? 'postgresql'
   const autoNaming = form.watch('auto_name_and_description')
   const isFileType = FILE_SOURCE_TYPES.has(sourceType)
-  const isDatabaseType = sourceType === 'database'
+  const isDatabaseType = isDatabaseSource(sourceType)
   const isMongo = isDatabaseType && dbType === 'mongodb'
   const isSqlDb = isDatabaseType && SQL_DB_TYPES.has(dbType)
 

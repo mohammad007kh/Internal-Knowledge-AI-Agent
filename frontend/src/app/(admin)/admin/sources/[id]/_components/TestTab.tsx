@@ -109,7 +109,7 @@ function TestTabBody({ source }: TestTabBodyProps) {
   const bottomRef = useRef<HTMLDivElement>(null)
 
   const schemaFailed =
-    sourceKindOf(source.source_type) === 'database' && source.schema_status === 'FAILED'
+    sourceKindOf(source.source_type) === 'database' && source.schema_status === 'failed'
   const inputDisabled = stream.isStreaming || schemaFailed
 
   // When the assistant turn finishes, fold the streamed text into the
@@ -453,7 +453,7 @@ function SourceStateWarnings({ source }: SourceStateWarningsProps) {
 
   if (
     sourceKindOf(source.source_type) === 'database' &&
-    source.schema_status === 'FAILED'
+    source.schema_status === 'failed'
   ) {
     warnings.push({
       tone: 'red',

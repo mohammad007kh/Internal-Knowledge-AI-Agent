@@ -64,7 +64,13 @@ export type NameStatus = 'user_set' | 'pending_ai' | 'ai_set'
 // the API has not yet populated them.
 // ---------------------------------------------------------------------------
 
-export type SchemaStatus = 'QUEUED' | 'STUDYING' | 'READY' | 'STALE' | 'FAILED'
+// `schema_status` mirrors the LATEST study's lifecycle for the UI/list
+// filters. The backend (see backend/src/tasks/study_source.py) emits
+// lowercase: 'studying' transiently, then terminal 'completed' or 'failed'
+// — null on sources that were never studied. The 'queued before any work'
+// concept is NOT in this column; it lives on `study_state` (see StudyState
+// below). The 'stale / drift' concept lives on `drift_signal_count`.
+export type SchemaStatus = 'studying' | 'completed' | 'failed'
 
 /**
  * Phase the studying agent is in. The backend names match the LangGraph

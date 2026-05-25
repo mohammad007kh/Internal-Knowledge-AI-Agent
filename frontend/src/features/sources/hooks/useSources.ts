@@ -110,7 +110,9 @@ export function shouldPollSourceLifecycle(
   if (jobStatus === 'pending' || jobStatus === 'running') return true
   if (source.name_status === 'pending_ai') return true
   if (source.description_status === 'pending_ai') return true
-  if (source.schema_status === 'QUEUED' || source.schema_status === 'STUDYING') {
+  // FX41 — schema_status is lowercase on the wire; 'queued' lives on
+  // study_state (uppercase), not on schema_status.
+  if (source.schema_status === 'studying' || source.study_state === 'QUEUED') {
     return true
   }
   return false

@@ -15,12 +15,14 @@ import type {
 } from '@/lib/api/sources'
 import { describe, expect, it } from 'vitest'
 import {
+  NAMING_STUCK_THRESHOLD_MS,
   PHASE_ORDER,
   type Phase,
   type SourceKind,
   availabilityBlockers,
   derivePhase,
   isInFlightPhase,
+  isNamingStuck,
   isPollingPhase,
   lifecycleGatesFor,
   phaseHint,
@@ -90,7 +92,7 @@ describe('derivePhase', () => {
     it('returns failed when schema_status is FAILED', () => {
       const s = makeSource({
         source_type: 'database',
-        schema_status: 'FAILED' as SchemaStatus,
+        schema_status: 'failed',
         latest_job: makeJob({ status: 'success' }),
       })
       expect(derivePhase(s)).toBe('failed')
@@ -109,15 +111,16 @@ describe('derivePhase', () => {
     it('STUDYING → analyzing', () => {
       const s = makeSource({
         source_type: 'database',
-        schema_status: 'STUDYING' as SchemaStatus,
+        schema_status: 'studying',
       })
       expect(derivePhase(s)).toBe('analyzing')
     })
 
-    it('QUEUED → analyzing', () => {
+    it('study_state=QUEUED → analyzing (FX41: queued lives on study_state)', () => {
       const s = makeSource({
         source_type: 'database',
-        schema_status: 'QUEUED' as SchemaStatus,
+        schema_status: null,
+        study_state: 'QUEUED',
       })
       expect(derivePhase(s)).toBe('analyzing')
     })
@@ -125,7 +128,7 @@ describe('derivePhase', () => {
     it('READY schema with success job → ready', () => {
       const s = makeSource({
         source_type: 'database',
-        schema_status: 'READY' as SchemaStatus,
+        schema_status: 'completed',
         latest_job: makeJob({ status: 'success' }),
         chunk_count: 5,
       })
@@ -139,7 +142,7 @@ describe('derivePhase', () => {
     it('schema_status="completed" + no sync_job + DB source → ready (FX32)', () => {
       const s = makeSource({
         source_type: 'database',
-        schema_status: 'completed' as unknown as SchemaStatus,
+        schema_status: 'completed',
         latest_job: null,
         chunk_count: 0,
         last_synced_at: null,
@@ -154,7 +157,7 @@ describe('derivePhase', () => {
       // the in-flight state, not the stale "ready" from the prior study.
       const s = makeSource({
         source_type: 'database',
-        schema_status: 'completed' as unknown as SchemaStatus,
+        schema_status: 'completed',
         latest_job: makeJob({ status: 'pending' }),
       })
       expect(derivePhase(s)).not.toBe('ready')
@@ -163,7 +166,7 @@ describe('derivePhase', () => {
     it('schema_status="completed" still defers to running job (FX32 guard)', () => {
       const s = makeSource({
         source_type: 'database',
-        schema_status: 'completed' as unknown as SchemaStatus,
+        schema_status: 'completed',
         latest_job: makeJob({ status: 'running' }),
       })
       expect(derivePhase(s)).not.toBe('ready')
@@ -175,7 +178,7 @@ describe('derivePhase', () => {
       // column), but if it somehow did, the rule must not fire.
       const s = makeSource({
         source_type: 'web_url',
-        schema_status: 'completed' as unknown as SchemaStatus,
+        schema_status: 'completed',
         latest_job: null,
         chunk_count: 0,
       })
@@ -305,6 +308,38 @@ describe('derivePhase', () => {
       })
       expect(derivePhase(s)).toBe('ready')
     })
+  })
+})
+
+describe('isNamingStuck (FX41)', () => {
+  // 2026-05-09T00:00:00Z baseline, six minutes later than the default
+  // makeSource created_at — past the 5-minute NAMING_STUCK_THRESHOLD_MS.
+  const SIX_MIN_LATER = Date.parse('2026-05-09T00:06:00Z')
+  const ONE_MIN_LATER = Date.parse('2026-05-09T00:01:00Z')
+
+  it('returns true when the naming phase has sat past the threshold', () => {
+    const s = makeSource({ name_status: 'pending_ai' })
+    expect(derivePhase(s)).toBe('naming')
+    expect(isNamingStuck(s, SIX_MIN_LATER)).toBe(true)
+  })
+
+  it('returns false when the naming phase is still within the threshold', () => {
+    const s = makeSource({ name_status: 'pending_ai' })
+    expect(isNamingStuck(s, ONE_MIN_LATER)).toBe(false)
+  })
+
+  it('returns false for any non-naming phase', () => {
+    const ready = makeSource({
+      latest_job: makeJob({ status: 'success', chunks_created: 1 }),
+      chunk_count: 1,
+      last_synced_at: '2026-05-09T00:00:00Z',
+    })
+    expect(derivePhase(ready)).not.toBe('naming')
+    expect(isNamingStuck(ready, SIX_MIN_LATER)).toBe(false)
+  })
+
+  it('exposes the threshold constant for downstream UI use', () => {
+    expect(NAMING_STUCK_THRESHOLD_MS).toBe(5 * 60 * 1000)
   })
 })
 
@@ -688,7 +723,7 @@ describe('useLifecycle — FX29b threads kind through to gate copy', () => {
     const { useLifecycle } = await import('../lifecycle')
     const s = makeDetail({
       source_type: 'database',
-      schema_status: 'STUDYING' as SchemaStatus,
+      schema_status: 'studying',
     })
     const result = useLifecycle(s)
     expect(result.phase).toBe('analyzing')
@@ -783,14 +818,16 @@ describe('shouldPollSourceLifecycle', () => {
     const { shouldPollSourceLifecycle } = await import(
       '@/features/sources/hooks/useSources'
     )
+    // FX41 — schema_status only emits lowercase studying/completed/failed;
+    // the 'queued before any work' state lives on study_state (uppercase).
     expect(
       shouldPollSourceLifecycle(
-        makeSource({ schema_status: 'QUEUED' as SchemaStatus })
+        makeSource({ schema_status: null, study_state: 'QUEUED' })
       )
     ).toBe(true)
     expect(
       shouldPollSourceLifecycle(
-        makeSource({ schema_status: 'STUDYING' as SchemaStatus })
+        makeSource({ schema_status: 'studying' })
       )
     ).toBe(true)
   })
