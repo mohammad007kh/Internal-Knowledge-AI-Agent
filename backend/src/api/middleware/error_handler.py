@@ -19,10 +19,24 @@ _PROBLEM_CONTENT_TYPE = "application/problem+json"
 
 
 def _sanitize_validation_errors(errors: Sequence[Any]) -> list[Any]:
-    """Convert non-JSON-serializable Exception objects in Pydantic v2 ctx to strings."""
+    """Sanitize Pydantic v2 validation errors for the wire.
+
+    Two guarantees:
+
+    * Non-JSON-serializable ``Exception`` objects in ``ctx`` (Pydantic v2
+      attaches the raised ``ValueError`` there) are stringified so the body
+      serialises.
+    * The raw ``input`` value is DROPPED. Pydantic echoes the offending
+      user-submitted value under ``input``; reflecting it verbatim is a
+      security hazard — it can carry instruction-like prompt-injection text
+      (Source Intent API, T-023) or other sensitive payloads. ``loc`` already
+      names the field and ``msg`` carries a clean, field-named message, so the
+      caller still knows exactly what was rejected without the echo.
+    """
     sanitized = []
     for err in errors:
         e = dict(err)
+        e.pop("input", None)
         if "ctx" in e and isinstance(e["ctx"], dict):
             e["ctx"] = {
                 k: str(v) if isinstance(v, Exception) else v
@@ -164,7 +178,17 @@ def register_exception_handlers(app: FastAPI) -> None:
     async def validation_error_handler(
         request: Request, exc: RequestValidationError
     ) -> JSONResponse:
-        logger.warning("Validation error on [%s]: %s", request.url.path, exc.errors())
+        # Log the SANITIZED errors, not exc.errors(): the raw errors still
+        # carry the user-submitted ``input`` value, which can be an
+        # instruction-like prompt-injection payload (Source Intent API,
+        # T-023). The wire body already strips it via
+        # _sanitize_validation_errors; the log must do the same so the payload
+        # never lands in server logs either.
+        logger.warning(
+            "Validation error on [%s]: %s",
+            request.url.path,
+            _sanitize_validation_errors(exc.errors()),
+        )
         return _problem_response(
             type_="validation_error",
             title="Validation Error",
