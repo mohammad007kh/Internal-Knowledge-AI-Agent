@@ -23,6 +23,7 @@ TASK_MODULES: list[str] = [
     "src.tasks.trigger_all_syncs",
     "src.tasks.auto_name_source",
     "src.tasks.study_source",
+    "src.tasks.propose_intent",
 ]
 
 celery_app: Celery = Celery(
