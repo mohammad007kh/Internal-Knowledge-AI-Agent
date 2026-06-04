@@ -37,6 +37,7 @@ from typing import TYPE_CHECKING, Any
 import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import create_async_engine
 
+from src.agent.nodes._intent_render import render_intent_block
 from src.agent.state import AgentState
 from src.core.crypto import decrypt
 from src.models.enums import SourceType
@@ -341,6 +342,30 @@ _MAX_TABLES_FOR_SKETCH = 30
 the LLM stops paying attention; truncation is documented in the prompt."""
 
 
+def _description_fallback(source: Any) -> str:
+    """Render the schema-sketch fallback when no usable SchemaDocument exists.
+
+    The source's *purpose* takes precedence over the bare ``description``
+    (T-024 / FR-004): a delimiter-wrapped, treat-as-data intent block leads,
+    followed by the freeform description as supplementary context. Falls back
+    to the bare description when no intent is authored, and to an empty string
+    when neither is present.
+    """
+    intent_block = render_intent_block(
+        purpose=getattr(source, "purpose", None),
+        example_questions=getattr(source, "example_questions", None),
+        out_of_scope=getattr(source, "out_of_scope", None),
+        intent_status=getattr(source, "intent_status", None),
+    )
+    description = (getattr(source, "description", None) or "").strip()
+
+    if not intent_block:
+        return description
+    if not description:
+        return intent_block
+    return f"{intent_block}\n\n{description}"
+
+
 async def _load_schema_sketch(
     db: "AsyncSession",  # noqa: F821 — forward ref under TYPE_CHECKING
     source: Any,
@@ -348,9 +373,10 @@ async def _load_schema_sketch(
     """Render the latest persisted SchemaDocument as a compact text block
     suitable for the text-to-SQL prompt.
 
-    Falls back to ``source.description`` when no SchemaStudy exists yet
-    (e.g., source created before Wave 1 shipped, or studying agent hasn't
-    finished its first run).
+    Falls back to the source's intent (purpose-first, delimiter-wrapped) and
+    then its bare ``description`` when no SchemaStudy exists yet (e.g., source
+    created before Wave 1 shipped, or the studying agent hasn't finished its
+    first run). See :func:`_description_fallback`.
 
     The shape we emit is deliberately deterministic so prompt tokens stay
     stable — one line per table with type/PK/columns and a trailing
@@ -370,18 +396,18 @@ async def _load_schema_sketch(
     )
     study = (await db.execute(stmt)).scalar_one_or_none()
     if study is None or study.schema_document_json is None:
-        return source.description or ""
+        return _description_fallback(source)
 
     try:
         doc = SchemaDocument.model_validate(study.schema_document_json)
     except Exception:  # noqa: BLE001 — bad JSON shape is recoverable
         logger.warning(
             "text_to_query: schema_document_json failed strict validation — "
-            "falling back to source.description",
+            "falling back to source intent / description",
             extra={"source_id": str(source.id)},
             exc_info=True,
         )
-        return source.description or ""
+        return _description_fallback(source)
 
     return _render_schema_sketch(doc)
 

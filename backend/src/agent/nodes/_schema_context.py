@@ -27,6 +27,7 @@ from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import select
 
+from src.agent.nodes._intent_render import render_intent_block
 from src.models.enums import SourceType
 from src.models.schema_study import SchemaStudy
 from src.models.source import Source
@@ -80,8 +81,26 @@ def _render_chunk_text(source: Source, doc: SchemaDocument) -> str:
     The format is deliberately deterministic so prompt tokens stay stable
     across runs; the LLM should treat this as the authoritative schema
     description for the source.
+
+    Source *intent* (purpose / example questions / out-of-scope) renders
+    ABOVE the schema block — inside the same pinned chunk — so the answer
+    synthesizer always sees the source's purpose even when the table list is
+    truncated past ``_MAX_TABLES`` (FR-004). Intent is delimiter-wrapped and
+    flagged as data, never instructions (security rule 1).
     """
     lines: list[str] = []
+
+    # -- Intent block FIRST (survives _MAX_TABLES truncation, FR-004) --------
+    intent_block = render_intent_block(
+        purpose=getattr(source, "purpose", None),
+        example_questions=getattr(source, "example_questions", None),
+        out_of_scope=getattr(source, "out_of_scope", None),
+        intent_status=getattr(source, "intent_status", None),
+    )
+    if intent_block:
+        lines.append(intent_block)
+        lines.append("")  # blank line separates intent from the schema render
+
     lines.append(
         f"Database source: {source.name} (dialect: {doc.dialect})"
     )
