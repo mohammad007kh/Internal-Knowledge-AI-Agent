@@ -1,4 +1,4 @@
-"""Per-stage LLM tuning defaults for the 10 admin pipeline slots.
+"""Per-stage LLM tuning defaults for the 13 admin pipeline slots.
 
 Source-of-truth for the seeded ``LLMConfiguration`` rows written by
 :func:`src.services.startup_seed.ensure_default_stage_configs` on app
@@ -51,4 +51,10 @@ STAGE_DEFAULTS: dict[str, StageDefaults] = {
     # Auto-titler — short sidebar-style titles for new chat sessions.
     # Mildly creative but bounded; ~30 tokens covers a 3–7 word title.
     "titler": StageDefaults(temperature=0.3, max_tokens=30, custom_prompt=None),
+    # Planner — decomposes a question into dependent steps. Runs cold/structured
+    # like source_router/retrieval; short structured plan output.
+    "planner": StageDefaults(temperature=0.0, max_tokens=1024),
+    # Retrieval grader — light-everywhere + heavy-for-DB verification verdicts.
+    # Deterministic, short structured output (mirrors source_router/retrieval).
+    "retrieval_grader": StageDefaults(temperature=0.0, max_tokens=1024),
 }

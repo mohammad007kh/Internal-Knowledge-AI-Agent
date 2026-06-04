@@ -11,8 +11,8 @@
 | Metric      | Value |
 | ----------- | ----- |
 | Total Tasks | 41    |
-| Completed   | 0     |
-| Verified    | 0     |
+| Completed   | 4     |
+| Verified    | 4     |
 | Coverage    | 100% (26/26 FRs mapped; FR-025 is a scope constraint — see traceability) |
 
 **Current Phase**: Implementation (pending `/atomicspec.implement`)
@@ -31,10 +31,10 @@
 
 | ID | Story | Description | Status | Verification |
 | --- | --- | --- | --- | --- |
-| [T-001](./tasks/T-001-config-flags-and-caps.md) | US6 | Config flags + hard-cap settings | 🔴 Todo | `pytest tests/unit/core` |
-| [T-010](./tasks/T-010-migration-source-intent.md) | US1 | Migration 0036 — source intent columns | 🔴 Todo | `alembic upgrade head` |
-| [T-011](./tasks/T-011-migration-message-activity.md) | US5 | Migration 0037 — activity_summary JSONB | 🔴 Todo | `alembic upgrade head` |
-| [T-012](./tasks/T-012-stage-slots-planner-grader.md) | US2/3 | planner + retrieval_grader LLM slots | 🔴 Todo | `pytest startup_seed tests` |
+| [T-001](./tasks/T-001-config-flags-and-caps.md) | US6 | Config flags + hard-cap settings | ✅ Done | `pytest tests/unit/core` |
+| [T-010](./tasks/T-010-migration-source-intent.md) | US1 | Migration 0036 — source intent columns | ✅ Done | `alembic upgrade head` |
+| [T-011](./tasks/T-011-migration-message-activity.md) | US5 | Migration 0037 — activity_summary JSONB | ✅ Done | `alembic upgrade head` |
+| [T-012](./tasks/T-012-stage-slots-planner-grader.md) | US2/3 | planner + retrieval_grader LLM slots | ✅ Done | `pytest startup_seed tests` |
 | [T-020](./tasks/T-020-intent-model-and-repo.md) | US1 | Intent model columns + repo (TOCTOU guard) | 🔴 Todo | `pytest repo tests` |
 | [T-021](./tasks/T-021-intent-sanitization.md) | US1 | Intent sanitizer (strict/lenient modes) | 🔴 Todo | `pytest sanitizer tests` |
 | [T-022](./tasks/T-022-intent-proposal-task.md) | US1 | Celery intent-proposal task | 🔴 Todo | `pytest task tests` |

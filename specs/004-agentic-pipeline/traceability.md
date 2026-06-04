@@ -52,10 +52,10 @@ negative-scope constraint — enforced by absence + review, see note below.
 
 | Task | Requirements |
 | --- | --- |
-| T-001 | FR-007, FR-019, FR-026 |
-| T-010 | FR-001 |
-| T-011 | FR-018 |
-| T-012 | FR-002, FR-010 |
+| T-001 | FR-007, FR-019, FR-026 — ✅ Done, Verified 2026-06-04 (18 tests + ruff) |
+| T-010 | FR-001 — ✅ Done, Verified 2026-06-04 (0036 up/down/up clean; columns + index confirmed via psql) |
+| T-011 | FR-018 — ✅ Done, Verified 2026-06-04 (0037 up/down/up clean; CHECK rejects >16KB on real row) |
+| T-012 | FR-002, FR-010 — ✅ Done, Verified 2026-06-04 (17 tests; STAGES 11→13 no regression) |
 | T-020 | FR-001 |
 | T-021 | FR-002 |
 | T-022 | FR-002 |
