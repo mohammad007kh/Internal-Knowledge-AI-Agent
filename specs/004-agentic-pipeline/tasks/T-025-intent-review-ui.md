@@ -69,7 +69,7 @@ Build the source-intent review section in the admin source Settings: editable pu
 ### Files to Create
 
 - `frontend/src/app/(admin)/admin/sources/[id]/_components/IntentSection.tsx` — the PascalCase component: purpose `Textarea`, example-questions list editor, out-of-scope list editor, status badge, Save + Regenerate buttons. React Hook Form + Zod resolver; TanStack Query `useMutation` for PUT and propose.
-- `frontend/src/features/sources/__tests__/intent.test.tsx` — Vitest tests: renders fields from `getIntent` data; `ai_set` badge copy present; Save triggers PUT and reflects `user_set`; Regenerate triggers propose; a 409 propose response surfaces a toast; Zod rejects 6 example questions / 501-char purpose.
+- `frontend/src/app/(admin)/admin/sources/[id]/_components/__tests__/IntentSection.test.tsx` — Vitest tests (co-located with the component, matching where `AINamingCard.test.tsx` lives): renders fields from `getIntent` data; `ai_set` badge copy present; Save triggers PUT and reflects `user_set`; Regenerate triggers propose; a 409 propose response surfaces a toast; Zod rejects 6 example questions / 501-char purpose.
 
 ### Files to Update (REQUIRED)
 
@@ -99,7 +99,7 @@ Build the source-intent review section in the admin source Settings: editable pu
 
 **Command**:
 ```bash
-cd frontend && pnpm exec vitest run src/features/sources/__tests__/intent.test.tsx
+cd frontend && pnpm exec vitest run "src/app/(admin)/admin/sources/[id]/_components/__tests__/IntentSection.test.tsx"
 cd frontend && pnpm exec tsc --noEmit
 ```
 **Success Criteria**: Vitest reports the intent test file `passed` (render, badge copy, Save→user_set, Regenerate, 409 toast, Zod cap rejection); `tsc --noEmit` exits 0 with no errors.

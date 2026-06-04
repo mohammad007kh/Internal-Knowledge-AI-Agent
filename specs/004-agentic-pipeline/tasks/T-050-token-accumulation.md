@@ -88,7 +88,7 @@ Make per-turn token usage a first-class, accumulated state value so the budget g
 - `backend/src/agent/nodes/generate.py` — return usage delta; implement synthesizer estimate-then-reconcile; emit `turn_token_cost` Langfuse score at turn end.
 - `backend/src/agent/nodes/source_router.py` — return usage delta instead of dropping `response.usage`.
 - `backend/src/agent/nodes/text_to_query.py` — return usage delta instead of dropping `response.usage`.
-- Any other node in the enumerated LLM-calling set (planner/grader nodes land in later tasks — wire their deltas there per the same contract; this task fixes the EXISTING droppers).
+- Any other node in the enumerated LLM-calling set (planner/grader nodes land in later tasks — wire their deltas there per the same contract; this task fixes the EXISTING droppers). The EXISTING-dropper node list to fix here: `generate.py` (synthesizer), `source_router.py`, `text_to_query.py`, and `clarify.py`/clarification-detection IF it makes an LLM call when enabled (read it to confirm). Note: planner/grader nodes created later wire the same contract in their own tasks.
 
 ### Code/Logic Requirements
 

@@ -135,6 +135,7 @@ slide-over.
 - PlanCard visibility helper encodes FR-008 exactly: `steps.length >= 2 || revision >= 1 || hadClarification`.
 - Replan: one-line `↻ Plan updated — {reason}`; collapse old plan to `▸ Original plan (superseded)`; the superseded plan stays inspectable (read from `superseded_plan` / the prior log entry). NO strikethrough diff.
 - Step-row inspection: in `mode === "live"` (and same-turn just-finished, where the in-memory activityLog still holds deep payloads), clicking a row calls `onInspectStep(stepId)` → opens the CitationPanel slide-over with that step's payload. In `mode === "review"` (reload), deep payloads are absent → rows are non-interactive (disabled cursor, no slide-over).
+- **Slide-over data source (resolve the ambiguity explicitly)**: the step-payload slide-over reads ONLY from the in-memory `activityLog` (stream-only payloads per data-model §3). There is NO new backend endpoint in v1 — do NOT create one. Ownership is implicitly satisfied: the activityLog only ever contains the current user's own session stream. (plan.md's "ownership-checked endpoint" phrasing applies only if a payload endpoint is ever added later — out of scope here.) On reload, deep payloads are absent and the slide-over affordance is hidden.
 - Immutability; keep each component focused (<300 lines); named props interfaces.
 
 ## 🔌 Wiring Checklist

@@ -76,8 +76,10 @@ calibrate the token ceiling to measured p95.
 
 ```bash
 docker compose exec -T backend python -m evals.run --pipeline agentic && \
-docker compose exec -T backend python -m evals.compare --latest && echo GATES-PASS
+docker compose exec -T backend python -m evals.compare <baseline-run> <agentic-run> && echo GATES-PASS
 ```
+
+Use the positional form (the explicit baseline-run path vs the agentic-run path) consistent with Step 2 — `<baseline-run>`/`<agentic-run>` are the JSON sidecar paths under `evals/runs/`. The `--latest` convenience flag is OPTIONAL and only usable if it was actually implemented in T-044's compare CLI — confirm it exists before relying on it.
 
 **Expected Output**: `GATES-PASS` (compare exit 0 with each gate named PASS on stdout)
 

@@ -72,7 +72,7 @@ Implement a Celery task that generates AI-proposed source intent (example questi
 ### Files to Update (REQUIRED)
 
 - `backend/src/tasks/__init__.py` (or the Celery autodiscover list) — register `tasks.propose_intent` so the worker picks it up.
-- Study-completion hook (the same place `auto_name_source` is chained — locate the study `READY`/`READY_PARTIAL` transition) — enqueue `tasks.propose_intent` post-study. (Read that call site first to match the dispatch shim idiom.)
+- Study-completion hook — enqueue `tasks.propose_intent` post-study. CAUTION: the study-chaining premise is shaky — `auto_name_source.py`'s docstring says its study-chain is "wired in a follow-up commit" and may not exist yet. So: if `auto_name_source` is already enqueued from the study completion transition, enqueue `propose_intent` at the same site; OTHERWISE add the dispatch to `backend/src/tasks/study_source.py`'s success/completion path directly. The API trigger (T-023 POST propose) is the guaranteed entry point either way. (Read the relevant call site first to match the dispatch shim idiom.)
 
 ### Code/Logic Requirements
 

@@ -132,6 +132,7 @@ writes a JSON sidecar + markdown report to `backend/evals/runs/`.
 
 - CLI: `--pipeline {current,agentic}` (required); optional `--cases-dir` (default `evals/cases`), `--out-dir` (default `evals/runs`), `--limit` (for stub/dev runs).
 - Build the compiled graph ONCE before the loop (avoid rebuilding per case); select current vs agentic through the existing pipeline build function — do not duplicate topology.
+- **Forward-compatibility note**: `--pipeline agentic` resolves through `build_pipeline()`/the graph selector; the agentic graph does not exist until T-058 (Slice C). Implement the selector pass-through generically and make `--pipeline agentic` exit with a clear "agentic pipeline not available" error until the flag+builder land — do NOT hard-code any topology here. Slice B only ever executes `--pipeline current` (T-045).
 - Partitioning: when `--pipeline current`, filter out `source_type == "multi"` cases BEFORE the loop.
 - For each case:
   - If `case.fixtures` present → enter `ephemeral_fixture(case, session)` (T-041) to get the temp `source_id`; otherwise use the case's declared source set.

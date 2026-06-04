@@ -97,6 +97,9 @@ Assemble the flag-selected agentic LangGraph from the nodes built in T-052..T-05
 
 ### Code/Logic Requirements
 
+- `run_pipeline()`'s `initial_state` dict in `backend/src/agent/pipeline.py` must now populate: `raw_user_intent` (= the incoming user query, never mutated thereafter), empty `plan` (`[]`), empty `past_steps` (`[]`), `current_step=None`, `plan_revision=0`, and the `budget` snapshot from settings (`max_steps`/`max_retries_per_step`/`max_revisions`/`token_ceiling`/`deadline`).
+- CAUTION: verify the flag attribute name matches exactly what T-001 added to settings (`PIPELINE_AGENTIC_ENABLED`) — read `backend/src/core/config.py` before wiring the selector.
+- `DoneData` is a nested model inside the chat schema module — extend it where it actually lives after reading `backend/src/schemas/chat.py` (do not assume a top-level location).
 - Build the graph topology described above using the nodes/edges exported by T-052..T-057 (verify owns the R4b conditional edge; budget_guard at loop edges).
 - `build_pipeline()` returns the agentic graph when the flag is on AND the request is in the sandbox path; otherwise the v2 graph (rollback).
 - Guardrail input/output nodes must wrap the agentic graph with no bypass path (Constitution IV); confirm the reflector is not inserted.
@@ -104,6 +107,7 @@ Assemble the flag-selected agentic LangGraph from the nodes built in T-052..T-05
 - Acceptance Criteria:
   - Flag OFF → v2 topology; flag ON (sandbox) → agentic topology — both assertable in the assembly test.
   - A 1-step streamed turn emits `done` with a non-null `activity_summary` of the compact shape, and the row persists to `chat_messages.activity_summary`.
+  - `initial_state` carries `raw_user_intent` + plan-state fields (`plan`/`past_steps`/`current_step`/`plan_revision`/`budget`); planner does not crash on first turn.
 
 ## 🔌 Wiring Checklist
 

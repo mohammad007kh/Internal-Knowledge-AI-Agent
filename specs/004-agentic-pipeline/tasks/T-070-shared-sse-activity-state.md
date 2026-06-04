@@ -181,7 +181,7 @@ that folds an event sequence into log state, and wire BOTH stream hooks to it
 - `replan` records the superseded plan + reason; the subsequent `plan` (revision 1) becomes the active plan. Do NOT discard the superseded plan (later UI inspects it).
 - `budget` records a budget entry; it is intermediate (does NOT end the turn — the turn still ends on `done`/`error`).
 - Unknown event types: `parseAgentEvent` returns `null`; the caller skips. Never throw.
-- IMPORTANT (cross-cutting): the new intermediate-event class must NOT be treated as a terminal frame. The optimistic-bubble lifecycle in `useChat.ts` (wired in T-077) relies on terminal frames; this module must expose a clear signal that these four events are intermediate so T-077 can keep the optimistic bubble alive.
+- IMPORTANT (cross-cutting): the new intermediate-event class must NOT be treated as a terminal frame. The REAL mechanism: the four new events must be handled in BOTH hooks' switch statements as additive `activityLog` updates that (a) do NOT set `messageType` to any terminal value, (b) do NOT set `lastMessageId`, and (c) do NOT set the `sawTerminal`/`sawTerminalEvent` local flags (`useSandboxStream.ts` line ~145 sets `sawTerminal` on clarification/done/error/guardrail_blocked — the four new events must NOT be added to that set). The optimistic-bubble protection lives in these hook-level facts, not in a flag exported by the shared module.
 
 ## 🔌 Wiring Checklist
 

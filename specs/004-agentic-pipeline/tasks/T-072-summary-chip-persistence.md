@@ -131,6 +131,7 @@ re-opens the activity accordion in review mode.
 
 - `ActivitySummary` type mirrors data-model §3 exactly. Treat `plan`/`roles`/`superseded_plan` as optional-on-reload-safe (present, but the chip only needs counts + `had_replan`/`had_failure`).
 - Variant logic: amber iff `had_replan || had_failure`; otherwise neutral. Retry count copy: derive a simple `· 1 retry` style suffix from `had_failure`/`had_replan` (the summary doesn't carry an explicit retry integer in v1 — render the qualitative `1 retry` when failure/replan occurred; do not fabricate a count).
+- **Amber copy is NOT design-blessed**: the exact amber copy (`· 1 retry`) is NOT specified by the design doc — `activity_summary` carries only boolean `had_replan`/`had_failure`. Render a qualitative marker (e.g. `· retried` or `· 1 retry`) — any equivalent qualitative wording is acceptable; do NOT invent a numeric count from booleans.
 - Live vs persisted: a SINGLE render path takes an `ActivitySummary`; the parent chooses the source (live `done.activity_summary` vs `message.activity_summary`). Do not branch rendering on source.
 - Compact-only graceful degradation: if step-level deep payloads are absent (reload), the chip still renders; `onExpand` opens the accordion in review mode which renders from the compact summary only.
 - Immutability; small component; named props interface.

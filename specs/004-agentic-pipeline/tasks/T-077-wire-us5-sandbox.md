@@ -88,7 +88,8 @@ the optimistic bubble alive (no terminal-frame trip).
 
 - `frontend/src/app/(admin)/admin/sources/[id]/_components/TestTab.tsx` - render `StatusLine` (in-flight), `ActivityAccordion` + `PlanCard`, `BudgetFooter`, honest-failure block, and the summary chip from `useSandboxStream`'s exposed `activityLog` + `done.activity_summary`. **(SANDBOX FIRST.)**
 - `frontend/src/components/chat/MessageThread.tsx` - same assembly for the main chat assistant turn (most component integration was stubbed in T-071..T-075; here finalize the activityLog plumbing into each).
-- `frontend/src/components/chat/useChat.ts` - confirm/adjust the optimistic-bubble lifecycle so the intermediate events (`plan`/`step`/`replan`/`budget`) update `activityLog` WITHOUT finalizing the optimistic bubble; only `done`/`error` finalize. Carry `done.activity_summary` onto the finalized message for the summary chip.
+- `frontend/src/hooks/use-chat-stream.ts` - the intermediate-event correctness fix lives HERE (and in `useSandboxStream.ts`): `plan`/`step`/`replan`/`budget` must not set `sawTerminalEvent`/`messageType`/`lastMessageId` — verify T-070's wiring did this and fix here if not.
+- `frontend/src/components/chat/useChat.ts` - confirm/adjust the optimistic-bubble lifecycle so the intermediate events (`plan`/`step`/`replan`/`budget`) update `activityLog` WITHOUT finalizing the optimistic bubble; only `done`/`error` finalize. Carry `done.activity_summary` onto the finalized message for the summary chip. `useChat.ts` adjustments are secondary (its watchers key off `messageType`/`lastMessageId`, which the new events must never touch).
 
 ### Code/Logic Requirements
 

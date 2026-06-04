@@ -38,6 +38,7 @@ Evolve the linear retrieve-then-answer pipeline into a transparent plan-and-exec
 - **No orphan code**: every new file from T-020..T-025 must be reachable from a real entry point. This task closes the wiring gaps.
 - **FX41 request-session binding** preserved across the wired write paths.
 - **Capability ramp end-to-end** (data-model §1): after propose, status is `ai_set` (out_of_scope advisory); after PUT save, status is `user_set` (out_of_scope hard-decline authority). The integration test asserts the ramp.
+- **Client-function ownership note**: T-025's component tests mock the API client functions (`getIntent`/`putIntent`/`proposeIntent`) which are IMPLEMENTED here — that ordering is intentional (T-025 mocks, T-037 delivers); don't import the real client in T-025 tests.
 
 ### API Context (the wired surface — VERBATIM intent)
 

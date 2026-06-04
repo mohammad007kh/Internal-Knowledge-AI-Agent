@@ -99,6 +99,7 @@ Implement the planner node that decomposes the user's question into a bounded (�
 
 - `backend/src/agent/stage_defaults.py` — add the `planner` stage default (per data-model §7; `STAGE_DEFAULTS` dict).
 - `backend/src/agent/nodes/__init__.py` — export the new node so the pipeline builder (T-058) can import it.
+- `backend/src/schemas/chat.py` — add ALL FOUR new members to `StreamEventType` (`PLAN = "plan"`, `STEP = "step"`, `REPLAN = "replan"`, `BUDGET = "budget"`) plus their `ChatStreamEvent` factory classmethods, in THIS task (first emitter owns the enum). Note: T-053/T-056/T-057 emit via these members — they do NOT re-add them.
 
 ### Code/Logic Requirements
 
@@ -111,6 +112,7 @@ Implement the planner node that decomposes the user's question into a bounded (�
   - 6-step model output is capped/rejected to ≤5.
   - A plan containing an out-of-permitted-set `source_id` trips the assertion and yields the honest-failure route with NO `plan` event.
   - A confident question yields a plan; an ambiguous one yields `needs_clarification` with 2-4 permitted-set options.
+  - A schema test asserts the four new `StreamEventType` members (`PLAN`/`STEP`/`REPLAN`/`BUDGET`) exist with their `"plan"`/`"step"`/`"replan"`/`"budget"` values.
 
 ## 🔌 Wiring Checklist
 
@@ -128,7 +130,7 @@ Implement the planner node that decomposes the user's question into a bounded (�
 docker compose exec -T backend python -m pytest tests/unit/agent/test_planner_node.py --no-cov -q
 docker compose exec -T backend ruff check src/agent/nodes/planner.py
 ```
-**Success Criteria**: pytest reports all tests `passed` (cap enforced, permission assertion trips on out-of-set id with no event emitted, event shape matches, clarify options all permitted); ruff prints `All checks passed!`.
+**Success Criteria**: pytest reports all tests `passed` (cap enforced, permission assertion trips on out-of-set id with no event emitted, event shape matches, clarify options all permitted, and the schema test asserting the four new `StreamEventType` members `PLAN`/`STEP`/`REPLAN`/`BUDGET` exist); ruff prints `All checks passed!`.
 
 **Expected output (pytest tail)**:
 ```

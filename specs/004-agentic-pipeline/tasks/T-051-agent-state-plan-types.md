@@ -47,7 +47,7 @@ Evolve the linear retrieve-then-answer pipeline into a transparent plan-and-exec
 
 > **StepResult**: `{step_id, output_chunks: list[dict], generated_sql: str|None, bound_inputs: {refs: dict[str, str], truncated: bool} | None, verification: {verdict: acceptable|partial|unacceptable, reason: str, checks: dict}, narration: str}` — `bound_inputs` records exactly what was interpolated (R1b); the verifier judges the RESOLVED sub_query. `output_chunks` are step-scoped (the executor sets per-step scratch — one source_id, step sub_query, that source's schema chunk — and writes results here, NOT into the turn-wide `retrieved_chunks`).
 
-**State fields to add (data-model §2):** `raw_user_intent: str` (never mutated) · `plan: list[PlanStep]` · `past_steps: list[StepResult]` · `current_step: PlanStep | None` · `plan_revision: int` (0 or 1) · `budget: {max_steps, max_retries_per_step, max_revisions, token_ceiling, deadline}` (read-only config snapshot). `narration` ≤ 200 chars.
+**State fields to add (data-model §2):** `raw_user_intent: str` (never mutated) · `plan: list[PlanStep]` · `past_steps: list[StepResult]` · `current_step: PlanStep | None` · `plan_revision: int` (0 or 1) · `budget: {max_steps, max_retries_per_step, max_revisions, token_ceiling, deadline}` (read-only config snapshot). NOTE: `narration` (≤ 200 chars) is a field of `StepResult` ONLY — there is NO top-level `AgentState` narration field to add.
 
 ### API Context
 

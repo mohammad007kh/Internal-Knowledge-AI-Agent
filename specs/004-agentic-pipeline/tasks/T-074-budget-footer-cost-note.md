@@ -5,7 +5,7 @@
 **Platform**: web | **Task Target**: frontend
 **User Story**: US6 (operators bound cost; users get graceful budget-hit)
 **Requirement**: FR-020, FR-021
-**Dependencies**: [T-070-shared-sse-activity-state](./T-070-shared-sse-activity-state.md)
+**Dependencies**: [T-070-shared-sse-activity-state](./T-070-shared-sse-activity-state.md), [T-073-activity-accordion-plan-card](./T-073-activity-accordion-plan-card.md)
 
 ---
 

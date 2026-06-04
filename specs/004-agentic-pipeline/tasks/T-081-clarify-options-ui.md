@@ -5,7 +5,7 @@
 **Platform**: web | **Task Target**: frontend
 **User Story**: US4 (when the question is ambiguous, ask — with choices)
 **Requirement**: FR-014, FR-015
-**Dependencies**: [T-075-honest-failure-ui-optionbuttons](./T-075-honest-failure-ui-optionbuttons.md), [T-080-clarify-options-backend](./T-080-clarify-options-backend.md)
+**Dependencies**: [T-070-shared-sse-activity-state](./T-070-shared-sse-activity-state.md), [T-075-honest-failure-ui-optionbuttons](./T-075-honest-failure-ui-optionbuttons.md), [T-080-clarify-options-backend](./T-080-clarify-options-backend.md)
 
 ---
 
@@ -113,6 +113,8 @@ payload in both stream hooks — preserving legacy no-options behavior.
 
 - `frontend/src/components/chat/ClarificationCard.tsx` - add optional `options?: ClarificationOption[]` and `allowFreeText?: boolean` props; render `<OptionButtonGroup options={options} onSelect={…} />` above the existing textarea when options are present; keep the textarea as the free-text fallback; selection posts the option label via the existing send path.
 - `frontend/src/lib/sse/agent-events.ts` (shared module from T-070) - extend the `clarification` parse to carry `options[]` + `allow_free_text` (typed `ClarificationOption`). Both hooks already consume this module, so both gain the extended payload for free.
+
+**T-070 handoff (load-bearing):** T-070 deliberately leaves `clarification` parsing inline in both hooks. THIS task moves/extends clarification parsing into the shared `agent-events.ts` module (or extends the inline parse in BOTH hooks consistently — choose one and do it in both); the extended payload is `{question, options[], allow_free_text}` with `options` optional for legacy compatibility.
 
 ### Code/Logic Requirements
 

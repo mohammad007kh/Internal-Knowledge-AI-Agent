@@ -52,9 +52,10 @@ weakening any principle, via the standard amendment process.
 - [T-058-agentic-graph-assembly](./T-058-agentic-graph-assembly.md) — amend only once the described reality exists
 
 ### Implementation Steps
-1. Draft the amendment diff + one-paragraph impact analysis.
-2. Present to the owner for explicit approval (HUMAN-GATE).
-3. Apply; append changelog entry with approval record.
+1. FIRST read `memory/constitution.md` and confirm the exact current phrasing (the token may be "8-node" or a variant); adapt the grep verification to the actual original string so the check cannot pass vacuously.
+2. Draft the amendment diff + one-paragraph impact analysis.
+3. Present to the owner for explicit approval (HUMAN-GATE).
+4. Apply; append changelog entry with approval record.
 
 ### Acceptance Criteria
 - [ ] Article IV no longer states a fixed node count; principles intact verbatim

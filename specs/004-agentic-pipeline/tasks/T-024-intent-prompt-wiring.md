@@ -74,6 +74,8 @@ Inject sanitized, delimiter-wrapped source intent into all three prompt consumer
 - `backend/src/agent/nodes/source_router.py` — extend the catalog entry per source with purpose + example_questions + out_of_scope, capped to ~150 tokens/source; out_of_scope influence tiered by `intent_status` (advisory down-rank at `ai_set`, exclusion-capable hard-decline signal only at `user_set`).
 - `backend/src/agent/nodes/text_to_query.py` — in the schema-sketch fallback, render `purpose` with precedence over the bare `description`.
 
+**FR-004 coverage note:** the synthesizer (`backend/src/agent/nodes/generate.py`) requires NO direct edit — it consumes the pinned schema-context chunk, and this task's `_schema_context.py` change places the intent block (purpose) at the top of that chunk, which is how FR-004 ("answer composition has access to purpose, surviving truncation") is satisfied. Do not add a separate `generate.py` edit.
+
 ### Code/Logic Requirements
 
 - Read all three node files first to match their existing render idioms and where `source.description` is currently used.
