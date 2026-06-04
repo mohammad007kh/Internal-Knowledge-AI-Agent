@@ -84,3 +84,10 @@ specs/
 ├── 001-knowledge-ai-agent/
 └── 002-bug-fixes/
 ```
+
+## Active Technologies
+- Python 3.12 (backend), TypeScript 5.6 (frontend) + FastAPI, LangChain+LangGraph (existing pins), SQLAlchemy 2 async, Next.js 15, shadcn/ui, TanStack Query v5 — NO new runtime dependencies (004-agentic-pipeline)
+- PostgreSQL 16 + pgvector (2 expand-only migrations: source-intent columns, message activity_summary JSONB); Redis (unchanged); MinIO (unchanged) (004-agentic-pipeline)
+
+## Recent Changes
+- 004-agentic-pipeline: Added Python 3.12 (backend), TypeScript 5.6 (frontend) + FastAPI, LangChain+LangGraph (existing pins), SQLAlchemy 2 async, Next.js 15, shadcn/ui, TanStack Query v5 — NO new runtime dependencies

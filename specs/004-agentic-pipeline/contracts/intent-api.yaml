@@ -1,0 +1,120 @@
+# OpenAPI delta — Source Intent endpoints (004-agentic-pipeline)
+# Extends the existing /api/v1 surface. Registry: url versioning, plural
+# resources, bearer auth, RFC7807 errors, wrapped responses where listed.
+openapi: 3.1.0
+info:
+  title: Agentic Pipeline — Source Intent API (delta)
+  version: 0.1.0
+paths:
+  /api/v1/sources/{source_id}/intent:
+    get:
+      summary: Read a source's intent metadata
+      description: >
+        Admin-only. Also embedded in the existing GET source detail response
+        (intent fields ride on SourceDetail); this endpoint exists for the
+        review UI's focused fetch.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: source_id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: Intent metadata
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SourceIntent" }
+        "404": { $ref: "#/components/responses/Problem" }
+    put:
+      summary: Admin review/edit of a source's intent (upgrades status to user_set)
+      description: >
+        Admin-only. Saving constitutes review: intent_status becomes
+        user_set and out_of_scope gains hard-decline authority (FR-005).
+        Validation: purpose <= 500 chars; example_questions <= 5;
+        out_of_scope <= 10.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: source_id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SourceIntentUpdate" }
+      responses:
+        "200":
+          description: Updated intent (status now user_set)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SourceIntent" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+  /api/v1/sources/{source_id}/intent/propose:
+    post:
+      summary: (Re)generate the AI-proposed intent draft
+      description: >
+        Admin-only (require_admin dependency). Triggers the intent-proposal
+        pass (same async pattern as re-study). BUNDLE-level semantics: runs
+        only while intent_status != user_set, then replaces the AI-writable
+        fields (example_questions, out_of_scope) together via a conditional
+        UPDATE (WHERE intent_status != 'user_set' — TOCTOU guard against a
+        concurrent admin save). NEVER writes purpose or cross_source_hints
+        (admin-only fields). 202 + existing job-status polling.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: source_id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "202": { description: Proposal queued }
+        "404": { $ref: "#/components/responses/Problem" }
+        "409": { description: A study/proposal is already in flight, $ref: "#/components/responses/Problem" }
+components:
+  securitySchemes:
+    bearerAuth: { type: http, scheme: bearer, bearerFormat: JWT }
+  responses:
+    Problem:
+      description: RFC 7807 problem document
+      content:
+        application/problem+json:
+          schema:
+            type: object
+            properties:
+              type: { type: string }
+              title: { type: string }
+              status: { type: integer }
+              detail: { type: string }
+  schemas:
+    SourceIntent:
+      type: object
+      properties:
+        purpose: { type: [string, "null"], maxLength: 500 }
+        example_questions:
+          type: [array, "null"]
+          maxItems: 5
+          items: { type: string }
+        out_of_scope:
+          type: [array, "null"]
+          maxItems: 10
+          items: { type: string }
+        cross_source_hints:
+          type: [array, "null"]
+          items:
+            type: object
+            properties:
+              topic: { type: string }
+              source_id: { type: string, format: uuid }
+        intent_status:
+          type: string
+          enum: [pending_ai, ai_set, user_set]
+        intent_updated_at: { type: [string, "null"], format: date-time }
+      required: [intent_status]
+    SourceIntentUpdate:
+      type: object
+      description: All fields optional; provided fields replace stored values.
+      properties:
+        purpose: { type: [string, "null"], maxLength: 500 }
+        example_questions: { type: [array, "null"], maxItems: 5, items: { type: string } }
+        out_of_scope: { type: [array, "null"], maxItems: 10, items: { type: string } }
+        cross_source_hints:
+          type: [array, "null"]
+          items:
+            type: object
+            properties:
+              topic: { type: string }
+              source_id: { type: string, format: uuid }

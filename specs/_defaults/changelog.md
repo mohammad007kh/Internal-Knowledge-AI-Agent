@@ -8,6 +8,23 @@ This file tracks ALL changes to `registry.yaml`. Every update requires Human-In-
 
 ## Change Log
 
+### 2026-06-04 | api.rate_limiting
+- **Changed**: `none` → `sliding_window`
+- **Why**: Drift correction — per-IP rate limiting on auth endpoints plus
+  per-email account lockout shipped after the registry was seeded; the
+  registry still said "none (MVP)". Found during 004-agentic-pipeline
+  conventions/drift review (HITL #4).
+- **Source**: specs/004-agentic-pipeline/plan.md
+- **Approved by**: Human (accept — "Update both")
+
+### 2026-06-04 | ui_specs.animations
+- **Changed**: `none` → `minimal`
+- **Why**: The 004 transparency UX (§3D.1 design pass) adopts subtle
+  CSS-only transitions (200ms ease expansion, fade+slide-in for live
+  activity blocks). No animation library introduced.
+- **Source**: specs/004-agentic-pipeline/plan.md
+- **Approved by**: Human (accept — "Update both")
+
 ### 2026-04-21 | backend.sse_pattern
 - **Changed**: `null` → `fastapi_streaming_response`
 - **Why**: Phase 2 chat interface requires real-time token streaming. FastAPI `StreamingResponse` with `text/event-stream` + browser `fetch()` + `ReadableStream` chosen over EventSource (allows POST, custom headers).
