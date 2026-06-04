@@ -56,17 +56,17 @@ negative-scope constraint — enforced by absence + review, see note below.
 | T-010 | FR-001 — ✅ Done, Verified 2026-06-04 (0036 up/down/up clean; columns + index confirmed via psql) |
 | T-011 | FR-018 — ✅ Done, Verified 2026-06-04 (0037 up/down/up clean; CHECK rejects >16KB on real row) |
 | T-012 | FR-002, FR-010 — ✅ Done, Verified 2026-06-04 (17 tests; STAGES 11→13 no regression) |
-| T-020 | FR-001 |
-| T-021 | FR-002 |
-| T-022 | FR-002 |
-| T-023 | FR-001, FR-002 |
-| T-024 | FR-003, FR-004, FR-005 |
+| T-020 | FR-001 — ✅ Done, Verified 2026-06-03 (14 tests: caps, TOCTOU guard structural+behavioral; ruff clean; no new mypy errors) |
+| T-021 | FR-002 — ✅ Done, Verified 2026-06-03 (63 tests: patterns/caps/dual-mode; ruff + mypy clean) |
+| T-022 | FR-002 — ✅ Done, Verified 2026-06-04 (7 tests: user_set short-circuit, never-writes-purpose, lenient sanitize, TOCTOU race→skipped+no-commit; best-effort study-chain enqueue) |
+| T-023 | FR-001, FR-002 — ✅ Done, Verified 2026-06-04 (19 tests: require_admin×3, 422 strict-sanitize, 409 in-flight, no config leak; error_handler input-strip; order-independent celery spy) |
+| T-024 | FR-003, FR-004, FR-005 — ✅ Done, Verified 2026-06-04 (26 tests: ramp tiers, delimiters, router cap, fallback; ruff + mypy isolation clean) |
 | T-025 | FR-001, FR-002 |
 | T-037 | FR-001..FR-005 (wiring/integration) |
-| T-040 | FR-022 |
-| T-041 | FR-022 |
+| T-040 | FR-022 — ✅ Done, Verified 2026-06-04 (53 tests; 26 synthetic cases, 13 declines, 4 multi; ruff + mypy clean) |
+| T-041 | FR-022 — ✅ Done, Verified 2026-06-04 (ephemeral schema seed+teardown proven via in-container harness; loader renamed fixtures→fixtures_loader to avoid pkg/dir clash; conftest port/venv portability tracked as debt) |
 | T-042 | FR-023, FR-024 |
-| T-043 | FR-023 |
+| T-043 | FR-023 — ✅ Done, Verified 2026-06-04 (19 tests, LLM mocked; dual-decline standard for both pipelines; judge model pinned to dated version) |
 | T-044 | FR-023, FR-024 |
 | T-045 | FR-023 |
 | T-050 | FR-019, FR-021 |

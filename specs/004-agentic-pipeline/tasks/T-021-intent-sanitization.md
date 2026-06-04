@@ -99,8 +99,8 @@ docker compose exec -T backend mypy src/services/intent_sanitizer.py
 
 ## 📝 Completion Log
 
-- [ ] Code implemented
-- [ ] Tests passed
-- [ ] Linter passed
-- [ ] Wiring checklist verified
-- [ ] Integration verification passed
+- [x] Code implemented
+- [x] Tests passed
+- [x] Linter passed
+- [x] Wiring checklist verified (module ready; T-022/T-023 wire it in)
+- [x] Integration verification passed

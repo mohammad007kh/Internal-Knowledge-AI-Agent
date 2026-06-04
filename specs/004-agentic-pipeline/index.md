@@ -11,8 +11,8 @@
 | Metric      | Value |
 | ----------- | ----- |
 | Total Tasks | 41    |
-| Completed   | 4     |
-| Verified    | 4     |
+| Completed   | 12    |
+| Verified    | 12    |
 | Coverage    | 100% (26/26 FRs mapped; FR-025 is a scope constraint — see traceability) |
 
 **Current Phase**: Implementation (pending `/atomicspec.implement`)
@@ -35,17 +35,17 @@
 | [T-010](./tasks/T-010-migration-source-intent.md) | US1 | Migration 0036 — source intent columns | ✅ Done | `alembic upgrade head` |
 | [T-011](./tasks/T-011-migration-message-activity.md) | US5 | Migration 0037 — activity_summary JSONB | ✅ Done | `alembic upgrade head` |
 | [T-012](./tasks/T-012-stage-slots-planner-grader.md) | US2/3 | planner + retrieval_grader LLM slots | ✅ Done | `pytest startup_seed tests` |
-| [T-020](./tasks/T-020-intent-model-and-repo.md) | US1 | Intent model columns + repo (TOCTOU guard) | 🔴 Todo | `pytest repo tests` |
-| [T-021](./tasks/T-021-intent-sanitization.md) | US1 | Intent sanitizer (strict/lenient modes) | 🔴 Todo | `pytest sanitizer tests` |
-| [T-022](./tasks/T-022-intent-proposal-task.md) | US1 | Celery intent-proposal task | 🔴 Todo | `pytest task tests` |
-| [T-023](./tasks/T-023-intent-api-endpoints.md) | US1 | Intent GET/PUT/propose API (require_admin) | 🔴 Todo | `pytest api tests` |
-| [T-024](./tasks/T-024-intent-prompt-wiring.md) | US1 | Intent → 3 prompt consumers + capability ramp | 🔴 Todo | `pytest render tests` |
+| [T-020](./tasks/T-020-intent-model-and-repo.md) | US1 | Intent model columns + repo (TOCTOU guard) | ✅ Done | `pytest repo tests` |
+| [T-021](./tasks/T-021-intent-sanitization.md) | US1 | Intent sanitizer (strict/lenient modes) | ✅ Done | `pytest sanitizer tests` |
+| [T-022](./tasks/T-022-intent-proposal-task.md) | US1 | Celery intent-proposal task | ✅ Done | `pytest task tests` |
+| [T-023](./tasks/T-023-intent-api-endpoints.md) | US1 | Intent GET/PUT/propose API (require_admin) | ✅ Done | `pytest api tests` |
+| [T-024](./tasks/T-024-intent-prompt-wiring.md) | US1 | Intent → 3 prompt consumers + capability ramp | ✅ Done | `pytest render tests` |
 | [T-025](./tasks/T-025-intent-review-ui.md) | US1 | Admin intent review UI | 🔴 Todo | `vitest + tsc` |
 | [T-037](./tasks/T-037-wire-us1-intent.md) | US1 | WIRE US1: router + api client + hooks | 🔴 Todo | `pytest integration` |
-| [T-040](./tasks/T-040-eval-case-schema-and-cases.md) | US6 | Eval case schema + frozen set (synthetic) | 🔴 Todo | `pytest case validation` |
-| [T-041](./tasks/T-041-eval-fixtures-loader.md) | US6 | Ephemeral DB fixtures loader | 🔴 Todo | `pytest fixtures` |
+| [T-040](./tasks/T-040-eval-case-schema-and-cases.md) | US6 | Eval case schema + frozen set (synthetic) | ✅ Done | `pytest case validation` |
+| [T-041](./tasks/T-041-eval-fixtures-loader.md) | US6 | Ephemeral DB fixtures loader | ✅ Done | `pytest fixtures` |
 | [T-042](./tasks/T-042-eval-runner.md) | US6 | Headless eval runner (partitioned, exit codes) | 🔴 Todo | `pytest runner` |
-| [T-043](./tasks/T-043-eval-judge.md) | US6 | LLM judge (binary, dual decline standard) | 🔴 Todo | `pytest judge` |
+| [T-043](./tasks/T-043-eval-judge.md) | US6 | LLM judge (binary, dual decline standard) | ✅ Done | `pytest judge` |
 | [T-044](./tasks/T-044-eval-compare-and-ci.md) | US6 | Gate compare + nightly CI job | 🔴 Todo | `pytest compare` |
 | [T-045](./tasks/T-045-eval-baseline-run.md) | US6 | Partitioned baseline run + BASELINE.md | 🔴 Todo | `evals.run --pipeline current` |
 | [T-050](./tasks/T-050-token-accumulation.md) | US2/3 | C0: token usage → additive state reducers | 🔴 Todo | `pytest token tests` |
