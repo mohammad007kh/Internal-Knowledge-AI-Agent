@@ -19,13 +19,36 @@ from typing import Any
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.core.exceptions import NotFoundError
+from src.core.exceptions import BadRequestError, NotFoundError
 from src.models.chunk import Chunk
 from src.models.document import Document
 from src.models.enums import SourceStatus
 from src.models.source import Source
 from src.models.sync_job import SyncJob
 from src.repositories.base_repository import BaseRepository
+
+# -- Source-intent enforcement (004-agentic-pipeline US1 / FR-001) ---------
+# The DB has NO CHECK constraint on intent_status, and the JSONB caps are not
+# enforceable in DDL — the repository/schema layer is the enforcement point.
+# Caps protect the router token budget (data-model §1). The sanitizer is the
+# SINGLE SOURCE OF TRUTH for these values; this module re-exports them under
+# its historical public names (``INTENT_*``) at the BOTTOM of the file so
+# callers importing from here stay unchanged. The sanitizer itself imports
+# nothing from this module — but it lives under the ``src.services`` package
+# whose ``__init__`` eagerly imports ``SourceService`` (which imports this
+# repo). Re-exporting after ``SourceRepository`` is defined breaks that
+# package-init cycle; ``_validate_intent_caps`` only reads the constants at
+# call time, so their late binding is safe.
+
+# Tri-state capability ramp. ``user_set`` is terminal for AI writes: a
+# re-study/propose NEVER downgrades it (mirror of auto-naming's
+# never-overwrite-human-values rule).
+INTENT_STATUS_PENDING_AI = "pending_ai"
+INTENT_STATUS_AI_SET = "ai_set"
+INTENT_STATUS_USER_SET = "user_set"
+INTENT_STATUS_VALUES = frozenset(
+    {INTENT_STATUS_PENDING_AI, INTENT_STATUS_AI_SET, INTENT_STATUS_USER_SET}
+)
 
 
 class SourceRepository(BaseRepository[Source]):
@@ -290,6 +313,217 @@ class SourceRepository(BaseRepository[Source]):
         )
         result = await self._session.execute(stmt)
         return result.scalars().first()
+
+    # ------------------------------------------------------------------ #
+    # Source intent (004-agentic-pipeline US1 / FR-001)
+    # ------------------------------------------------------------------ #
+
+    async def get_intent(self, source_id: uuid.UUID) -> dict[str, Any]:
+        """Return the six intent fields for *source_id*.
+
+        Backs the GET intent endpoint (T-023). Reads exactly the columns the
+        capability ramp governs:
+
+          * ``purpose``            — admin-authored business purpose
+          * ``example_questions``  — AI-proposed / admin-edited list[str]
+          * ``out_of_scope``       — AI-proposed / admin-edited list[str]
+          * ``cross_source_hints`` — admin-authored list[{topic, source_id}]
+          * ``intent_status``      — bundle status (pending_ai|ai_set|user_set)
+          * ``intent_updated_at``  — last intent write timestamp
+
+        Raises
+        ------
+        NotFoundError
+            When no non-deleted ``Source`` row exists for *source_id* — the
+            same not-found convention :meth:`get_stats` uses, so callers that
+            bypass the router existence check don't see silent empties.
+        """
+        stmt = select(
+            Source.purpose,
+            Source.example_questions,
+            Source.out_of_scope,
+            Source.cross_source_hints,
+            Source.intent_status,
+            Source.intent_updated_at,
+        ).where(
+            Source.id == source_id,
+            Source.deleted_at.is_(None),
+        )
+        result = await self._session.execute(stmt)
+        row = result.one_or_none()
+        if row is None:
+            raise NotFoundError(f"Source {source_id} not found")
+        return {
+            "purpose": row.purpose,
+            "example_questions": row.example_questions,
+            "out_of_scope": row.out_of_scope,
+            "cross_source_hints": row.cross_source_hints,
+            "intent_status": row.intent_status,
+            "intent_updated_at": row.intent_updated_at,
+        }
+
+    async def update_intent(
+        self,
+        source_id: uuid.UUID,
+        *,
+        purpose: str | None = None,
+        example_questions: list[Any] | None = None,
+        out_of_scope: list[Any] | None = None,
+        cross_source_hints: list[Any] | None = None,
+    ) -> bool:
+        """Admin save of source intent — flips status to ``user_set`` (FR-001).
+
+        Backs the PUT intent endpoint (T-023). Every provided field replaces
+        the stored value; omitted fields are left untouched (``None`` means
+        "not provided", consistent with the keyword-only signature). The save
+        always sets ``intent_status='user_set'`` and stamps
+        ``intent_updated_at=now()``. ``user_set`` is terminal: this is the
+        only transition into it, and once set a concurrent AI proposal can no
+        longer overwrite the bundle (see
+        :meth:`propose_intent_conditional`).
+
+        Caps are enforced HERE (the DB has no CHECK constraint and JSONB length
+        is not expressible in DDL):
+
+          * ``purpose`` ≤ 500 chars
+          * ``example_questions`` ≤ 5 items
+          * ``out_of_scope`` ≤ 10 items
+
+        Returns ``True`` when a (non-deleted) row was updated, ``False`` when
+        no such source exists. The caller owns the transaction — this method
+        only emits the UPDATE.
+
+        Raises
+        ------
+        BadRequestError
+            On any cap violation (exceptions are the registry error strategy).
+        """
+        self._validate_intent_caps(
+            purpose=purpose,
+            example_questions=example_questions,
+            out_of_scope=out_of_scope,
+        )
+
+        values: dict[str, Any] = {
+            "intent_status": INTENT_STATUS_USER_SET,
+            "intent_updated_at": func.now(),
+        }
+        if purpose is not None:
+            values["purpose"] = purpose
+        if example_questions is not None:
+            values["example_questions"] = example_questions
+        if out_of_scope is not None:
+            values["out_of_scope"] = out_of_scope
+        if cross_source_hints is not None:
+            values["cross_source_hints"] = cross_source_hints
+
+        stmt = (
+            update(Source)
+            .where(Source.id == source_id, Source.deleted_at.is_(None))
+            .values(**values)
+            .returning(Source.id)
+        )
+        result = await self._session.execute(stmt)
+        return result.scalars().first() is not None
+
+    async def propose_intent_conditional(
+        self,
+        source_id: uuid.UUID,
+        *,
+        example_questions: list[Any],
+        out_of_scope: list[Any],
+    ) -> bool:
+        """Apply an AI proposal — bundle-level conditional UPDATE (FR-001).
+
+        Called by the studying / auto-intent task. Writes ONLY the two
+        AI-writable fields plus the bundle status/timestamp, guarded by
+        ``WHERE intent_status != 'user_set'`` so a concurrent admin save (which
+        set ``user_set``) always wins the race — a TOCTOU-safe mirror of the
+        auto-naming row-level precedent. Propose semantics are bundle-level:
+        there is no per-field provenance, so the AI-writable fields are
+        replaced together.
+
+        Critically, the SET clause NEVER includes ``purpose`` (admin-only,
+        FR-002) or ``cross_source_hints`` (admin-only in v1).
+
+        Equivalent to::
+
+            UPDATE sources
+               SET example_questions = :eq,
+                   out_of_scope       = :oos,
+                   intent_status      = 'ai_set',
+                   intent_updated_at  = now()
+             WHERE id = :id
+               AND intent_status != 'user_set'
+               AND deleted_at IS NULL
+
+        Caps are enforced HERE as well (``example_questions`` ≤ 5,
+        ``out_of_scope`` ≤ 10).
+
+        Returns ``True`` when a row was updated, ``False`` when 0 rows were
+        affected — the latter means either the source is gone or a concurrent
+        admin save already won the race (the caller short-circuits on
+        ``False``). The caller owns the transaction.
+
+        Raises
+        ------
+        BadRequestError
+            On any cap violation.
+        """
+        self._validate_intent_caps(
+            example_questions=example_questions,
+            out_of_scope=out_of_scope,
+        )
+
+        stmt = (
+            update(Source)
+            .where(
+                Source.id == source_id,
+                Source.intent_status != INTENT_STATUS_USER_SET,
+                Source.deleted_at.is_(None),
+            )
+            .values(
+                example_questions=example_questions,
+                out_of_scope=out_of_scope,
+                intent_status=INTENT_STATUS_AI_SET,
+                intent_updated_at=func.now(),
+            )
+            .returning(Source.id)
+        )
+        result = await self._session.execute(stmt)
+        return result.scalars().first() is not None
+
+    @staticmethod
+    def _validate_intent_caps(
+        *,
+        purpose: str | None = None,
+        example_questions: list[Any] | None = None,
+        out_of_scope: list[Any] | None = None,
+    ) -> None:
+        """Enforce the intent token-budget caps; raise on violation.
+
+        Shared by :meth:`update_intent` and :meth:`propose_intent_conditional`
+        so the model/repo layer is a single enforcement point (the DB cannot
+        express these limits).
+        """
+        if purpose is not None and len(purpose) > INTENT_PURPOSE_MAX_CHARS:
+            raise BadRequestError(
+                f"purpose exceeds {INTENT_PURPOSE_MAX_CHARS} characters "
+                f"(got {len(purpose)})."
+            )
+        if (
+            example_questions is not None
+            and len(example_questions) > INTENT_EXAMPLE_QUESTIONS_MAX
+        ):
+            raise BadRequestError(
+                f"example_questions exceeds {INTENT_EXAMPLE_QUESTIONS_MAX} "
+                f"items (got {len(example_questions)})."
+            )
+        if out_of_scope is not None and len(out_of_scope) > INTENT_OUT_OF_SCOPE_MAX:
+            raise BadRequestError(
+                f"out_of_scope exceeds {INTENT_OUT_OF_SCOPE_MAX} items "
+                f"(got {len(out_of_scope)})."
+            )
 
     # ------------------------------------------------------------------ #
     # Writes
@@ -693,3 +927,17 @@ class SourceRepository(BaseRepository[Source]):
         )
         result = await self._session.execute(stmt)
         return list(result.scalars().all())
+
+
+# -- Intent cap constants: single source of truth re-export --------------- #
+# Imported here (module bottom) rather than at the top so that triggering the
+# ``src.services`` package ``__init__`` — which eagerly imports
+# ``SourceService`` → this module — happens AFTER ``SourceRepository`` is fully
+# defined, avoiding a partially-initialized-module ImportError. The sanitizer
+# is the authoritative definition; these aliases preserve the repo's public
+# ``INTENT_*`` names for existing importers.
+from src.services.intent_sanitizer import (  # noqa: E402
+    MAX_EXAMPLE_QUESTIONS as INTENT_EXAMPLE_QUESTIONS_MAX,
+    MAX_OUT_OF_SCOPE as INTENT_OUT_OF_SCOPE_MAX,
+    PURPOSE_MAX_CHARS as INTENT_PURPOSE_MAX_CHARS,
+)
