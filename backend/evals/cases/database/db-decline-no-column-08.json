@@ -1,0 +1,11 @@
+{
+  "id": "db-decline-no-column-08",
+  "source_type": "database",
+  "question": "What is the favorite color of each user in the dataset?",
+  "expected_kind": "decline",
+  "golden_answer": "The dataset does not store a favorite-color attribute, so I can't answer that.",
+  "must_include": [],
+  "must_not_fabricate": true,
+  "fixtures": {"seed": "evals/fixtures/cctp-mini.sql"},
+  "data_source": "synthetic"
+}

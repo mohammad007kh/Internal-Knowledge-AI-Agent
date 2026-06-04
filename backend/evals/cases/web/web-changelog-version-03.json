@@ -1,0 +1,11 @@
+{
+  "id": "web-changelog-version-03",
+  "source_type": "web",
+  "question": "What is the latest Cinderblock release version listed on the public changelog at changelog.example.test?",
+  "expected_kind": "answer",
+  "golden_answer": "The public changelog at changelog.example.test lists version 2.4.0 as the latest Cinderblock release.",
+  "must_include": ["2.4.0"],
+  "must_not_fabricate": true,
+  "fixtures": null,
+  "data_source": "synthetic"
+}

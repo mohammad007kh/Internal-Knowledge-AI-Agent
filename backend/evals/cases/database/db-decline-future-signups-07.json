@@ -1,0 +1,11 @@
+{
+  "id": "db-decline-future-signups-07",
+  "source_type": "database",
+  "question": "How many users will sign up next month?",
+  "expected_kind": "decline",
+  "golden_answer": "The dataset only records existing users and cannot predict future sign-ups, so I can't answer that.",
+  "must_include": [],
+  "must_not_fabricate": true,
+  "fixtures": {"seed": "evals/fixtures/cctp-mini.sql"},
+  "data_source": "synthetic"
+}

@@ -1,0 +1,11 @@
+{
+  "id": "db-workspaces-alice-01",
+  "source_type": "database",
+  "question": "How many workspaces does Alice have?",
+  "expected_kind": "answer",
+  "golden_answer": "Alice has 3 workspaces.",
+  "must_include": ["3"],
+  "must_not_fabricate": true,
+  "fixtures": {"seed": "evals/fixtures/cctp-mini.sql"},
+  "data_source": "synthetic"
+}

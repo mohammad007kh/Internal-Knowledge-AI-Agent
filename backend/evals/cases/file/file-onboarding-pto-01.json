@@ -1,0 +1,11 @@
+{
+  "id": "file-onboarding-pto-01",
+  "source_type": "file",
+  "question": "How many paid time off days do new employees get in their first year at Acme Synthetic Labs?",
+  "expected_kind": "answer",
+  "golden_answer": "New employees at Acme Synthetic Labs accrue 15 paid time off days during their first year.",
+  "must_include": ["15"],
+  "must_not_fabricate": true,
+  "fixtures": null,
+  "data_source": "synthetic"
+}

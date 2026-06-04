@@ -1,0 +1,11 @@
+{
+  "id": "multi-decline-missing-policy-03",
+  "source_type": "multi",
+  "question": "Based on the retention policy document, how many of Carol's documents must be deleted this week?",
+  "expected_kind": "decline",
+  "golden_answer": "I found Carol's documents in the dataset but no retention policy document defining a deletion schedule, so I can't determine how many must be deleted.",
+  "must_include": [],
+  "must_not_fabricate": true,
+  "fixtures": {"seed": "evals/fixtures/cctp-mini.sql"},
+  "data_source": "synthetic"
+}

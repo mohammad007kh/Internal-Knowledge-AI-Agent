@@ -1,0 +1,11 @@
+{
+  "id": "db-documents-count-04",
+  "source_type": "database",
+  "question": "How many documents are stored in Carol's default workspace?",
+  "expected_kind": "answer",
+  "golden_answer": "Carol's default workspace contains 12 documents.",
+  "must_include": ["12"],
+  "must_not_fabricate": true,
+  "fixtures": {"seed": "evals/fixtures/cctp-mini.sql"},
+  "data_source": "synthetic"
+}

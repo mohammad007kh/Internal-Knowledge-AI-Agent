@@ -1,0 +1,11 @@
+{
+  "id": "file-security-badge-04",
+  "source_type": "file",
+  "question": "Who should an employee contact to replace a lost building access badge, per the facilities guide?",
+  "expected_kind": "answer",
+  "golden_answer": "The facilities guide says to contact the Workplace Operations desk to replace a lost building access badge.",
+  "must_include": ["Workplace Operations"],
+  "must_not_fabricate": true,
+  "fixtures": null,
+  "data_source": "synthetic"
+}

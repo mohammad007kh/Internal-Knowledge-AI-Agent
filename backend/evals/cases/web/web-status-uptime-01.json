@@ -1,0 +1,11 @@
+{
+  "id": "web-status-uptime-01",
+  "source_type": "web",
+  "question": "What uptime percentage does the Cinderblock status page report for the last 90 days?",
+  "expected_kind": "answer",
+  "golden_answer": "The Cinderblock status page reports 99.95% uptime over the last 90 days.",
+  "must_include": ["99.95"],
+  "must_not_fabricate": true,
+  "fixtures": null,
+  "data_source": "synthetic"
+}

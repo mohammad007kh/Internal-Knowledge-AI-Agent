@@ -1,0 +1,11 @@
+{
+  "id": "web-decline-roadmap-04",
+  "source_type": "web",
+  "question": "What unreleased Cinderblock features are planned for 2030 according to the public website?",
+  "expected_kind": "decline",
+  "golden_answer": "The public website does not list any 2030 roadmap, so I can't tell you about unreleased features.",
+  "must_include": [],
+  "must_not_fabricate": true,
+  "fixtures": null,
+  "data_source": "synthetic"
+}

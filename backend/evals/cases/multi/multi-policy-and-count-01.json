@@ -1,0 +1,11 @@
+{
+  "id": "multi-policy-and-count-01",
+  "source_type": "multi",
+  "question": "How many of Alice's workspaces exceed the document limit defined in the storage policy document?",
+  "expected_kind": "answer",
+  "golden_answer": "The storage policy sets a 10-document limit per workspace, and 1 of Alice's 3 workspaces exceeds it.",
+  "must_include": ["1"],
+  "must_not_fabricate": true,
+  "fixtures": {"seed": "evals/fixtures/cctp-mini.sql"},
+  "data_source": "synthetic"
+}

@@ -1,0 +1,11 @@
+{
+  "id": "db-bob-role-03",
+  "source_type": "database",
+  "question": "What role is assigned to the user named Bob?",
+  "expected_kind": "answer",
+  "golden_answer": "Bob is assigned the editor role.",
+  "must_include": ["editor"],
+  "must_not_fabricate": true,
+  "fixtures": {"seed": "evals/fixtures/cctp-mini.sql"},
+  "data_source": "synthetic"
+}

@@ -1,0 +1,11 @@
+{
+  "id": "file-decline-salary-05",
+  "source_type": "file",
+  "question": "What is the exact base salary of the Acme Synthetic Labs CEO?",
+  "expected_kind": "decline",
+  "golden_answer": "I could not find any document that states the CEO's base salary, so I can't answer that.",
+  "must_include": [],
+  "must_not_fabricate": true,
+  "fixtures": null,
+  "data_source": "synthetic"
+}
