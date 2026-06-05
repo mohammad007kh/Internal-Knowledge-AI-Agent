@@ -131,6 +131,13 @@ docker-compose.override.yml
 docs/ReferenceImage/
 
 # =============================================================
+# Eval run artifacts (T-042) — generated per run, not committed.
+# The committed baseline summary lives in T-045's BASELINE.md instead.
+# =============================================================
+backend/evals/runs/*
+!backend/evals/runs/.gitkeep
+
+# =============================================================
 # SpecKit (internal AI agent scaffolding - not part of project source)
 # =============================================================
 memory/
