@@ -138,6 +138,12 @@ backend/evals/runs/*
 !backend/evals/runs/.gitkeep
 
 # =============================================================
+# pnpm local store — created by Docker runs mounting frontend/
+# as a volume. Lives at ~/.local/share/pnpm/store on the host.
+# =============================================================
+frontend/.pnpm-store/
+
+# =============================================================
 # SpecKit (internal AI agent scaffolding - not part of project source)
 # =============================================================
 memory/
