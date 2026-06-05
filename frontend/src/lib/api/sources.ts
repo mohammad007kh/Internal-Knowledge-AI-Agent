@@ -273,6 +273,52 @@ export interface InspectSourceResponse {
   schema_summary: Record<string, unknown>
 }
 
+// ---------------------------------------------------------------------------
+// Source intent (004-agentic-pipeline, T-023 endpoints; client wired here)
+//
+// Mirrors contracts/intent-api.yaml exactly. The admin review surface
+// (IntentSection) reads via getIntentApi, saves via putIntentApi (which flips
+// `intent_status` → 'user_set' server-side), and (re)generates the AI draft
+// via proposeIntentApi.
+//
+// `intent_status` ramp:
+//   - pending_ai  — admin opted into AI authoring; the draft hasn't landed.
+//   - ai_set      — the assistant wrote a draft; reviewing (Save) activates
+//                   out-of-scope decline authority (FR-002).
+//   - user_set    — an admin reviewed/edited; this is authoritative and the
+//                   propose pass will no longer overwrite it.
+// ---------------------------------------------------------------------------
+
+export type IntentStatus = 'pending_ai' | 'ai_set' | 'user_set'
+
+/** A single `cross_source_hints` entry — admin-authored, never AI-written. */
+export interface CrossSourceHint {
+  topic: string
+  source_id: string
+}
+
+export interface SourceIntent {
+  purpose: string | null
+  example_questions: string[] | null
+  out_of_scope: string[] | null
+  cross_source_hints: CrossSourceHint[] | null
+  intent_status: IntentStatus
+  intent_updated_at: string | null
+}
+
+/**
+ * PUT body. All fields optional and additive — a provided field replaces the
+ * stored value; an omitted field is left untouched. The server runs STRICT
+ * sanitization + cap enforcement and returns 422 (problem+json, field named)
+ * on violation.
+ */
+export interface SourceIntentUpdate {
+  purpose?: string | null
+  example_questions?: string[] | null
+  out_of_scope?: string[] | null
+  cross_source_hints?: CrossSourceHint[] | null
+}
+
 export interface RefreshDescriptionResponse {
   proposed_description: string
 }
@@ -373,6 +419,76 @@ export async function autoNameApi(sourceId: string): Promise<AutoNameResponse> {
     `/api/v1/sources/${sourceId}/auto-name`
   )
   return data
+}
+
+// ---------------------------------------------------------------------------
+// Source intent endpoints (T-023 → consumed by IntentSection via TanStack hooks)
+// ---------------------------------------------------------------------------
+
+/**
+ * Sentinel thrown by `proposeIntentApi` when the backend returns 409 — a
+ * schema study or intent proposal is already in flight for this source. The
+ * UI surfaces this as a Sonner toast rather than a generic error.
+ *
+ * The propose 409 is raised via `HTTPException(detail={...})`, which FastAPI
+ * serialises as plain `application/json` (NOT `application/problem+json`), so
+ * the shared apiClient interceptor does NOT flatten it — the raw AxiosError
+ * (with `response.status === 409`) reaches us here. We still defensively match
+ * the backend's stable detail text as a fallback in case a future change
+ * routes it through the problem+json normaliser (which drops the status).
+ */
+export class IntentProposalConflictError extends Error {
+  readonly status = 409
+  constructor(message = 'A study or proposal is already running.') {
+    super(message)
+    this.name = 'IntentProposalConflictError'
+  }
+}
+
+const INTENT_IN_FLIGHT_DETAIL_FRAGMENT = 'already in flight'
+
+export async function getIntentApi(sourceId: string): Promise<SourceIntent> {
+  const { data } = await apiClient.get<SourceIntent>(
+    `/api/v1/sources/${sourceId}/intent`
+  )
+  return data
+}
+
+export async function putIntentApi(
+  sourceId: string,
+  body: SourceIntentUpdate
+): Promise<SourceIntent> {
+  const { data } = await apiClient.put<SourceIntent>(
+    `/api/v1/sources/${sourceId}/intent`,
+    body
+  )
+  return data
+}
+
+/**
+ * Enqueue the AI intent-proposal pass (202). Translates the in-flight 409 into
+ * a typed `IntentProposalConflictError` so the hook can show a friendly toast.
+ */
+export async function proposeIntentApi(sourceId: string): Promise<void> {
+  try {
+    await apiClient.post<void>(`/api/v1/sources/${sourceId}/intent/propose`)
+  } catch (error: unknown) {
+    const maybeAxios = error as {
+      response?: { status?: number }
+      status?: number
+    }
+    const status = maybeAxios.response?.status ?? maybeAxios.status
+    if (status === 409) {
+      throw new IntentProposalConflictError()
+    }
+    if (
+      error instanceof Error &&
+      error.message.includes(INTENT_IN_FLIGHT_DETAIL_FRAGMENT)
+    ) {
+      throw new IntentProposalConflictError()
+    }
+    throw error
+  }
 }
 
 export async function updateSourceApi(

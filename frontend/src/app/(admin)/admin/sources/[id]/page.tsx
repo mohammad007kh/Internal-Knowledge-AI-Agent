@@ -45,6 +45,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { PermissionsManager } from '@/app/(admin)/admin/sources/[id]/permissions/_components/PermissionsManager'
 import { PendingDescriptionPill } from '@/app/(admin)/admin/sources/_components/PendingDescriptionPill'
 import { AINamingCard } from '@/app/(admin)/admin/sources/[id]/_components/AINamingCard'
+import { IntentSection } from '@/app/(admin)/admin/sources/[id]/_components/IntentSection'
 import { EditCredentialsDialog } from '@/app/(admin)/admin/sources/[id]/_components/EditCredentialsDialog'
 import { SchemaViewer } from '@/app/(admin)/admin/sources/[id]/_components/SchemaViewer'
 import {
@@ -1449,6 +1450,11 @@ function EditableSettingsForm({ source }: EditableSettingsFormProps) {
           setValue via the onApply callback, so the sticky save bar updates
           instead of writing directly. */}
       <AINamingCard source={source} onApply={applyAiProposal} />
+
+      {/* Source-intent review surface (004-agentic-pipeline T-025). Owns its
+          own intent query + PUT/propose mutations — independent of the
+          settings form's single-writer path above. */}
+      <IntentSection sourceId={source.id} />
 
       <Card>
         <CardHeader>
