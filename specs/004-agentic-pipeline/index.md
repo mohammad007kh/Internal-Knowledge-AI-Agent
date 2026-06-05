@@ -11,8 +11,8 @@
 | Metric      | Value |
 | ----------- | ----- |
 | Total Tasks | 41    |
-| Completed   | 14    |
-| Verified    | 14    |
+| Completed   | 16    |
+| Verified    | 16    |
 | Coverage    | 100% (26/26 FRs mapped; FR-025 is a scope constraint — see traceability) |
 
 **Current Phase**: Implementation (pending `/atomicspec.implement`)
@@ -41,12 +41,12 @@
 | [T-023](./tasks/T-023-intent-api-endpoints.md) | US1 | Intent GET/PUT/propose API (require_admin) | ✅ Done | `pytest api tests` |
 | [T-024](./tasks/T-024-intent-prompt-wiring.md) | US1 | Intent → 3 prompt consumers + capability ramp | ✅ Done | `pytest render tests` |
 | [T-025](./tasks/T-025-intent-review-ui.md) | US1 | Admin intent review UI | ✅ Done | `vitest + tsc` |
-| [T-037](./tasks/T-037-wire-us1-intent.md) | US1 | WIRE US1: router + api client + hooks | 🔴 Todo | `pytest integration` |
+| [T-037](./tasks/T-037-wire-us1-intent.md) | US1 | WIRE US1: router + api client + hooks | ✅ Done | `pytest integration` |
 | [T-040](./tasks/T-040-eval-case-schema-and-cases.md) | US6 | Eval case schema + frozen set (synthetic) | ✅ Done | `pytest case validation` |
 | [T-041](./tasks/T-041-eval-fixtures-loader.md) | US6 | Ephemeral DB fixtures loader | ✅ Done | `pytest fixtures` |
 | [T-042](./tasks/T-042-eval-runner.md) | US6 | Headless eval runner (partitioned, exit codes) | ✅ Done | `pytest runner` |
 | [T-043](./tasks/T-043-eval-judge.md) | US6 | LLM judge (binary, dual decline standard) | ✅ Done | `pytest judge` |
-| [T-044](./tasks/T-044-eval-compare-and-ci.md) | US6 | Gate compare + nightly CI job | 🔴 Todo | `pytest compare` |
+| [T-044](./tasks/T-044-eval-compare-and-ci.md) | US6 | Gate compare + nightly CI job | ✅ Done | `pytest compare` |
 | [T-045](./tasks/T-045-eval-baseline-run.md) | US6 | Partitioned baseline run + BASELINE.md | 🔴 Todo | `evals.run --pipeline current` |
 | [T-050](./tasks/T-050-token-accumulation.md) | US2/3 | C0: token usage → additive state reducers | 🔴 Todo | `pytest token tests` |
 | [T-051](./tasks/T-051-agent-state-plan-types.md) | US2 | C1: PlanStep/StepResult/state schema | 🔴 Todo | `pytest + mypy` |

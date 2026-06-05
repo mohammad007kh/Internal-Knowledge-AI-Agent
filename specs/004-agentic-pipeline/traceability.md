@@ -62,12 +62,12 @@ negative-scope constraint — enforced by absence + review, see note below.
 | T-023 | FR-001, FR-002 — ✅ Done, Verified 2026-06-04 (19 tests: require_admin×3, 422 strict-sanitize, 409 in-flight, no config leak; error_handler input-strip; order-independent celery spy) |
 | T-024 | FR-003, FR-004, FR-005 — ✅ Done, Verified 2026-06-04 (26 tests: ramp tiers, delimiters, router cap, fallback; ruff + mypy isolation clean) |
 | T-025 | FR-001, FR-002 — ✅ Done, Verified 2026-06-06 (12 Vitest tests: badge×3, Save+toast.success, server-422 inline, Regenerate+toast, 409 toast, Regenerate-disabled-user_set, 501-char Zod cap, OOS 9-vs-10 boundary, questions 4→5 disables Add; query key in sourcesKeys hierarchy) |
-| T-037 | FR-001..FR-005 (wiring/integration) |
+| T-037 | FR-001..FR-005 (wiring/integration) — ✅ Done, Verified 2026-06-06 (6 integration tests: GET 200 + intent_status, PUT→user_set + purpose echo, propose 202, non-admin 403×2, 501-char PUT 422; follows existing integration patterns, ruff clean) |
 | T-040 | FR-022 — ✅ Done, Verified 2026-06-04 (53 tests; 26 synthetic cases, 13 declines, 4 multi; ruff + mypy clean) |
 | T-041 | FR-022 — ✅ Done, Verified 2026-06-04 (ephemeral schema seed+teardown proven via in-container harness; loader renamed fixtures→fixtures_loader to avoid pkg/dir clash; conftest port/venv portability tracked as debt) |
 | T-042 | FR-023, FR-024 — ✅ Done, Verified 2026-06-06 (20 unit tests: normal flow, agentic gate exit-2 via main(), FixtureError, JudgeError, prior-run comparison, _coerce_tokens, PASS/FAIL plain-text assertions; ruff + mypy clean) |
 | T-043 | FR-023 — ✅ Done, Verified 2026-06-04 (19 tests, LLM mocked; dual-decline standard for both pipelines; judge model pinned to dated version) |
-| T-044 | FR-023, FR-024 |
+| T-044 | FR-023, FR-024 — ✅ Done, Verified 2026-06-06 (28 unit tests: honesty gate, regression gate, compare_runs orchestration, main() CLI path, parametric threshold sweep; nightly CI workflow with Security Rule 4 assertion + artifact upload; ruff clean) |
 | T-045 | FR-023 |
 | T-050 | FR-019, FR-021 |
 | T-051 | FR-006, FR-007 |
