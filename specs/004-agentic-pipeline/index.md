@@ -11,8 +11,8 @@
 | Metric      | Value |
 | ----------- | ----- |
 | Total Tasks | 41    |
-| Completed   | 16    |
-| Verified    | 16    |
+| Completed   | 17    |
+| Verified    | 17    |
 | Coverage    | 100% (26/26 FRs mapped; FR-025 is a scope constraint — see traceability) |
 
 **Current Phase**: Implementation (pending `/atomicspec.implement`)
@@ -47,7 +47,7 @@
 | [T-042](./tasks/T-042-eval-runner.md) | US6 | Headless eval runner (partitioned, exit codes) | ✅ Done | `pytest runner` |
 | [T-043](./tasks/T-043-eval-judge.md) | US6 | LLM judge (binary, dual decline standard) | ✅ Done | `pytest judge` |
 | [T-044](./tasks/T-044-eval-compare-and-ci.md) | US6 | Gate compare + nightly CI job | ✅ Done | `pytest compare` |
-| [T-045](./tasks/T-045-eval-baseline-run.md) | US6 | Partitioned baseline run + BASELINE.md | 🔴 Todo | `evals.run --pipeline current` |
+| [T-045](./tasks/T-045-eval-baseline-run.md) | US6 | Partitioned baseline run + BASELINE.md | ✅ Done | `evals.run --pipeline current` |
 | [T-050](./tasks/T-050-token-accumulation.md) | US2/3 | C0: token usage → additive state reducers | 🔴 Todo | `pytest token tests` |
 | [T-051](./tasks/T-051-agent-state-plan-types.md) | US2 | C1: PlanStep/StepResult/state schema | 🔴 Todo | `pytest + mypy` |
 | [T-052](./tasks/T-052-planner-node.md) | US2 | C2: planner node + plan event + perm assert | 🔴 Todo | `pytest planner` |
