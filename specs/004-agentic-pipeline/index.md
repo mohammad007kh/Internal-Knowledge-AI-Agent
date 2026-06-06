@@ -51,8 +51,8 @@
 | [T-050](./tasks/T-050-token-accumulation.md) | US2/3 | C0: token usage → additive state reducers | ✅ Done | 12 unit tests; all 142 agent tests pass; ruff clean |
 | [T-051](./tasks/T-051-agent-state-plan-types.md) | US2 | C1: PlanStep/StepResult/state schema | ✅ Done | 18 unit tests; mypy + ruff clean; 160 agent tests pass |
 | [T-052](./tasks/T-052-planner-node.md) | US2 | C2: planner node + plan event + perm assert | ✅ Done | 17 unit tests; html.escape hardening; AgentState additions; ruff clean; 177 agent tests pass |
-| [T-053](./tasks/T-053-executor-node.md) | US2 | C3: executor (R1b binding, step events) | 🔴 Todo | `pytest executor` |
-| [T-054](./tasks/T-054-verify-node-light.md) | US3 | C4: verify node + R4b state machine | 🔴 Todo | `pytest verify` |
+| [T-053](./tasks/T-053-executor-node.md) | US2 | C3: executor (R1b binding, step events) | ✅ Done | `pytest executor` |
+| [T-054](./tasks/T-054-verify-node-light.md) | US3 | C4: verify node + R4b state machine | ✅ Done | `pytest verify` |
 | [T-055](./tasks/T-055-verify-heavy-sql.md) | US3 | C5: heavy SQL verification | 🔴 Todo | `pytest heavy-verify` |
 | [T-056](./tasks/T-056-replan-node.md) | US2 | C6: replan node + events | 🔴 Todo | `pytest replan` |
 | [T-057](./tasks/T-057-budget-guard-diagnostics.md) | US3/6 | C7: budget guard + diagnostics + honest-failure | 🔴 Todo | `pytest guard` |
