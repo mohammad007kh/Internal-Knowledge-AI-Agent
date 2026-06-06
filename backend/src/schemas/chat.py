@@ -147,6 +147,11 @@ class StreamEventType(StrEnum):
     # ``/chat`` → ``/chat/<id>`` and patch the sidebar cache before any
     # tokens flow.  Never emitted when the path already targets a real id.
     SESSION_CREATED = "session_created"
+    # Agentic-pipeline events (T-052 owns these enum entries; T-053/T-056/T-057 emit them).
+    PLAN = "plan"      # planner emits the step-by-step plan before execution
+    STEP = "step"      # executor emits per-step progress events
+    REPLAN = "replan"  # replan node emits a revised plan
+    BUDGET = "budget"  # budget guard emits a cost-ceiling diagnostic
 
 
 class ChatStreamEvent(BaseModel):
@@ -255,5 +260,68 @@ class ChatStreamEvent(BaseModel):
             data={
                 "session_id": session_id,
                 "source_ids": source_ids or [],
+            },
+        )
+
+    @classmethod
+    def plan(
+        cls,
+        *,
+        revision: int,
+        reason: str | None,
+        steps: list[dict[str, Any]],
+    ) -> ChatStreamEvent:
+        """Emit the planner's step-by-step plan before execution begins."""
+        return cls(
+            event=StreamEventType.PLAN,
+            data={"revision": revision, "reason": reason, "steps": steps},
+        )
+
+    @classmethod
+    def step(
+        cls,
+        *,
+        step_id: str,
+        label: str,
+        status: str,
+        narration: str = "",
+    ) -> ChatStreamEvent:
+        """Emit progress for a single executor step."""
+        return cls(
+            event=StreamEventType.STEP,
+            data={"step_id": step_id, "label": label, "status": status, "narration": narration},
+        )
+
+    @classmethod
+    def replan(
+        cls,
+        *,
+        revision: int,
+        reason: str,
+        steps: list[dict[str, Any]],
+    ) -> ChatStreamEvent:
+        """Emit a revised plan after a failed verification step."""
+        return cls(
+            event=StreamEventType.REPLAN,
+            data={"revision": revision, "reason": reason, "steps": steps},
+        )
+
+    @classmethod
+    def budget(
+        cls,
+        *,
+        steps_used: int,
+        steps_max: int,
+        tokens_used: int,
+        tokens_max: int,
+    ) -> ChatStreamEvent:
+        """Emit a budget-ceiling diagnostic when the agent nears its limits."""
+        return cls(
+            event=StreamEventType.BUDGET,
+            data={
+                "steps_used": steps_used,
+                "steps_max": steps_max,
+                "tokens_used": tokens_used,
+                "tokens_max": tokens_max,
             },
         )

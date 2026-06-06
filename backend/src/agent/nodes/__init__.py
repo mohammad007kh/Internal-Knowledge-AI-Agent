@@ -5,6 +5,7 @@ from src.agent.nodes.generate import generate_response
 from src.agent.nodes.guardrail import guardrail_input, guardrail_output
 from src.agent.nodes.history import load_history
 from src.agent.nodes.persist import format_response, save_message
+from src.agent.nodes.planner import plan_query
 from src.agent.nodes.query_analyzer import analyze_query
 from src.agent.nodes.reflector import reflect
 from src.agent.nodes.retrieve import retrieve_context
@@ -20,6 +21,7 @@ __all__ = [
     "guardrail_output",
     "handle_clarification",
     "load_history",
+    "plan_query",
     "reflect",
     "retrieve_context",
     "route_sources",
