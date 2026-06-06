@@ -99,6 +99,9 @@ async def generate_response(
             "provider": client.provider,
             "chunk_count": len(state.get("retrieved_chunks", [])),
             "query": state.get("query", "")[:200],
+            # Estimate-then-reconcile (FR-021): record configured max_tokens as
+            # the pre-call output budget estimate; actuals replace it post-stream.
+            "estimated_output_tokens": client.max_tokens,
         },
     )
 
@@ -119,6 +122,8 @@ async def generate_response(
         return {
             "final_answer": NO_CONTEXT_MESSAGE,
             "error": "generation_failed",
+            "total_input_tokens": 0,
+            "total_output_tokens": 0,
         }
 
     # Once the first token has streamed to the client, we MUST NOT retry —
@@ -172,14 +177,28 @@ async def generate_response(
 
     try:
         answer, usage = await _call()
+        in_tok = usage["input_tokens"]
+        out_tok = usage["output_tokens"]
         span.update(output={"answer_length": len(answer), **usage})
         logger.info(
             "generate_response: model=%s tokens in=%d out=%d",
             client.model_id,
-            usage["input_tokens"],
-            usage["output_tokens"],
+            in_tok,
+            out_tok,
         )
-        return {"final_answer": answer}
+        # Emit accumulated turn cost as a Langfuse score (Constitution II).
+        prior_in = state.get("total_input_tokens") or 0
+        prior_out = state.get("total_output_tokens") or 0
+        langfuse.score(  # type: ignore[attr-defined]
+            trace_id=state["trace_id"],
+            name="turn_token_cost",
+            value=float(prior_in + prior_out + in_tok + out_tok),
+        )
+        return {
+            "final_answer": answer,
+            "total_input_tokens": in_tok,
+            "total_output_tokens": out_tok,
+        }
 
     except Exception as exc:
         logger.exception("generate_response failed after retries: %s", exc)
@@ -187,6 +206,8 @@ async def generate_response(
         return {
             "final_answer": NO_CONTEXT_MESSAGE,
             "error": "generation_failed",
+            "total_input_tokens": 0,
+            "total_output_tokens": 0,
         }
     finally:
         span.end()

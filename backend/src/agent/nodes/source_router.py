@@ -158,7 +158,7 @@ async def _call_llm(
     catalog: list[dict[str, Any]],
     *,
     ai_model_resolver: AIModelResolver,
-) -> tuple[list[str], list[str]]:
+) -> tuple[list[str], list[str], int, int]:
     client = await ai_model_resolver.resolve(_STAGE)
     prompt = load_prompt(_STAGE, custom=client.custom_prompt)
     user_payload = json.dumps({"sources": catalog, "question": query})
@@ -176,7 +176,9 @@ async def _call_llm(
     payload = json.loads(raw)
     selected = _safe_uuids(payload.get("selected_source_ids") or [])
     text_to_query = _safe_uuids(payload.get("use_text_to_query_for") or [])
-    return selected, text_to_query
+    in_tok = int(response.usage.prompt_tokens) if response.usage else 0
+    out_tok = int(response.usage.completion_tokens) if response.usage else 0
+    return selected, text_to_query, in_tok, out_tok
 
 
 async def route_sources(
@@ -213,8 +215,9 @@ async def route_sources(
         # Build {id: source_type} for filtering text_to_query targets.
         type_by_id = {row["id"]: row["type"] for row in catalog}
 
+        in_tok = out_tok = 0
         try:
-            selected, text_to_query_ids = await _call_llm(
+            selected, text_to_query_ids, in_tok, out_tok = await _call_llm(
                 query, catalog, ai_model_resolver=ai_model_resolver
             )
         except Exception:  # noqa: BLE001 - degrade
@@ -259,6 +262,8 @@ async def route_sources(
         return {
             "selected_source_ids": selected,
             "text_to_query_source_ids": text_to_query_ids,
+            "total_input_tokens": in_tok,
+            "total_output_tokens": out_tok,
         }
     finally:
         span.end()

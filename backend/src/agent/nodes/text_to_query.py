@@ -98,7 +98,7 @@ async def _generate_sql(
     query: str,
     schema_sketch: str,
     ai_model_resolver: AIModelResolver,
-) -> str:
+) -> tuple[str, int, int]:
     client = await ai_model_resolver.resolve(_STAGE)
     prompt = load_prompt(_STAGE, custom=client.custom_prompt)
     user_payload = (
@@ -114,7 +114,9 @@ async def _generate_sql(
         temperature=client.temperature,
         max_tokens=client.max_tokens,
     )
-    return (response.choices[0].message.content or "").strip()
+    in_tok = int(response.usage.prompt_tokens) if response.usage else 0
+    out_tok = int(response.usage.completion_tokens) if response.usage else 0
+    return (response.choices[0].message.content or "").strip(), in_tok, out_tok
 
 
 def _decrypt_source_config(source: Any) -> dict[str, Any] | None:
@@ -202,6 +204,8 @@ async def text_to_query(
     new_chunks: list[dict[str, Any]] = []
     generated_sql: dict[str, str] = {}
     skipped: list[str] = []
+    total_in = 0
+    total_out = 0
 
     try:
         # Resolve sources by id (defensive — bad inputs just get skipped).
@@ -243,11 +247,13 @@ async def text_to_query(
             schema_sketch = await _load_schema_sketch(db_session, source)
 
             try:
-                raw_sql = await _generate_sql(
+                raw_sql, in_tok, out_tok = await _generate_sql(
                     query=query,
                     schema_sketch=schema_sketch,
                     ai_model_resolver=ai_model_resolver,
                 )
+                total_in += in_tok
+                total_out += out_tok
             except Exception:  # noqa: BLE001
                 logger.warning(
                     "text_to_query: LLM call failed for source=%s", sid,
@@ -327,6 +333,8 @@ async def text_to_query(
         return {
             "retrieved_chunks": merged,
             "generated_sql": generated_sql,
+            "total_input_tokens": total_in,
+            "total_output_tokens": total_out,
         }
     finally:
         span.end()
@@ -367,7 +375,7 @@ def _description_fallback(source: Any) -> str:
 
 
 async def _load_schema_sketch(
-    db: "AsyncSession",  # noqa: F821 — forward ref under TYPE_CHECKING
+    db: AsyncSession,  # noqa: F821 — forward ref under TYPE_CHECKING
     source: Any,
 ) -> str:
     """Render the latest persisted SchemaDocument as a compact text block
@@ -412,7 +420,7 @@ async def _load_schema_sketch(
     return _render_schema_sketch(doc)
 
 
-def _render_schema_sketch(doc: "SchemaDocument") -> str:  # noqa: F821
+def _render_schema_sketch(doc: SchemaDocument) -> str:  # noqa: F821
     """Format a :class:`SchemaDocument` into a compact text block the LLM
     can read efficiently.
 

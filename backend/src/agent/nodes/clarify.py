@@ -101,8 +101,8 @@ async def _llm_decision(
     query: str,
     *,
     ai_model_resolver: AIModelResolver,
-) -> ClarificationDecision:
-    """Resolve the slot, call the LLM, return a structured verdict."""
+) -> tuple[ClarificationDecision, int, int]:
+    """Resolve the slot, call the LLM, return a structured verdict and token deltas."""
     client = await ai_model_resolver.resolve(_STAGE)
     prompt = load_prompt(_STAGE, custom=client.custom_prompt)
     response = await client.http_client.chat.completions.create(
@@ -126,7 +126,9 @@ async def _llm_decision(
         question = "Could you please clarify your question?"
     if not needs:
         question = None
-    return ClarificationDecision(needs_clarification=needs, question=question)
+    in_tok = int(response.usage.prompt_tokens) if response.usage else 0
+    out_tok = int(response.usage.completion_tokens) if response.usage else 0
+    return ClarificationDecision(needs_clarification=needs, question=question), in_tok, out_tok
 
 
 async def check_clarification(
@@ -150,9 +152,10 @@ async def check_clarification(
     try:
         decision: ClarificationDecision
         used_llm = False
+        in_tok = out_tok = 0
         if ai_model_resolver is not None:
             try:
-                decision = await _llm_decision(
+                decision, in_tok, out_tok = await _llm_decision(
                     query, ai_model_resolver=ai_model_resolver
                 )
                 used_llm = True
@@ -162,6 +165,7 @@ async def check_clarification(
                     exc_info=True,
                 )
                 decision = _heuristic_decision(query)
+                in_tok = out_tok = 0
         else:
             decision = _heuristic_decision(query)
 
@@ -181,6 +185,8 @@ async def check_clarification(
         return {
             "requires_clarification": decision.needs_clarification,
             "clarification_question": decision.question,
+            "total_input_tokens": in_tok,
+            "total_output_tokens": out_tok,
         }
     finally:
         span.end()

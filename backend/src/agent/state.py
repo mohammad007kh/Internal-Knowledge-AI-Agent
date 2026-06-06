@@ -1,6 +1,7 @@
 """AgentState TypedDict for LangGraph pipeline."""
 from __future__ import annotations
 
+import operator
 from typing import Annotated, Any
 
 from langchain_core.messages import BaseMessage
@@ -29,8 +30,8 @@ class AgentState(TypedDict, total=False):
     final_answer: str | None
     error: str | None
     sources: list[dict[str, Any]]
-    total_input_tokens: int
-    total_output_tokens: int
+    total_input_tokens: Annotated[int, operator.add]
+    total_output_tokens: Annotated[int, operator.add]
     # --- v2 additions -------------------------------------------------------
     query_variants: list[str]
     selected_source_ids: list[str]
