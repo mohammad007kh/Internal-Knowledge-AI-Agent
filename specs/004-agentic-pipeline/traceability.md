@@ -70,7 +70,7 @@ negative-scope constraint — enforced by absence + review, see note below.
 | T-044 | FR-023, FR-024 — ✅ Done, Verified 2026-06-06 (28 unit tests: honesty gate, regression gate, compare_runs orchestration, main() CLI path, parametric threshold sweep; nightly CI workflow with Security Rule 4 assertion + artifact upload; ruff clean) |
 | T-045 | FR-023 — ✅ Done, Verified 2026-06-06 (22 cases executed, 0 non-terminating — SC-004 PASS; SC-005 anchor 50.0% (11/22) written to BASELINE.md; harness defects fixed: idempotent _ensure_eval_owner/_ensure_eval_session, eval_id UUID round-trip, _pipeline_with_session closure; 120 unit tests pass; ruff clean) |
 | T-050 | FR-019, FR-021 — ✅ Done, Verified 2026-06-06 (12 unit tests: Annotated[int, operator.add] reducers; generate/source_router/text_to_query/clarify return deltas; turn_token_cost Langfuse score; estimate-then-reconcile in synthesizer span; ruff clean) |
-| T-051 | FR-006, FR-007 |
+| T-051 | FR-006, FR-007 — ✅ Done, Verified 2026-06-06 (18 unit tests: PlanStep/StepResult exact field sets, all status/verdict literals, nullable fields, no clarification_pending, no top-level narration, T-050 reducers preserved; mypy clean, ruff clean; 160 agent tests pass) |
 | T-052 | FR-006, FR-007, FR-008, FR-009, FR-014 (trigger) |
 | T-053 | FR-006, FR-009, FR-016 |
 | T-054 | FR-010, FR-012 |

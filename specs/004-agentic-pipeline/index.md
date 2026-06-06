@@ -11,8 +11,8 @@
 | Metric      | Value |
 | ----------- | ----- |
 | Total Tasks | 41    |
-| Completed   | 18    |
-| Verified    | 18    |
+| Completed   | 19    |
+| Verified    | 19    |
 | Coverage    | 100% (26/26 FRs mapped; FR-025 is a scope constraint — see traceability) |
 
 **Current Phase**: Implementation (pending `/atomicspec.implement`)
@@ -49,7 +49,7 @@
 | [T-044](./tasks/T-044-eval-compare-and-ci.md) | US6 | Gate compare + nightly CI job | ✅ Done | `pytest compare` |
 | [T-045](./tasks/T-045-eval-baseline-run.md) | US6 | Partitioned baseline run + BASELINE.md | ✅ Done | `evals.run --pipeline current` |
 | [T-050](./tasks/T-050-token-accumulation.md) | US2/3 | C0: token usage → additive state reducers | ✅ Done | 12 unit tests; all 142 agent tests pass; ruff clean |
-| [T-051](./tasks/T-051-agent-state-plan-types.md) | US2 | C1: PlanStep/StepResult/state schema | 🔴 Todo | `pytest + mypy` |
+| [T-051](./tasks/T-051-agent-state-plan-types.md) | US2 | C1: PlanStep/StepResult/state schema | ✅ Done | 18 unit tests; mypy + ruff clean; 160 agent tests pass |
 | [T-052](./tasks/T-052-planner-node.md) | US2 | C2: planner node + plan event + perm assert | 🔴 Todo | `pytest planner` |
 | [T-053](./tasks/T-053-executor-node.md) | US2 | C3: executor (R1b binding, step events) | 🔴 Todo | `pytest executor` |
 | [T-054](./tasks/T-054-verify-node-light.md) | US3 | C4: verify node + R4b state machine | 🔴 Todo | `pytest verify` |
