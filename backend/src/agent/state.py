@@ -111,3 +111,4 @@ class AgentState(TypedDict, total=False):
     step_event_data: list[dict[str, Any]]  # SSE events for the current step (started/finished/failed); read by T-058
     clarification_options: list[dict[str, Any]]  # set by planner on needs_clarification path
     budget: _AgentBudget  # read-only snapshot; guard (T-057) reads, no node writes
+    _verify_route: str | None  # pre-computed by verify_step to avoid retry_count timing ambiguity
