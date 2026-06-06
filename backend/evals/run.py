@@ -329,7 +329,7 @@ async def _run_and_judge(
     judge_model: str,
 ) -> CaseResult:
     """Invoke the pipeline under a wall-clock bound, then judge the candidate."""
-    eval_id = uuid.uuid4().hex
+    eval_id = uuid.uuid4()
     input_tokens = 0
     output_tokens = 0
     judge_prompt_version: str | None = None
@@ -337,11 +337,11 @@ async def _run_and_judge(
         result = await asyncio.wait_for(
             pipeline_runner(
                 compiled_graph=compiled_graph,
-                session_id=f"eval-{eval_id}",
+                session_id=str(eval_id),
                 user_id=str(_EVAL_OWNER_ID),
                 query=case.question,
                 source_ids=source_ids,
-                trace_id=f"eval-trace-{eval_id}",
+                trace_id=f"eval-trace-{eval_id.hex}",
             ),
             timeout=deadline_secs,
         )
@@ -614,6 +614,63 @@ def _render_markdown(report: RunReport, prior: dict[str, Any] | None) -> str:
 # --------------------------------------------------------------------------- #
 
 
+async def _ensure_eval_session(session_id: uuid.UUID, owner_id: uuid.UUID) -> None:
+    """Idempotent: ensure a chat_sessions row exists so guardrail_events FK is satisfied.
+
+    The production pipeline inserts guardrail_event rows that reference a
+    chat_sessions.id.  The headless eval runner bypasses the HTTP layer so no
+    session row is pre-created; we insert one here and commit immediately.
+    Uses check-before-add so a retry or concurrent caller doesn't raise.
+    """
+    from sqlalchemy.exc import IntegrityError  # noqa: PLC0415
+
+    from src.core.database import AsyncSessionLocal  # noqa: PLC0415
+    from src.models.chat import ChatSession  # noqa: PLC0415
+
+    async with AsyncSessionLocal() as seed_session:
+        existing = await seed_session.get(ChatSession, session_id)
+        if existing is None:
+            seed_session.add(ChatSession(id=session_id, user_id=owner_id))
+        try:
+            await seed_session.commit()
+        except IntegrityError:
+            await seed_session.rollback()
+
+
+async def _ensure_eval_owner(owner_id: uuid.UUID) -> None:
+    """Upsert the synthetic eval-harness user so the sources FK is satisfiable.
+
+    ``_EVAL_OWNER_ID`` is used as ``owner_id`` for every ephemeral temp-source
+    row. The ``sources.owner_id`` FK must point at an existing ``users`` row.
+    Runs in its own short-lived session and commits immediately so the row is
+    durable — later per-case session rollbacks cannot undo it.
+    Uses check-before-add + IntegrityError catch to be safe under concurrent
+    first-run inserts (e.g., matrix CI).
+    """
+    from sqlalchemy.exc import IntegrityError  # noqa: PLC0415
+
+    from src.core.database import AsyncSessionLocal  # noqa: PLC0415
+    from src.models.user import User, UserRole  # noqa: PLC0415
+
+    async with AsyncSessionLocal() as seed_session:
+        existing = await seed_session.get(User, owner_id)
+        if existing is None:
+            seed_session.add(
+                User(
+                    id=owner_id,
+                    email="eval-harness@eval.internal",
+                    hashed_password="*",
+                    full_name="Eval Harness",
+                    role=UserRole.admin,
+                    is_active=True,
+                )
+            )
+        try:
+            await seed_session.commit()
+        except IntegrityError:
+            await seed_session.rollback()
+
+
 async def _run_with_real_wiring(args: argparse.Namespace) -> RunReport:
     """Wire the real collaborators (DB session, graph, judge LLM) and run.
 
@@ -649,14 +706,23 @@ async def _run_with_real_wiring(args: argparse.Namespace) -> RunReport:
 
     judge_client = _RealJudgeLLM(AsyncOpenAI(api_key=settings.OPENAI_API_KEY))
 
+    await _ensure_eval_owner(_EVAL_OWNER_ID)
+
     async with AsyncSessionLocal() as session:
         compiled_graph = container.pipeline()
+
+        async def _pipeline_with_session(**kwargs: Any) -> dict[str, Any]:
+            """Wrap run_pipeline to pre-create the chat_session FK row."""
+            eval_session_id = uuid.UUID(kwargs["session_id"])
+            await _ensure_eval_session(eval_session_id, _EVAL_OWNER_ID)
+            return await run_pipeline(**kwargs)
+
         report = await run_evals(
             pipeline=args.pipeline,
             cases=cases,
             compiled_graph=compiled_graph,
             session=session,
-            pipeline_runner=run_pipeline,
+            pipeline_runner=_pipeline_with_session,
             judge_fn=judge_case,
             judge_llm=judge_client,
             limit=args.limit,
