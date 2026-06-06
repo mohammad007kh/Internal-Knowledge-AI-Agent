@@ -1,6 +1,7 @@
 """LangGraph node implementations."""
 
 from src.agent.nodes.clarify import check_clarification, handle_clarification
+from src.agent.nodes.executor import execute_step
 from src.agent.nodes.generate import generate_response
 from src.agent.nodes.guardrail import guardrail_input, guardrail_output
 from src.agent.nodes.history import load_history
@@ -14,6 +15,7 @@ from src.agent.nodes.text_to_query import text_to_query
 
 __all__ = [
     "analyze_query",
+    "execute_step",
     "check_clarification",
     "format_response",
     "generate_response",
