@@ -20,18 +20,20 @@ text is the only contract.
 """
 from __future__ import annotations
 
-import hashlib
 import json
 import logging
 import re
+import secrets
 import unicodedata
 from typing import TYPE_CHECKING, Any
 
 import sqlglot
+import sqlglot.errors
 from sqlglot import exp as sqlexp
 
 from src.agent.state import AgentState, PlanStep, _Verification
 from src.prompts import load_prompt
+from src.services.db_safety.sql_validator import DEFAULT_ROW_LIMIT
 
 if TYPE_CHECKING:
     from langfuse import Langfuse
@@ -49,7 +51,9 @@ _LOG_UNSAFE = re.compile(r"[\r\n\x00-\x1f\x7f​-‏‪-‮⁦-⁩﻿]")
 _VALID_VERDICTS: frozenset[str] = frozenset({"acceptable", "partial", "unacceptable"})
 _RETRY_PREFIX = "[Retry context: "
 
-_INJECTED_LIMIT = 100  # matches inject_limit() default; row count at this value = silent truncation risk
+# Sourced from the canonical db_safety default so the two can never drift.
+# Row count at/above this value = silent-truncation risk.
+_INJECTED_LIMIT = DEFAULT_ROW_LIMIT
 
 _MAX_SQL_CHARS = 20_000  # SEC-6: oversized SQL is treated as a parse-skip (no DoS on sqlglot)
 
@@ -64,8 +68,9 @@ _GATE_HINTS: dict[str, str] = {
 }
 _FALLBACK_HINT = "previous result was judged inadequate; refine the query"
 
+# L3: "how" removed — false-positive on narrative "how does X work" questions.
 _RESULT_IMPLY_WORDS: frozenset[str] = frozenset(
-    {"list", "show", "find", "get", "what", "which", "who", "give", "return", "display", "fetch", "how"}
+    {"list", "show", "find", "get", "what", "which", "who", "give", "return", "display", "fetch"}
 )
 _FILTER_IMPLY_WORDS: frozenset[str] = frozenset(
     {"for", "by", "named", "called", "where", "whose"}
@@ -81,6 +86,20 @@ def _safe_log(value: str, max_len: int = 200) -> str:
     """Strip control + BiDi override characters from LLM-generated strings before logging."""
     cleaned = _LOG_UNSAFE.sub("?", str(value))
     return unicodedata.normalize("NFC", cleaned)[:max_len]
+
+
+def _strip_code_fences(raw: str) -> str:
+    """Strip a leading ```/```lang fence and its trailing ``` some models add.
+
+    L4: shared by both the heavy and light JSON-parse paths so the stripping
+    logic exists once.  No-op when the text isn't fenced.
+    """
+    raw = raw.strip()
+    if raw.startswith("```"):
+        raw = raw.split("\n", 1)[-1]
+        raw = raw.rsplit("```", 1)[0]
+        raw = raw.strip()
+    return raw
 
 
 # ---------------------------------------------------------------------------
@@ -135,10 +154,9 @@ def _build_verify_delta(
     current_step: PlanStep,
     updated_past_steps: list[dict[str, Any]],
     verdict: str,
-    reason_for_hint_keys: list[str] | None,
+    hint_keys: list[str] | None,
     in_tok: int,
     out_tok: int,
-    failed_gate_keys: list[str] | None = None,
 ) -> dict[str, Any]:
     """Pure builder for the verify_step / _heavy_sql_verify return delta (M1).
 
@@ -169,7 +187,7 @@ def _build_verify_delta(
     }
 
     if verdict == "unacceptable" and original_retry < 1:
-        hint = _canned_hint(reason_for_hint_keys if reason_for_hint_keys is not None else failed_gate_keys)
+        hint = _canned_hint(hint_keys)
         original_sub_query = current_step.get("sub_query", "")
         delta["current_step"] = {
             **current_step,
@@ -180,13 +198,32 @@ def _build_verify_delta(
     return delta
 
 
-def _build_judge_prompt(sub_query: str, generated_sql: str, rows_text: str, nonce: str) -> str:
+def _tag_neutralizer(tag: str) -> re.Pattern[str]:
+    """Compile a case-insensitive matcher for any opening/closing variant of *tag*.
+
+    Matches ``<tag>``, ``</tag>``, the nonce-suffixed forms ``<tag-deadbeef>`` /
+    ``</tag-deadbeef>`` (hex suffix), with optional trailing whitespace before
+    ``>`` — so injected ``</ROWS>``, ``</rows >`` and bare ``<rows>`` are all
+    stripped.  The genuine nonce fences are re-added by the caller afterwards.
+    """
+    return re.compile(rf"</?{re.escape(tag)}(?:-[0-9a-fA-F]+)?\s*>", re.IGNORECASE)
+
+
+# Compiled once per tag — reused across every judge-prompt build.
+_TAG_NEUTRALIZERS: dict[str, re.Pattern[str]] = {
+    tag: _tag_neutralizer(tag) for tag in ("sub_query", "generated_sql", "rows")
+}
+
+
+def _build_judge_prompt(sub_query: Any, generated_sql: Any, rows_text: Any, nonce: str) -> str:
     """C2/SEC-2: single-pass prompt build with per-call NONCE data fences.
 
-    Each value has any literal nonce-fenced closing tag stripped before it is
-    concatenated between fixed fragments (no chained ``.replace()`` that could
-    clobber).  The instruction line names the exact nonce-tagged delimiters as
-    the only real boundaries.
+    Each value is ``str()``-coerced (LOW-2: a malformed plan could supply a
+    non-str), then ALL opening/closing tag variants (case-insensitive, with or
+    without a nonce suffix, trailing whitespace tolerated) are stripped via a
+    compiled regex before concatenation.  Only the per-call nonce fences re-added
+    here survive as real delimiters; ``secrets.token_hex`` makes the nonce
+    unpredictable to an attacker who controls ``generated_sql`` (defense-in-depth).
     """
     def fence(tag: str) -> tuple[str, str]:
         return f"<{tag}-{nonce}>", f"</{tag}-{nonce}>"
@@ -195,14 +232,14 @@ def _build_judge_prompt(sub_query: str, generated_sql: str, rows_text: str, nonc
     sql_open, sql_close = fence("generated_sql")
     rows_open, rows_close = fence("rows")
 
-    def neutralize(value: str, tag: str, nonce_close: str) -> str:
-        # Strip both the nonce-tagged close and the bare static close an attacker
-        # may have injected (e.g. literal </rows>), so no spurious fence survives.
-        return value.replace(nonce_close, "").replace(f"</{tag}>", "")
+    def neutralize(value: Any, tag: str) -> str:
+        # str()-coerce first (LOW-2), then strip every <tag>/<​/tag> variant so no
+        # spurious fence — injected </ROWS>, </rows >, or bare <rows> — survives.
+        return _TAG_NEUTRALIZERS[tag].sub("", str(value))
 
-    safe_sub_query = neutralize(sub_query, "sub_query", sq_close)
-    safe_sql = neutralize(generated_sql, "generated_sql", sql_close)
-    safe_rows = neutralize(rows_text, "rows", rows_close)
+    safe_sub_query = neutralize(sub_query, "sub_query")
+    safe_sql = neutralize(generated_sql, "generated_sql")
+    safe_rows = neutralize(rows_text, "rows")
 
     return (
         "You are a SQL result quality judge.\n\n"
@@ -235,12 +272,26 @@ def _query_implies_filter(sub_query: str) -> bool:
 
 
 def _parse_sql(sql: Any) -> sqlexp.Expression | None:
-    """Parse SQL, returning None on failure, non-str, or oversized input (SEC-6)."""
-    if not isinstance(sql, str) or len(sql) > _MAX_SQL_CHARS:
+    """Parse SQL, returning None on failure, non-str, or oversized input (SEC-6).
+
+    Narrowed except (SEC-6): only sqlglot parse/tokenize errors and RecursionError
+    are swallowed; any other exception type propagates.  Every None-return path
+    logs context at debug level (no silent swallow — project rule).
+    """
+    if not isinstance(sql, str):
+        logger.debug("_parse_sql: skip — reason=non-str type=%s", type(sql).__name__)
+        return None
+    if len(sql) > _MAX_SQL_CHARS:
+        logger.debug("_parse_sql: skip — reason=oversized len=%d", len(sql))
         return None
     try:
         return sqlglot.parse_one(sql, read="postgres")
-    except Exception:
+    except (sqlglot.errors.ParseError, sqlglot.errors.TokenError, RecursionError) as exc:
+        logger.debug(
+            "_parse_sql: skip — reason=parse-error type=%s snippet=%s",
+            type(exc).__name__,
+            _safe_log(sql, 120),
+        )
         return None
 
 
@@ -321,7 +372,7 @@ def _deterministic_sql_gate(
 
     Returns a dict with keys:
       zero_rows_when_expected — output empty but sub_query implies results
-      possible_truncation     — row count equals injected LIMIT (silent truncation risk)
+      possible_truncation     — row count at or above injected LIMIT (silent truncation risk)
       schema_mismatch         — SQL references columns not present in first result row
       missing_filter          — sub_query implies a filter but SQL has no WHERE/JOIN
     """
@@ -330,8 +381,8 @@ def _deterministic_sql_gate(
     # Check 1: zero rows when sub_query implies expecting results
     zero_rows = row_count == 0 and _query_implies_results(sub_query)
 
-    # Check 2: possible silent truncation
-    possible_truncation = row_count == _INJECTED_LIMIT
+    # Check 2: possible silent truncation (>= so an over-limit count also flags)
+    possible_truncation = row_count >= _INJECTED_LIMIT
 
     # Check 3: schema mismatch (skipped for wildcard SELECT or empty results)
     sql_cols = _extract_sql_select_columns(sql)
@@ -359,8 +410,8 @@ async def _heavy_sql_verify(
     past_steps: list[dict[str, Any]],
     match_idx: int,
     generated_sql: str,
-    langfuse: Any,
-    ai_model_resolver: Any,
+    langfuse: Langfuse,
+    ai_model_resolver: AIModelResolver,
 ) -> dict[str, Any]:
     """Heavy SQL path: deterministic gate + one LLM judge call.
 
@@ -402,10 +453,9 @@ async def _heavy_sql_verify(
                 input={"step_id": step_id, "mode": "heavy_sql"},
             )
             rows_text = _build_context(output_chunks[:3]) if output_chunks else "(no rows)"
-            # C2/SEC-2: per-call nonce data fences, single-pass interpolation.
-            nonce = hashlib.sha256(
-                (state.get("trace_id", "") + step_id + generated_sql).encode("utf-8", "replace")
-            ).hexdigest()[:12]
+            # C2/SEC-2: per-call nonce data fences. secrets.token_hex makes the
+            # fence unpredictable to an attacker who controls generated_sql.
+            nonce = secrets.token_hex(8)
             judge_prompt = _build_judge_prompt(sub_query, generated_sql, rows_text, nonce)
             client = await ai_model_resolver.resolve(_STAGE)
             response = await client.http_client.chat.completions.create(
@@ -415,10 +465,7 @@ async def _heavy_sql_verify(
                 max_tokens=client.max_tokens,
             )
             raw = (response.choices[0].message.content or "{}") if response.choices else "{}"
-            raw = raw.strip()
-            if raw.startswith("```"):
-                raw = raw.split("\n", 1)[-1]
-                raw = raw.rsplit("```", 1)[0].strip()
+            raw = _strip_code_fences(raw)
             try:
                 parsed = json.loads(raw)
             except json.JSONDecodeError:
@@ -461,7 +508,7 @@ async def _heavy_sql_verify(
         current_step=current_step,
         updated_past_steps=updated_past_steps,
         verdict=verdict,
-        reason_for_hint_keys=failed_gate_keys,
+        hint_keys=failed_gate_keys,
         in_tok=in_tok,
         out_tok=out_tok,
     )
@@ -549,12 +596,8 @@ async def verify_step(
         )
 
         raw = response.choices[0].message.content or "{}" if response.choices else "{}"
-        # Strip markdown code fences that some models add despite instruction
-        raw = raw.strip()
-        if raw.startswith("```"):
-            raw = raw.split("\n", 1)[-1]
-            raw = raw.rsplit("```", 1)[0]
-            raw = raw.strip()
+        # Strip markdown code fences that some models add despite instruction (L4)
+        raw = _strip_code_fences(raw)
         try:
             parsed = json.loads(raw)
         except json.JSONDecodeError:
@@ -609,7 +652,7 @@ async def verify_step(
             current_step=current_step,
             updated_past_steps=updated_past_steps,
             verdict=verdict,
-            reason_for_hint_keys=[],
+            hint_keys=[],
             in_tok=in_tok,
             out_tok=out_tok,
         )
