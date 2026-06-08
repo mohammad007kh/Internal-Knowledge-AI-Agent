@@ -18,7 +18,6 @@ import pytest
 
 from src.agent.nodes.verify import route_after_verify, verify_step
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -328,7 +327,15 @@ class TestUnacceptableFirstRetry:
         assert current["retry_count"] == 1
 
     @pytest.mark.asyncio
-    async def test_verifier_reason_injected_into_sub_query(self):
+    async def test_verifier_canned_hint_injected_into_sub_query(self):
+        """C1/SEC-1: the retried sub_query carries a CANNED hint, never the model reason.
+
+        UPDATED from test_verifier_reason_injected_into_sub_query, which asserted
+        the raw model reason text appeared in the retried sub_query:
+            OLD: assert reason in current["sub_query"]
+        The light path now uses the fixed fallback phrase and must NOT echo the
+        model-supplied reason (prompt-injection trust boundary).
+        """
         reason = "missing key detail about revenue"
         state = _make_state(
             plan=[_make_plan_step("s2")],
@@ -344,7 +351,9 @@ class TestUnacceptableFirstRetry:
 
         state_after = {**state, **delta}
         current = state_after["current_step"]
-        assert reason in current["sub_query"]
+        # NEW: canned fallback phrase present; raw model reason absent
+        assert "previous result was judged inadequate" in current["sub_query"]
+        assert reason not in current["sub_query"]
 
     @pytest.mark.asyncio
     async def test_original_sub_query_still_present_after_prefix(self):
