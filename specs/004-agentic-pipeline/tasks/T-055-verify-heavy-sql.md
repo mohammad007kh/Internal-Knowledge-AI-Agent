@@ -1,7 +1,7 @@
 # Task: T-055 - verify-heavy-sql
 
-**Status**: Pending
-**Created**: 2026-06-04 | **Completed**: N/A
+**Status**: Done
+**Created**: 2026-06-04 | **Completed**: 2026-06-07
 **User Story**: US3 (verification & honesty)
 **Requirement**: FR-011
 **Platform**: web | **Subagents Enabled**: yes
@@ -120,8 +120,23 @@ docker compose exec -T backend ruff check src/agent/nodes/verify.py
 
 ## 📝 Completion Log
 
-- [ ] Code implemented
-- [ ] Tests passed
-- [ ] Linter passed
-- [ ] Wiring checklist verified
-- [ ] Integration verification passed
+- [x] Code implemented
+- [x] Tests passed — 77 unit tests in `test_verify_heavy_sql.py` + 21 light-path (`test_verify_node.py`); full `tests/unit/agent/` suite 295 passed
+- [x] Linter passed — `ruff check src/agent/nodes/verify.py` + both test files clean
+- [x] Wiring checklist verified — verdict feeds the R4b edge owned by T-054 (graph wiring deferred to T-058)
+- [x] Integration verification passed — heavy path exercised by synthetic fixtures (see forward-contract note)
+
+## 🧾 Completion Notes (deviations + forward contracts)
+
+Reviewed by code-reviewer + 2 independent security experts (security-auditor, backend-security-coder) + an architect supervisor adjudication. All CRITICAL/HIGH findings fixed; LOW items deferred (see below).
+
+**Deviations from the R3 spec (recorded in `specs/_defaults/changelog.md` deviation log):**
+1. **`missing_filter` demoted to warning-only.** R3 listed "filter/JOIN present when implied" as a gate check. The heuristic (`_query_implies_filter` AND no WHERE/JOIN) is noisy (false positives on `GROUP BY`/`ORDER BY`/"data for report"), and a false positive forces a wasted retry. Per supervisor ruling §3 it is still computed and recorded in `verification.checks`, but the gate-fail set is now **`zero_rows_when_expected OR schema_mismatch`** only. Ambiguous-filter cases route to the judge instead of being pre-rejected.
+2. **`schema_mismatch` approximated.** R3 check #3 says "every referenced table/column exists in the **schema sketch**." The verify node has no schema sketch in `StepResult` (no structured column metadata), so it is implemented as "SELECT-list columns ⊆ columns recovered from the rendered result rows," skipping the check (route-to-judge) for `SELECT *` / aggregates / undeterminable projections rather than false-failing.
+
+**Forward contracts (heavy path is currently dormant):**
+- The executor (T-053) always sets `generated_sql=None`, so the heavy path is exercised only by synthetic fixtures today. A future SQL-execution producer MUST emit each result row as identifier-prefixed `col: value\n...` text for `_extract_result_columns` to recover the column set (documented in the `verify.py` module docstring).
+
+**Deferred (non-blocking) follow-ups:** `possible_truncation` `==`→`>=` + shared LIMIT constant (M2); drop weak word "how" from result-imply set (L3); narrow `except Exception`→sqlglot error types + richer fallback logging (SEC-6 remainder); collapse `_build_verify_delta` dual hint-keys param (LOW-1); optional `secrets`-seeded fence nonce + `str()`-coerce `sub_query` before neutralize (security LOW).
+
+**Security posture:** judge prompt uses per-call nonce data fences with unconditional close-tag neutralization (breakout does not depend on nonce secrecy); model `reason` is never echoed into the retried `sub_query` (canned hints only); all LLM-derived strings `_safe_log`-sanitized before logging; non-dict JSON / non-dict chunks / oversized SQL all fail closed. Security verdict: CLEAR-TO-COMMIT.

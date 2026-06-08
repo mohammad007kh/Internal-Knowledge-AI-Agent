@@ -18,7 +18,7 @@ negative-scope constraint — enforced by absence + review, see note below.
 | US2 | P2 | FR-008 (plan visible, revision announced, card threshold) | T-052, T-056, T-073 | 🔴 Pending |
 | US2 | P2 | FR-009 (per-step permission re-clipping) | T-052, T-053 | 🔴 Pending |
 | US3 | P3 | FR-010 (every step verified) | T-012, T-054 | 🔴 Pending |
-| US3 | P3 | FR-011 (heavy DB verification) | T-055 | 🔴 Pending |
+| US3 | P3 | FR-011 (heavy DB verification) | T-055 | ✅ Done |
 | US3 | P3 | FR-012 (retry once with reason) | T-054 | 🔴 Pending |
 | US3 | P3 | FR-013 (honest abstain + what-I-tried + quick replies) | T-057, T-075 | 🔴 Pending |
 | US4 | P4 | FR-014 (clarify with 2-4 options + free text) | T-080, T-081 | 🔴 Pending |
