@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from src.agent.nodes.text_to_query import text_to_query
+from src.agent.nodes.text_to_query import _execute, text_to_query
 from src.models.enums import SourceType
 from src.services.ai_model_resolver import AIModelClient
 from src.services.db_safety import inject_limit, validate_sql
@@ -275,3 +275,84 @@ async def test_skips_on_missing_connection_string() -> None:
         )
 
     assert result.get("retrieved_chunks", []) == []
+
+
+# ---------------------------------------------------------------------------
+# _execute — engine hardening wiring (atomic url + connect_args pairing)
+# ---------------------------------------------------------------------------
+
+
+class _FakeExecResult:
+    def mappings(self):  # type: ignore[no-untyped-def]
+        class _M:
+            def all(self_inner):  # noqa: N805
+                return []
+
+        return _M()
+
+
+class _FakeExecConn:
+    async def __aenter__(self):  # type: ignore[no-untyped-def]
+        return self
+
+    async def __aexit__(self, *exc):  # type: ignore[no-untyped-def]
+        return False
+
+    async def execute(self, _stmt):  # type: ignore[no-untyped-def]
+        return _FakeExecResult()
+
+
+class _FakeExecEngine:
+    def connect(self):  # type: ignore[no-untyped-def]
+        return _FakeExecConn()
+
+    async def dispose(self):  # type: ignore[no-untyped-def]
+        return None
+
+
+def _make_capturing_create(captured: dict):  # type: ignore[no-untyped-def]
+    def _fake_create(*args, **kwargs):  # type: ignore[no-untyped-def]
+        # url may be passed positionally (non-postgres branch) or by kw.
+        captured["url"] = kwargs.get("url", args[0] if args else None)
+        captured["connect_args"] = kwargs.get("connect_args", {})
+        return _FakeExecEngine()
+
+    return _fake_create
+
+
+@pytest.mark.asyncio
+async def test_execute_asyncpg_passes_server_settings_connect_args() -> None:
+    captured: dict = {}
+    with patch(
+        "src.agent.nodes.text_to_query.create_async_engine",
+        side_effect=_make_capturing_create(captured),
+    ):
+        await _execute(
+            "postgresql+asyncpg://user:pw@host/db",
+            "SELECT 1",
+            db_type="postgresql",
+        )
+    assert "server_settings" in captured["connect_args"]
+    ss = captured["connect_args"]["server_settings"]
+    assert ss["default_transaction_read_only"] == "on"
+    # asyncpg URL is returned unchanged.
+    assert captured["url"] == "postgresql+asyncpg://user:pw@host/db"
+
+
+@pytest.mark.asyncio
+async def test_execute_libpq_passes_empty_connect_args() -> None:
+    captured: dict = {}
+    with patch(
+        "src.agent.nodes.text_to_query.create_async_engine",
+        side_effect=_make_capturing_create(captured),
+    ):
+        await _execute(
+            "postgresql://user:pw@host/db",
+            "SELECT 1",
+            db_type="postgresql",
+        )
+    assert captured["connect_args"] == {}
+    # libpq hardening rides in the URL options= (URL-encoded: %3D for =).
+    from urllib.parse import unquote
+
+    assert "default_transaction_read_only=on" in unquote(captured["url"])

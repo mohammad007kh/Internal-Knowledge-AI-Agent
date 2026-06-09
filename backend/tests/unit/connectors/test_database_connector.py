@@ -138,6 +138,65 @@ async def test_connect_calls_create_async_engine() -> None:
     assert conn._engine is not None  # noqa: SLF001
 
 
+async def test_connect_asyncpg_passes_server_settings_connect_args() -> None:
+    # Default _CONN_STR is a postgresql+asyncpg URL → hardening flows via
+    # connect_args server_settings (the URL itself is unchanged).
+    conn = _make_connector(extra={"db_type": "postgresql"})
+    engine = _mock_engine([])
+    fake_conn = AsyncMock()
+    fake_conn.execute = AsyncMock(return_value=MagicMock())
+    conn_ctx = MagicMock()
+    conn_ctx.__aenter__ = AsyncMock(return_value=fake_conn)
+    conn_ctx.__aexit__ = AsyncMock(return_value=False)
+    engine.connect = MagicMock(return_value=conn_ctx)
+
+    with patch(
+        "src.connectors.database_connector.create_async_engine",
+        return_value=engine,
+    ) as mock_create:
+        await conn.connect()
+
+    connect_args = mock_create.call_args.kwargs["connect_args"]
+    assert "server_settings" in connect_args
+    assert (
+        connect_args["server_settings"]["default_transaction_read_only"] == "on"
+    )
+
+
+async def test_connect_libpq_passes_empty_connect_args() -> None:
+    # A libpq (non-asyncpg) postgres URL hardens via the URL options=, so
+    # connect_args must stay empty.
+    conn = _make_connector(
+        extra={
+            "db_type": "postgresql",
+            "connection_string": "postgresql://user:secret@localhost:5432/testdb",
+        }
+    )
+    engine = _mock_engine([])
+    fake_conn = AsyncMock()
+    fake_conn.execute = AsyncMock(return_value=MagicMock())
+    conn_ctx = MagicMock()
+    conn_ctx.__aenter__ = AsyncMock(return_value=fake_conn)
+    conn_ctx.__aexit__ = AsyncMock(return_value=False)
+    engine.connect = MagicMock(return_value=conn_ctx)
+
+    with patch(
+        "src.connectors.database_connector.create_async_engine",
+        return_value=engine,
+    ) as mock_create:
+        await conn.connect()
+
+    assert mock_create.call_args.kwargs["connect_args"] == {}
+    # Hardening rides in the URL instead (passed positionally as conn_str;
+    # the options= value is URL-encoded, so decode before the substring check).
+    from urllib.parse import unquote
+
+    assert (
+        "default_transaction_read_only=on"
+        in unquote(mock_create.call_args.args[0])
+    )
+
+
 async def test_connect_raises_connection_error_on_failure() -> None:
     conn = _make_connector()
 

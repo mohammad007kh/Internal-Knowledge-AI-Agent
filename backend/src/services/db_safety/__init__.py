@@ -21,10 +21,12 @@ Two coordinated layers:
 """
 
 from src.services.db_safety.connection_hardening import (
+    PostgresEngineHardening,
     harden_connection,
     harden_mssql_connection,
     harden_mysql_connection,
     harden_postgres_connection,
+    harden_postgres_engine_kwargs,
     mssql_connect_args,
     postgres_asyncpg_connect_args,
     read_only_session,
@@ -36,11 +38,13 @@ from src.services.db_safety.sql_validator import (
 )
 
 __all__ = [
+    "PostgresEngineHardening",
     "SqlValidationResult",
     "harden_connection",
     "harden_mssql_connection",
     "harden_mysql_connection",
     "harden_postgres_connection",
+    "harden_postgres_engine_kwargs",
     "inject_limit",
     "mssql_connect_args",
     "postgres_asyncpg_connect_args",

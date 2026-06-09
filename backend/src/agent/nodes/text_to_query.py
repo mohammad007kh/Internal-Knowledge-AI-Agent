@@ -43,7 +43,7 @@ from src.core.crypto import decrypt
 from src.models.enums import SourceType
 from src.prompts import load_prompt
 from src.services.db_safety import (
-    harden_postgres_connection,
+    harden_postgres_engine_kwargs,
     inject_limit,
     validate_sql,
 )
@@ -153,22 +153,19 @@ async def _execute(
     ``validate_sql``. Other dialects fall back to the raw string until Phase 2
     ships their hardening helpers.
     """
-    connect_args: dict[str, Any] = {}
     if db_type == "postgresql":
-        connection_string = await harden_postgres_connection(connection_string)
-        # asyncpg refuses libpq ?options=; harden via server_settings.
-        if connection_string.startswith("postgresql+asyncpg"):
-            from src.services.db_safety import (  # noqa: PLC0415
-                postgres_asyncpg_connect_args,
-            )
-
-            connect_args = postgres_asyncpg_connect_args()
-    engine = create_async_engine(
-        connection_string,
-        pool_size=1,
-        max_overflow=0,
-        connect_args=connect_args,
-    )
+        hardened = await harden_postgres_engine_kwargs(connection_string)
+        engine = create_async_engine(
+            **hardened.as_create_async_engine_kwargs(),
+            pool_size=1,
+            max_overflow=0,
+        )
+    else:
+        engine = create_async_engine(
+            connection_string,
+            pool_size=1,
+            max_overflow=0,
+        )
     try:
         async with engine.connect() as conn:
             result = await conn.execute(sa.text(sql))

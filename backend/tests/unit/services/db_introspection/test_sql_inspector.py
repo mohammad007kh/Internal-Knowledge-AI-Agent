@@ -55,7 +55,7 @@ class _AsyncConnShim:
     def __init__(self, sync_conn: sa.Connection) -> None:
         self._conn = sync_conn
 
-    async def __aenter__(self) -> "_AsyncConnShim":
+    async def __aenter__(self) -> _AsyncConnShim:
         return self
 
     async def __aexit__(self, *exc: object) -> None:
@@ -804,3 +804,68 @@ async def test_signal_free_helper_skips_zero_row_zero_sample_tables():
         update={"row_count_estimate": 5}
     )
     assert _is_signal_free_for_llm(populated_but_no_samples) is False
+
+
+# ---------------------------------------------------------------------------
+# _build_engine — postgres hardening wiring (atomic url + connect_args pairing)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_build_engine_asyncpg_passes_server_settings_connect_args():
+    from src.services.db_introspection.sql_inspector import (
+        _STATEMENT_TIMEOUT_MS,
+        _build_engine,
+    )
+
+    captured: dict[str, Any] = {}
+
+    def _fake_create(*args: Any, **kwargs: Any) -> MagicMock:
+        captured["url"] = kwargs.get("url", args[0] if args else None)
+        captured["connect_args"] = kwargs.get("connect_args", {})
+        return MagicMock()
+
+    with patch(
+        "src.services.db_introspection.sql_inspector.create_async_engine",
+        side_effect=_fake_create,
+    ):
+        await _build_engine(
+            "postgresql+asyncpg://user:pw@host/db", "postgresql"
+        )
+
+    ss = captured["connect_args"]["server_settings"]
+    assert ss["default_transaction_read_only"] == "on"
+    # The 15_000 ms inspector constant threads through to connect_args.
+    assert ss["statement_timeout"] == str(_STATEMENT_TIMEOUT_MS)
+    # asyncpg URL unchanged.
+    assert captured["url"] == "postgresql+asyncpg://user:pw@host/db"
+
+
+@pytest.mark.asyncio
+async def test_build_engine_libpq_passes_empty_connect_args():
+    from src.services.db_introspection.sql_inspector import (
+        _STATEMENT_TIMEOUT_MS,
+        _build_engine,
+    )
+
+    captured: dict[str, Any] = {}
+
+    def _fake_create(*args: Any, **kwargs: Any) -> MagicMock:
+        captured["url"] = kwargs.get("url", args[0] if args else None)
+        captured["connect_args"] = kwargs.get("connect_args", {})
+        return MagicMock()
+
+    with patch(
+        "src.services.db_introspection.sql_inspector.create_async_engine",
+        side_effect=_fake_create,
+    ):
+        await _build_engine("postgresql://user:pw@host/db", "postgresql")
+
+    assert captured["connect_args"] == {}
+    # libpq hardening rides in the URL options=, with the inspector timeout.
+    # The options= value is URL-encoded (%3D for =), so decode first.
+    from urllib.parse import unquote
+
+    decoded_url = unquote(captured["url"])
+    assert "default_transaction_read_only=on" in decoded_url
+    assert f"statement_timeout={_STATEMENT_TIMEOUT_MS}" in decoded_url

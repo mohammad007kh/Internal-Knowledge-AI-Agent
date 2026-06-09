@@ -79,7 +79,7 @@ class DatabaseConnector(BaseConnector):
     async def test_connection(self) -> bool:
         return await self._delegate.test_connection()
 
-    async def study_schema(self) -> "SchemaDocument":
+    async def study_schema(self) -> SchemaDocument:
         """Produce a :class:`SchemaDocument` for this DB source.
 
         SQL dialects (postgresql / mysql / mssql) delegate to
@@ -172,9 +172,8 @@ class SqlDatabaseConnector(BaseConnector):
         """
         from src.services.db_safety import (  # noqa: PLC0415
             harden_connection,
-            harden_postgres_connection,
+            harden_postgres_engine_kwargs,
             mssql_connect_args,
-            postgres_asyncpg_connect_args,
         )
 
         conn_str: str = self._config["connection_string"]
@@ -184,22 +183,18 @@ class SqlDatabaseConnector(BaseConnector):
             db_type is None and conn_str.startswith(("postgresql", "postgres"))
         ):
             try:
-                conn_str = await harden_postgres_connection(conn_str)
+                hardened = await harden_postgres_engine_kwargs(conn_str)
+                conn_str = hardened.url
+                connect_args = hardened.connect_args
             except ValueError:
+                # On rejection, build with the raw conn_str + empty
+                # connect_args — the connect probe still protects us and we
+                # don't widen the blast radius.
                 logger.warning(
                     "DatabaseConnector: postgres hardening rejected URL "
                     "[conn_hash=%s] — falling back to raw conn_str",
                     self._conn_str_hash,
                 )
-            # For asyncpg URLs, harden_postgres_connection is a no-op (the
-            # libpq ?options= kwarg is rejected by asyncpg with TypeError).
-            # Pass server_settings via connect_args so we still get the same
-            # `default_transaction_read_only=on` + statement_timeout on every
-            # connection. Safe to pass unconditionally — asyncpg simply
-            # forwards them to Postgres at startup; libpq URLs that aren't
-            # asyncpg won't reach this code path with a different driver.
-            if conn_str.startswith("postgresql+asyncpg"):
-                connect_args = postgres_asyncpg_connect_args()
         elif db_type == "mssql":
             connect_args = mssql_connect_args()
 
@@ -375,7 +370,7 @@ class SqlDatabaseConnector(BaseConnector):
     # Schema study (studying-agent)
     # ------------------------------------------------------------------ #
 
-    async def study_schema(self) -> "SchemaDocument":
+    async def study_schema(self) -> SchemaDocument:
         """Run the studying-agent's 6-phase introspection for this source.
 
         Delegates to :func:`src.services.db_introspection.sql_inspector.study_sql_schema`,

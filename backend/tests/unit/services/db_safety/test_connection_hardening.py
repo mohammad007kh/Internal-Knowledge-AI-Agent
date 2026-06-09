@@ -12,10 +12,12 @@ import pytest
 from src.services.db_safety import connection_hardening as ch
 from src.services.db_safety.connection_hardening import (
     DEFAULT_STATEMENT_TIMEOUT_MS,
+    PostgresEngineHardening,
     harden_connection,
     harden_mssql_connection,
     harden_mysql_connection,
     harden_postgres_connection,
+    harden_postgres_engine_kwargs,
     mssql_connect_args,
     postgres_asyncpg_connect_args,
     read_only_session,
@@ -238,6 +240,95 @@ class TestPostgresAsyncpgConnectArgs:
             postgres_asyncpg_connect_args(statement_timeout_ms=0)
         with pytest.raises(ValueError, match="must be positive"):
             postgres_asyncpg_connect_args(statement_timeout_ms=-1)
+
+
+# ---------------------------------------------------------------------------
+# harden_postgres_engine_kwargs (atomic url + connect_args pairing)
+# ---------------------------------------------------------------------------
+
+
+class TestHardenPostgresEngineKwargs:
+    """The combined helper that pairs URL + connect_args atomically."""
+
+    async def test_asyncpg_url_unchanged_with_server_settings(self) -> None:
+        url = "postgresql+asyncpg://user:pw@host/db"
+        hardened = await harden_postgres_engine_kwargs(url)
+        # URL must be returned verbatim (asyncpg rejects libpq options=).
+        assert hardened.url == url
+        # connect_args carry the full server_settings hardening.
+        assert hardened.connect_args == {
+            "server_settings": {
+                "default_transaction_read_only": "on",
+                "statement_timeout": str(DEFAULT_STATEMENT_TIMEOUT_MS),
+            }
+        }
+
+    async def test_libpq_url_injects_options_and_empty_connect_args(self) -> None:
+        url = "postgresql://user:pw@host:5432/db"
+        hardened = await harden_postgres_engine_kwargs(url)
+        # libpq drivers harden via the URL's options=, not connect_args.
+        assert hardened.connect_args == {}
+        opts = _options_value(hardened.url)
+        assert "-c default_transaction_read_only=on" in opts
+
+    async def test_legacy_postgres_scheme_like_libpq(self) -> None:
+        url = "postgres://user:pw@host/db"
+        hardened = await harden_postgres_engine_kwargs(url)
+        assert hardened.connect_args == {}
+        opts = _options_value(hardened.url)
+        assert "-c default_transaction_read_only=on" in opts
+
+    async def test_rejects_non_postgres_url(self) -> None:
+        with pytest.raises(ValueError, match="PostgreSQL"):
+            await harden_postgres_engine_kwargs("mysql://user:pw@host/db")
+
+    async def test_rejects_non_positive_timeout(self) -> None:
+        with pytest.raises(ValueError, match="must be positive"):
+            await harden_postgres_engine_kwargs(
+                "postgresql://u:p@h/db", statement_timeout_ms=0
+            )
+        with pytest.raises(ValueError, match="must be positive"):
+            await harden_postgres_engine_kwargs(
+                "postgresql://u:p@h/db", statement_timeout_ms=-5
+            )
+
+    async def test_as_create_async_engine_kwargs_shape_and_fresh_copy(self) -> None:
+        url = "postgresql+asyncpg://user:pw@host/db"
+        hardened = await harden_postgres_engine_kwargs(url)
+        kwargs = hardened.as_create_async_engine_kwargs()
+        assert set(kwargs) == {"url", "connect_args"}
+        assert kwargs["url"] == hardened.url
+        assert kwargs["connect_args"] == hardened.connect_args
+        # Mutating the returned connect_args must NOT affect the dataclass —
+        # the helper hands out a fresh dict.
+        kwargs["connect_args"]["server_settings"] = "tampered"
+        assert hardened.connect_args != kwargs["connect_args"]
+        assert (
+            hardened.connect_args["server_settings"]["default_transaction_read_only"]
+            == "on"
+        )
+
+    async def test_custom_timeout_propagates_to_url_and_connect_args(self) -> None:
+        # asyncpg: timeout lands in connect_args server_settings.
+        asyncpg = await harden_postgres_engine_kwargs(
+            "postgresql+asyncpg://u:p@h/db", statement_timeout_ms=7_000
+        )
+        assert asyncpg.statement_timeout_ms == 7_000
+        assert (
+            asyncpg.connect_args["server_settings"]["statement_timeout"] == "7000"
+        )
+        # libpq: timeout lands in the URL options=.
+        libpq = await harden_postgres_engine_kwargs(
+            "postgresql://u:p@h/db", statement_timeout_ms=7_000
+        )
+        assert "-c statement_timeout=7000" in _options_value(libpq.url)
+        assert libpq.connect_args == {}
+
+    async def test_returns_dataclass_instance(self) -> None:
+        hardened = await harden_postgres_engine_kwargs(
+            "postgresql://u:p@h/db"
+        )
+        assert isinstance(hardened, PostgresEngineHardening)
 
 
 # ---------------------------------------------------------------------------

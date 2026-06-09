@@ -30,7 +30,7 @@ import json
 import logging
 import re
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, Final
 
 import sqlalchemy as sa
@@ -40,13 +40,15 @@ from sqlalchemy.types import (
     Boolean,
     Date,
     DateTime,
-    Enum as SAEnum,
     Integer,
     LargeBinary,
     Numeric,
     SmallInteger,
     String,
     Time,
+)
+from sqlalchemy.types import (
+    Enum as SAEnum,
 )
 
 from src.services.db_introspection._errors import SchemaStudyPhaseError
@@ -67,9 +69,8 @@ from src.services.db_introspection.schema_doc import (
 )
 from src.services.db_safety import (
     harden_connection,
-    harden_postgres_connection,
+    harden_postgres_engine_kwargs,
     mssql_connect_args,
-    postgres_asyncpg_connect_args,
     validate_sql,
 )
 
@@ -270,9 +271,11 @@ async def _build_engine(connection_string: str, db_type: str) -> AsyncEngine:
     connect_args: dict[str, Any] = {}
     if db_type == "postgresql" or conn_str.startswith(("postgresql", "postgres")):
         try:
-            conn_str = await harden_postgres_connection(
+            hardened = await harden_postgres_engine_kwargs(
                 conn_str, statement_timeout_ms=_STATEMENT_TIMEOUT_MS
             )
+            conn_str = hardened.url
+            connect_args = hardened.connect_args
         except ValueError:
             # Fall back to the raw URL — the connect probe below still
             # protects us, and we don't widen the blast radius.
@@ -280,10 +283,6 @@ async def _build_engine(connection_string: str, db_type: str) -> AsyncEngine:
                 "sql_inspector: postgres hardening rejected the URL — "
                 "falling back to raw connection string"
             )
-        # asyncpg refuses libpq `?options=`; harden via server_settings
-        # connect_args instead. See postgres_asyncpg_connect_args docstring.
-        if conn_str.startswith("postgresql+asyncpg"):
-            connect_args = postgres_asyncpg_connect_args(_STATEMENT_TIMEOUT_MS)
     elif db_type == "mssql":
         connect_args = mssql_connect_args(_STATEMENT_TIMEOUT_MS)
 
@@ -1195,7 +1194,7 @@ async def study_sql_schema(
         doc = SchemaDocument(
             dialect=dialect,
             fingerprint="0" * 64,  # placeholder, replaced below
-            generated_at=datetime.now(tz=timezone.utc),
+            generated_at=datetime.now(tz=UTC),
             agent_version=AGENT_VERSION,
             study_duration_ms=duration_ms,
             partial=partial,
