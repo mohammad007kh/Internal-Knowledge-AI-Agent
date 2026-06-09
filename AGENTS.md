@@ -1,6 +1,6 @@
-# CLAUDE.md — Internal Knowledge AI Agent
+# AGENTS.md — Internal Knowledge AI Agent
 
-This file is read by Claude Code at session start. It governs all AI-assisted development in this project.
+This file is read by Codex at session start. It governs all AI-assisted development in this project.
 
 ## What This Project Is
 
