@@ -254,7 +254,9 @@ class TestInvitationColumns:
         assert "token" in self.cols
 
     def test_token_max_length(self):
-        assert self.cols["token"].type.length == 36
+        # Stored token is the SHA-256 hex digest of secrets.token_urlsafe()
+        # → always 64 chars (see migration 0005_expand_invitation_token).
+        assert self.cols["token"].type.length == 64
 
     def test_token_not_nullable(self):
         assert self.cols["token"].nullable is False
