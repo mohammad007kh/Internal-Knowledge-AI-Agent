@@ -19,6 +19,9 @@ from src.connectors.base import Document
 from src.connectors.database_connector import (
     SqlDatabaseConnector as DatabaseConnector,
 )
+from src.connectors.database_connector import (
+    _sanitise,
+)
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -514,3 +517,46 @@ async def test_async_context_manager_calls_connect_disconnect() -> None:
         async with conn:
             mock_connect.assert_called_once()
         mock_disconnect.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# _sanitise — credential / DSN redaction (FR-020) regression tests
+# ---------------------------------------------------------------------------
+
+
+class TestSanitise:
+    """Lock in the credential-redaction fix so it can never silently regress."""
+
+    def test_redacts_password_containing_at_sign(self) -> None:
+        # Regression: a password with '@' must be FULLY stripped, not just up to
+        # the first '@' (the old `://[^@\\s/]+@` regex leaked the tail).
+        out = _sanitise(
+            "auth failed for postgresql+asyncpg://user:p@ss@host:5432/db"
+        )
+        assert "p@ss" not in out
+        assert "pass" not in out
+        assert "://***@" in out
+
+    def test_redacts_simple_url_credentials(self) -> None:
+        out = _sanitise("could not connect to postgresql://admin:secret@db/app")
+        assert "secret" not in out
+        assert "://***@" in out
+
+    def test_redacts_dsn_keyword_fragments(self) -> None:
+        out = _sanitise(
+            "connection failed: host=db port=5432 user=admin "
+            "password=hunter2 dbname=app"
+        )
+        assert "hunter2" not in out
+        assert "password=<redacted>" in out
+        assert "admin" not in out  # user=<redacted>
+
+    def test_masks_bare_host_port(self) -> None:
+        out = _sanitise("timeout connecting to internal-db.example.com:5432")
+        assert "internal-db.example.com:5432" not in out
+        assert "<host>:<port>" in out
+
+    def test_leaves_credential_free_text_untouched(self) -> None:
+        # No over-redaction of an innocuous message (no URL, no kv, no host:port).
+        msg = "relation \"documents\" does not exist"
+        assert _sanitise(msg) == msg

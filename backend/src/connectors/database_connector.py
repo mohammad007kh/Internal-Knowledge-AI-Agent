@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import re
 import uuid
 from collections.abc import AsyncIterator
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Final
 
 import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import create_async_engine
@@ -18,6 +19,49 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
     from src.services.db_introspection.schema_doc import SchemaDocument
 
 logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Credential / DSN redaction (FR-020)
+# ---------------------------------------------------------------------------
+# asyncpg / SQLAlchemy driver exceptions can embed the connection string or
+# DSN fragments (``scheme://user:pass@host`` URLs, ``password=...`` /
+# ``host=...`` key-value pairs, bare ``host:port``). We must NEVER surface
+# those in a log line or exception message. Mirrors
+# ``sql_inspector._sanitise`` / ``mongo_inspector._sanitise`` — we over-redact
+# on purpose: a scrubbed message is fine, a leaked one is a credential breach.
+
+#: ``scheme://user:pass@host`` → ``scheme://***@host``. Greedy up to the LAST
+#: ``@`` before a ``/`` or whitespace so passwords containing ``@`` (a common
+#: credential char) are fully redacted, e.g. ``://user:p@ss@host/db`` →
+#: ``://***@host/db`` (NOT ``://***@ss@host/db``, which would leak ``ss``).
+_CRED_URL_RE: Final[re.Pattern[str]] = re.compile(r"://[^/\s]*@")
+
+#: DSN-style ``key=value`` fragments that name host/db/user/credentials.
+_DSN_KV_RE: Final[re.Pattern[str]] = re.compile(
+    r"\b(host|hostaddr|port|dbname|database|user|username|password|passwd)\s*=\s*"
+    r"('[^']*'|\"[^\"]*\"|\S+)",
+    re.IGNORECASE,
+)
+
+#: A bare ``hostname:port`` (2-5 digit port). Only fires when a colon-separated
+#: port is present, so it won't eat ``"line 12:34"``.
+_HOST_PORT_RE: Final[re.Pattern[str]] = re.compile(r"\b[\w.-]+:\d{2,5}\b")
+
+
+def _sanitise(message: object) -> str:
+    """Redact credentials / host / db-name fragments from an error message.
+
+    Order matters: redact URL credentials FIRST (``scheme://user:pass@host``),
+    so the authority is collapsed to ``://***@`` before ``_HOST_PORT_RE`` could
+    match a ``host:port`` *inside* that authority. Then strip DSN ``key=value``
+    fragments, then collapse any remaining bare ``host:port``.
+    """
+    text = str(message)
+    text = _CRED_URL_RE.sub("://***@", text)
+    text = _DSN_KV_RE.sub(lambda m: f"{m.group(1).lower()}=<redacted>", text)
+    text = _HOST_PORT_RE.sub("<host>:<port>", text)
+    return text
 
 
 @register(SourceType.DATABASE)
@@ -351,18 +395,21 @@ class SqlDatabaseConnector(BaseConnector):
             await engine.dispose()
             return True
         except Exception as exc:
-            # Log the exception class + message + traceback so operators can
-            # debug a failed admin "Test connection". The connection string
-            # is NEVER part of `str(exc)` for asyncpg/SQLAlchemy errors —
-            # those drivers report field-level details (host, user, dbname)
-            # but not the URI verbatim. The caller still gets a sanitised
-            # ConnectionError (see source_inspection_service.inspect_source).
+            # Log the exception class + a *sanitised* message so operators can
+            # debug a failed admin "Test connection" without leaking
+            # credentials. Driver exceptions (asyncpg / SQLAlchemy) can embed
+            # the connection string or DSN fragments (host/user/dbname/password)
+            # in ``str(exc)``, so it is scrubbed via ``_sanitise`` (FR-020).
+            # ``exc_info`` is intentionally OMITTED — a traceback frame can
+            # carry the raw connection string passed to ``create_async_engine``,
+            # which the formatter would render verbatim. The caller still gets
+            # a sanitised ConnectionError (see
+            # source_inspection_service.inspect_source).
             logger.warning(
                 "DatabaseConnector.test_connection failed [conn_hash=%s]: %s: %s",
                 self._conn_str_hash,
                 type(exc).__name__,
-                exc,
-                exc_info=True,
+                _sanitise(exc),
             )
             return False
 
