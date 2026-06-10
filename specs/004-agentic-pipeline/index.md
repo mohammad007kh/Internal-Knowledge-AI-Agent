@@ -11,8 +11,8 @@
 | Metric      | Value |
 | ----------- | ----- |
 | Total Tasks | 41    |
-| Completed   | 21    |
-| Verified    | 21    |
+| Completed   | 22    |
+| Verified    | 22    |
 | Coverage    | 100% (26/26 FRs mapped; FR-025 is a scope constraint — see traceability) |
 
 **Current Phase**: Implementation (pending `/atomicspec.implement`)
@@ -54,7 +54,7 @@
 | [T-053](./tasks/T-053-executor-node.md) | US2 | C3: executor (R1b binding, step events) | ✅ Done | `pytest executor` |
 | [T-054](./tasks/T-054-verify-node-light.md) | US3 | C4: verify node + R4b state machine | ✅ Done | `pytest verify` |
 | [T-055](./tasks/T-055-verify-heavy-sql.md) | US3 | C5: heavy SQL verification | ✅ Done | 77 unit tests; 295 agent tests pass; ruff clean; dual security review |
-| [T-056](./tasks/T-056-replan-node.md) | US2 | C6: replan node + events | 🔴 Todo | `pytest replan` |
+| [T-056](./tasks/T-056-replan-node.md) | US2 | C6: replan node + events | ✅ Done | 17 unit tests; 340 agent tests pass; ruff clean; reviewed |
 | [T-057](./tasks/T-057-budget-guard-diagnostics.md) | US3/6 | C7: budget guard + diagnostics + honest-failure | 🔴 Todo | `pytest guard` |
 | [T-058](./tasks/T-058-agentic-graph-assembly.md) | US2/3 | C8: graph assembly + flag + done extension | 🔴 Todo | `pytest graph` |
 | [T-059](./tasks/T-059-integration-us2-us3.md) | US2/3 | Integration: chained/honesty/budget e2e | 🔴 Todo | `pytest integration` |
