@@ -113,4 +113,6 @@ class AgentState(TypedDict, total=False):
     step_event_data: list[dict[str, Any]]  # SSE events for the current step (started/finished/failed); read by T-058
     clarification_options: list[dict[str, Any]]  # set by planner on needs_clarification path
     budget: _AgentBudget  # read-only snapshot; guard (T-057) reads, no node writes
+    budget_hit: bool  # set by budget_guard (T-057) when a cap trips → synthesizer honest wrap-up
+    budget_event_data: dict[str, Any]  # SSE budget payload; set by budget_guard (T-057)
     _verify_route: str | None  # pre-computed by verify_step to avoid retry_count timing ambiguity
