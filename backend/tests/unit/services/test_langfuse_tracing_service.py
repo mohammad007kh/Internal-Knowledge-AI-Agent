@@ -9,8 +9,15 @@ from src.services.langfuse_tracing_service import LangfuseTracingService
 
 @pytest.fixture()
 def service() -> tuple[LangfuseTracingService, MagicMock]:
-    mock_lf = MagicMock()
+    # The project pins Langfuse to <3 (v2): the real client exposes ``.trace``
+    # and ``get_trace_url`` but NOT ``start_observation`` (a v4 API). A bare
+    # MagicMock auto-creates ``start_observation``, which would make the
+    # service take the wrong (v4) branch and diverge from production. Use
+    # ``spec_set`` to mirror the real v2 surface so tests exercise the live
+    # code path.
+    mock_lf = MagicMock(spec_set=["trace", "flush", "get_trace_url", "base_url"])
     mock_lf.base_url = "https://langfuse.example.com"
+    mock_lf.get_trace_url.return_value = "https://langfuse.example.com/trace/abc-123"
     return LangfuseTracingService(langfuse=mock_lf), mock_lf
 
 
