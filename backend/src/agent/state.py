@@ -107,7 +107,9 @@ class AgentState(TypedDict, total=False):
     current_step: PlanStep | None
     plan_revision: int  # 0 or 1 — bounded by FR-007
     plan_revision_reason: str | None  # set by replan node (T-056); None on initial plan
+    superseded_plan: list[PlanStep]  # pre-revision plan retained by replan (T-056) for activity record (data-model §3)
     plan_event_data: dict[str, Any]  # SSE payload emitted by planner/replan; read by T-058
+    replan_event_data: dict[str, Any]  # SSE replan payload {reason, superseded_revision}; set by replan (T-056)
     step_event_data: list[dict[str, Any]]  # SSE events for the current step (started/finished/failed); read by T-058
     clarification_options: list[dict[str, Any]]  # set by planner on needs_clarification path
     budget: _AgentBudget  # read-only snapshot; guard (T-057) reads, no node writes

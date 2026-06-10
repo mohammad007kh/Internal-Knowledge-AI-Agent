@@ -9,6 +9,7 @@ from src.agent.nodes.persist import format_response, save_message
 from src.agent.nodes.planner import plan_query
 from src.agent.nodes.query_analyzer import analyze_query
 from src.agent.nodes.reflector import reflect
+from src.agent.nodes.replan import replan_step
 from src.agent.nodes.retrieve import retrieve_context
 from src.agent.nodes.source_router import route_sources
 from src.agent.nodes.text_to_query import text_to_query
@@ -26,6 +27,7 @@ __all__ = [
     "load_history",
     "plan_query",
     "reflect",
+    "replan_step",
     "retrieve_context",
     "route_after_verify",
     "route_sources",
