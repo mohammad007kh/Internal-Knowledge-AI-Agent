@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from src.agent.nodes.text_to_query import _execute, text_to_query
+from src.agent.nodes.text_to_query import _execute, _sanitise, text_to_query
 from src.models.enums import SourceType
 from src.services.ai_model_resolver import AIModelClient
 from src.services.db_safety import inject_limit, validate_sql
@@ -46,6 +46,37 @@ def test_strips_single_trailing_semicolon() -> None:
     safe, reason = is_safe_sql("SELECT id FROM t;")
     assert safe
     assert reason == ""
+
+
+# ---------------------------------------------------------------------------
+# Credential / DSN redaction (FR-020) — regression for the post-incident sweep.
+# ``_execute`` opens an engine from the source's connection_string; a driver
+# failure must NOT reach the logs with the DSN (the old code logged
+# exc_info=True, whose traceback final line renders str(exc) = the DSN).
+# ---------------------------------------------------------------------------
+
+
+def test_sanitise_redacts_dsn_url_credentials() -> None:
+    out = _sanitise(
+        "connect failed: postgresql+asyncpg://user:p@ss@host:5432/db"
+    )
+    assert "p@ss" not in out
+    assert "pass" not in out
+    assert "://***@" in out
+
+
+def test_sanitise_redacts_dsn_keyword_fragments() -> None:
+    out = _sanitise(
+        "host=db port=5432 user=admin password=hunter2 dbname=app failed"
+    )
+    assert "hunter2" not in out
+    assert "password=<redacted>" in out
+    assert "admin" not in out
+
+
+def test_sanitise_leaves_clean_message_untouched() -> None:
+    msg = 'relation "documents" does not exist'
+    assert _sanitise(msg) == msg
 
 
 def test_rejects_dml_in_cte() -> None:

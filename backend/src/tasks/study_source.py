@@ -37,7 +37,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import re
 import uuid
 from typing import Any
 
@@ -49,6 +48,7 @@ from src.repositories.schema_study_repository import SchemaStudyRepository
 from src.repositories.source_repository import SourceRepository
 from src.services.db_introspection.fingerprint import compute_fingerprint
 from src.services.db_introspection.schema_doc import SchemaDocument
+from src.services.db_safety import redact_dsn
 from src.services.sync_cancellation import (
     clear_sync_cancelled,
     is_sync_cancelled,
@@ -100,13 +100,15 @@ _AGENT_VERSION = "studying-agent@0.3"
 
 
 def _sanitise(message: str) -> str:
-    """Strip credentials from connection-string-like substrings.
+    """Strip credentials / host / db-name fragments from an error message.
 
-    Mirrors the helper in :mod:`sync_source` — the studying-agent's error
+    Thin alias over the single canonical hardened redactor
+    (:func:`src.services.db_safety.redact_dsn`) — the studying-agent's error
     messages MUST never echo a connection string into the audit log or the
-    admin UI's error surface.
+    admin UI's error surface. The previous local regex stopped at the FIRST
+    ``@`` and leaked the tail of ``@``-containing passwords.
     """
-    return re.sub(r"://[^@\s]+@", "://***@", message)
+    return redact_dsn(message)
 
 
 # ---------------------------------------------------------------------------

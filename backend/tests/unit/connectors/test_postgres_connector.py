@@ -1,7 +1,7 @@
 """Unit tests for PostgresConnector — T-090."""
 
 import uuid
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -82,6 +82,52 @@ class TestFetchRows:
 # ---------------------------------------------------------------------------
 # TestTestConnection
 # ---------------------------------------------------------------------------
+
+class TestCredentialRedaction:
+    """FR-020 — driver exceptions must never leak the DSN to a user-facing
+    error envelope (post-incident regression: ``database_connector`` leaked a
+    connection string; the same bug class lived here in ``raise ... {exc}``).
+    """
+
+    async def test_connect_error_does_not_leak_dsn(self):
+        """asyncpg.connect failure embedding the DSN must be scrubbed in the
+        ServiceUnavailableError surfaced to the API."""
+        connector = _make_connector()
+        leaky = (
+            "connection failed: postgresql://admin:hunter2@db.internal:5432/app"
+        )
+        with patch(
+            "asyncpg.connect", new=AsyncMock(side_effect=Exception(leaky))
+        ):
+            with pytest.raises(ServiceUnavailableError) as ei:
+                await connector.connect()
+
+        msg = str(ei.value)
+        assert "hunter2" not in msg
+        assert "admin" not in msg
+        assert "db.internal:5432" not in msg
+        assert "://***@" in msg
+
+    async def test_query_error_does_not_leak_dsn(self):
+        """asyncpg query failure embedding DSN key=value fragments must be
+        scrubbed in the BadRequestError surfaced to the API."""
+        connector = _make_connector()
+        mock_conn = AsyncMock()
+        leaky = (
+            "query failed (host=db port=5432 user=admin password=hunter2 "
+            "dbname=app): relation does not exist"
+        )
+        mock_conn.fetch = AsyncMock(side_effect=Exception(leaky))
+        connector._conn = mock_conn
+
+        with pytest.raises(BadRequestError) as ei:
+            await connector.fetch_rows("SELECT 1")
+
+        msg = str(ei.value)
+        assert "hunter2" not in msg
+        assert "password=<redacted>" in msg
+        assert "admin" not in msg  # user=<redacted>
+
 
 class TestTestConnection:
     async def test_test_connection_returns_true_when_connected(self):

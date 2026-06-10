@@ -4,12 +4,25 @@ Requires ``asyncpg``; the package is installed in the project venv.
 """
 from __future__ import annotations
 
-from typing import Any, AsyncIterator
+from collections.abc import AsyncIterator
+from typing import Any
 
 import asyncpg  # asyncpg 0.31.0 — installed ✅
 
 from src.connectors.base import BaseConnector, Document
 from src.core.exceptions import BadRequestError, ServiceUnavailableError
+from src.services.db_safety import redact_dsn
+
+# ---------------------------------------------------------------------------
+# Credential / DSN redaction (FR-020)
+# ---------------------------------------------------------------------------
+# asyncpg raises errors whose ``str(exc)`` can embed the connection DSN
+# (``scheme://user:pass@host`` URL, ``password=...`` / ``host=...`` key-value
+# pairs, bare ``host:port``). Those exceptions must NEVER reach a log line or a
+# user-facing error envelope. Delegates to the single canonical hardened
+# redactor (:func:`src.services.db_safety.redact_dsn`); the module-local alias
+# preserves the existing call sites.
+_sanitise = redact_dsn
 
 
 class PostgresConnector(BaseConnector):
@@ -49,9 +62,11 @@ class PostgresConnector(BaseConnector):
                 password=self._config.get("password", ""),
             )
         except Exception as exc:
+            # ``str(exc)`` from asyncpg can embed the DSN (host/user/password);
+            # scrub before it reaches a user-facing error envelope (FR-020).
             raise ServiceUnavailableError(
-                f"Failed to connect to PostgreSQL: {exc}"
-            ) from exc
+                f"Failed to connect to PostgreSQL: {_sanitise(exc)}"
+            ) from None
 
     async def disconnect(self) -> None:
         """Close the underlying ``asyncpg`` connection if open."""
@@ -107,4 +122,8 @@ class PostgresConnector(BaseConnector):
             records = await self._conn.fetch(query)
             return [dict(record) for record in records]
         except Exception as exc:
-            raise BadRequestError(f"PostgreSQL query error: {exc}") from exc
+            # ``str(exc)`` from asyncpg can embed the DSN (host/user/password);
+            # scrub before it reaches a user-facing error envelope (FR-020).
+            raise BadRequestError(
+                f"PostgreSQL query error: {_sanitise(exc)}"
+            ) from None

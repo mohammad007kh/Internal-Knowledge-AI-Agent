@@ -446,7 +446,8 @@ class SourceService:
                 row is NOT mutated, so the caller (route handler) maps this
                 straight to a 422 with the modal-stays-open contract.
         """
-        from datetime import UTC, datetime as _datetime  # noqa: PLC0415
+        from datetime import UTC  # noqa: PLC0415
+        from datetime import datetime as _datetime
 
         from src.core.exceptions import ConnectorTestFailedError  # noqa: PLC0415
 
@@ -675,7 +676,15 @@ class SourceService:
                 last_error = "connector reported failure"
         except Exception as exc:  # noqa: BLE001
             ok = False
-            last_error = str(exc)
+            # This message is BOTH persisted (``connection_last_error``) and
+            # surfaced to the admin UI. A connector build / config-decrypt
+            # failure could embed a DSN fragment in ``str(exc)``; scrub it
+            # before it reaches the column / the client (FR-020).
+            from src.connectors.database_connector import (  # noqa: PLC0415
+                _sanitise as _sanitise_dsn,
+            )
+
+            last_error = _sanitise_dsn(exc)
 
         await self._persist_connection_probe(
             source_id, success=ok, error=last_error

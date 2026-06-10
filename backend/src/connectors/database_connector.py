@@ -2,10 +2,9 @@ from __future__ import annotations
 
 import hashlib
 import logging
-import re
 import uuid
 from collections.abc import AsyncIterator
-from typing import TYPE_CHECKING, Any, Final
+from typing import TYPE_CHECKING, Any
 
 import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import create_async_engine
@@ -13,7 +12,7 @@ from sqlalchemy.ext.asyncio import create_async_engine
 from src.connectors.base import BaseConnector, Document
 from src.connectors.registry import register
 from src.models.enums import SourceType
-from src.services.db_safety import validate_sql
+from src.services.db_safety import redact_dsn, validate_sql
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from src.services.db_introspection.schema_doc import SchemaDocument
@@ -24,44 +23,11 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # Credential / DSN redaction (FR-020)
 # ---------------------------------------------------------------------------
-# asyncpg / SQLAlchemy driver exceptions can embed the connection string or
-# DSN fragments (``scheme://user:pass@host`` URLs, ``password=...`` /
-# ``host=...`` key-value pairs, bare ``host:port``). We must NEVER surface
-# those in a log line or exception message. Mirrors
-# ``sql_inspector._sanitise`` / ``mongo_inspector._sanitise`` — we over-redact
-# on purpose: a scrubbed message is fine, a leaked one is a credential breach.
-
-#: ``scheme://user:pass@host`` → ``scheme://***@host``. Greedy up to the LAST
-#: ``@`` before a ``/`` or whitespace so passwords containing ``@`` (a common
-#: credential char) are fully redacted, e.g. ``://user:p@ss@host/db`` →
-#: ``://***@host/db`` (NOT ``://***@ss@host/db``, which would leak ``ss``).
-_CRED_URL_RE: Final[re.Pattern[str]] = re.compile(r"://[^/\s]*@")
-
-#: DSN-style ``key=value`` fragments that name host/db/user/credentials.
-_DSN_KV_RE: Final[re.Pattern[str]] = re.compile(
-    r"\b(host|hostaddr|port|dbname|database|user|username|password|passwd)\s*=\s*"
-    r"('[^']*'|\"[^\"]*\"|\S+)",
-    re.IGNORECASE,
-)
-
-#: A bare ``hostname:port`` (2-5 digit port). Only fires when a colon-separated
-#: port is present, so it won't eat ``"line 12:34"``.
-_HOST_PORT_RE: Final[re.Pattern[str]] = re.compile(r"\b[\w.-]+:\d{2,5}\b")
-
-
-def _sanitise(message: object) -> str:
-    """Redact credentials / host / db-name fragments from an error message.
-
-    Order matters: redact URL credentials FIRST (``scheme://user:pass@host``),
-    so the authority is collapsed to ``://***@`` before ``_HOST_PORT_RE`` could
-    match a ``host:port`` *inside* that authority. Then strip DSN ``key=value``
-    fragments, then collapse any remaining bare ``host:port``.
-    """
-    text = str(message)
-    text = _CRED_URL_RE.sub("://***@", text)
-    text = _DSN_KV_RE.sub(lambda m: f"{m.group(1).lower()}=<redacted>", text)
-    text = _HOST_PORT_RE.sub("<host>:<port>", text)
-    return text
+# Delegates to the single canonical hardened redactor
+# (:func:`src.services.db_safety.redact_dsn`). The module-local name is kept as
+# a thin alias so existing callers / tests that import ``_sanitise`` keep
+# working while the implementation lives in exactly one place.
+_sanitise = redact_dsn
 
 
 @register(SourceType.DATABASE)

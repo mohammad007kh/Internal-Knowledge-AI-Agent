@@ -31,6 +31,7 @@ from src.services.db_safety.connection_hardening import (
     postgres_asyncpg_connect_args,
     read_only_session,
 )
+from src.services.db_safety.dsn_redaction import redact_dsn
 from src.services.db_safety.sql_validator import (
     SqlValidationResult,
     inject_limit,
@@ -49,5 +50,6 @@ __all__ = [
     "mssql_connect_args",
     "postgres_asyncpg_connect_args",
     "read_only_session",
+    "redact_dsn",
     "validate_sql",
 ]

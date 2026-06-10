@@ -31,7 +31,7 @@ import logging
 import re
 import time
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Any, Final
+from typing import TYPE_CHECKING, Any
 
 import sqlalchemy as sa
 from sqlalchemy.engine import Inspector
@@ -71,6 +71,7 @@ from src.services.db_safety import (
     harden_connection,
     harden_postgres_engine_kwargs,
     mssql_connect_args,
+    redact_dsn,
     validate_sql,
 )
 
@@ -146,39 +147,13 @@ _SQLGLOT_DIALECT_BY_DB_TYPE: dict[str, str] = {
 # --- Error-message sanitisation -------------------------------------------
 #
 # Anything headed for a persisted PhaseError (and thus the audit log / admin
-# UI) must not leak DB topology or credentials. Driver exceptions are noisy:
-# asyncpg / psycopg embed ``host=...`` / ``dbname=...`` / ``password=...``
-# DSN fragments, SQLAlchemy embeds ``scheme://user:pass@host`` URLs, and a
-# bare ``host:port`` can show up anywhere. We over-redact on purpose — a
-# scrubbed error message is fine; a leaked one is not.
-
-#: ``scheme://user:pass@host`` → ``scheme://***@host``
-_CRED_URL_RE: Final[re.Pattern[str]] = re.compile(r"://[^@\s/]+@")
-
-#: DSN-style ``key=value`` fragments that name the host/db/user/credentials.
-_DSN_KV_RE: Final[re.Pattern[str]] = re.compile(
-    r"\b(host|hostaddr|port|dbname|database|user|username|password|passwd)\s*=\s*"
-    r"('[^']*'|\"[^\"]*\"|\S+)",
-    re.IGNORECASE,
-)
-
-#: A bare ``hostname:port`` (2-5 digit port). Conservative — only fires when a
-#: colon-separated port is present, so we don't eat ``"line 12:34"``.
-_HOST_PORT_RE: Final[re.Pattern[str]] = re.compile(r"\b[\w.-]+:\d{2,5}\b")
-
-
-def _sanitise(message: str) -> str:
-    """Redact credentials / host / db-name fragments from an error message.
-
-    Mirrors (and tightens) ``study_source._sanitise``. Order matters: strip
-    DSN ``key=value`` fragments first (they may contain a ``host:port``),
-    then collapse any remaining bare ``host:port``, then the URL form.
-    """
-    text = str(message)
-    text = _DSN_KV_RE.sub(lambda m: f"{m.group(1).lower()}=<redacted>", text)
-    text = _HOST_PORT_RE.sub("<host>:<port>", text)
-    text = _CRED_URL_RE.sub("://***@", text)
-    return text
+# UI) must not leak DB topology or credentials. Delegates to the single
+# canonical hardened redactor (:func:`src.services.db_safety.redact_dsn`),
+# which redacts URL credentials FIRST (greedy to the last ``@`` so
+# ``@``-containing passwords are fully stripped — the previous local URL regex
+# stopped at the first ``@``). The module-local alias preserves the existing
+# call sites / test imports.
+_sanitise = redact_dsn
 
 
 # ---------------------------------------------------------------------------

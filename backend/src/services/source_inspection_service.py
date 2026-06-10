@@ -18,7 +18,6 @@ schema metadata (counts) is returned to the caller.
 from __future__ import annotations
 
 import logging
-import re
 from typing import Any
 
 try:  # Langfuse 4.x exposes observe at the package root.
@@ -34,6 +33,7 @@ except Exception:  # noqa: BLE001 - observability is strictly optional
 
 from src.connectors.registry import get_connector
 from src.models.enums import SourceType
+from src.services.db_safety import redact_dsn
 
 logger = logging.getLogger(__name__)
 
@@ -60,19 +60,18 @@ FILE_SOURCE_TYPES: frozenset[str] = frozenset(
 # dialects, so we must supply *something*.
 _INSPECT_PROBE_QUERY = "SELECT 1"
 
-# Matches the ``user:password@`` segment of any URI so it can be masked before
-# the message reaches the caller.
-_CREDENTIALS_IN_URI = re.compile(r"://[^@\s]+@")
-
-
 def _sanitize_error_message(msg: str) -> str:
-    """Strip ``user:password@`` from any URI embedded in *msg*.
+    """Strip credentials / host / db-name fragments from an error message.
 
     Used on every error surfaced from the translation/connection path so a
     connection string (which the SQLAlchemy/asyncpg drivers love to embed in
-    exception text) never leaks credentials back to the API caller.
+    exception text) never leaks credentials back to the API caller. Thin alias
+    over the single canonical hardened redactor
+    (:func:`src.services.db_safety.redact_dsn`) — the previous local regex
+    stopped at the FIRST ``@`` and leaked the tail of ``@``-containing
+    passwords.
     """
-    return _CREDENTIALS_IN_URI.sub("://***@", msg)
+    return redact_dsn(msg)
 
 
 DESCRIPTION_PROMPT = (

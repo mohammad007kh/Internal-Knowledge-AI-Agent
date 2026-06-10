@@ -45,6 +45,7 @@ from src.prompts import load_prompt
 from src.services.db_safety import (
     harden_postgres_engine_kwargs,
     inject_limit,
+    redact_dsn,
     validate_sql,
 )
 
@@ -59,6 +60,18 @@ logger = logging.getLogger(__name__)
 
 _STAGE = "text_to_query"
 _LIMIT = 100
+
+# ---------------------------------------------------------------------------
+# Credential / DSN redaction (FR-020)
+# ---------------------------------------------------------------------------
+# ``_execute`` opens an engine from the source's decrypted ``connection_string``.
+# A driver (asyncpg / SQLAlchemy) failure can embed that DSN
+# (``scheme://user:pass@host`` URL, ``password=...`` key-value, bare
+# ``host:port``) in ``str(exc)``. We log the *sanitised* message instead of a
+# raw traceback, delegating to the single canonical hardened redactor
+# (:func:`src.services.db_safety.redact_dsn`). The module-local alias preserves
+# the existing call sites / test imports.
+_sanitise = redact_dsn
 
 # Map ``config["db_type"]`` to a sqlglot dialect name.  ``mssql`` is sqlglot's
 # ``tsql``; everything else falls back to ``postgres`` (the strictest parser
@@ -290,11 +303,17 @@ async def text_to_query(
                     wrapped,
                     db_type=str(config.get("db_type", "")),
                 )
-            except Exception:  # noqa: BLE001
+            except Exception as exc:  # noqa: BLE001
+                # ``exc_info`` is intentionally OMITTED: the traceback's final
+                # line renders ``str(exc)``, and a driver (asyncpg/SQLAlchemy)
+                # connection failure can embed the DSN there. Log the exception
+                # type + a *sanitised* message instead (FR-020).
                 logger.warning(
-                    "text_to_query: execution failed for source=%s — skipping",
+                    "text_to_query: execution failed for source=%s — skipping "
+                    "[%s: %s]",
                     sid,
-                    exc_info=True,
+                    type(exc).__name__,
+                    _sanitise(exc),
                 )
                 skipped.append(sid)
                 continue

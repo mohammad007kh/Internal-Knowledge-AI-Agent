@@ -40,7 +40,7 @@ import json
 import logging
 import re
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, Final
 
 from src.services.db_introspection._errors import SchemaStudyPhaseError
@@ -56,6 +56,7 @@ from src.services.db_introspection.schema_doc import (
     SchemaDocument,
     TableDoc,
 )
+from src.services.db_safety import redact_dsn
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from src.services.ai_model_resolver import AIModelResolver
@@ -96,40 +97,13 @@ _SYSTEM_PREFIXES: Final[tuple[str, ...]] = ("system.",)
 
 # --- Error-message sanitisation -------------------------------------------
 #
-# Mirrors sql_inspector._sanitise — anything headed for a persisted
-# PhaseError must not leak the connection URI or credentials.
-
-#: DSN-style ``key=value`` fragments that name the host/db/user/credentials.
-#: pymongo error text rarely uses this shape, but a wrapped driver/socket
-#: error might; redacting it is harmless either way.
-_DSN_KV_RE: Final[re.Pattern[str]] = re.compile(
-    r"\b(host|hostaddr|port|dbname|database|user|username|password|passwd)\s*=\s*"
-    r"('[^']*'|\"[^\"]*\"|\S+)",
-    re.IGNORECASE,
-)
-
-#: ``scheme://user:pass@host`` → ``scheme://***@host``
-_CRED_URL_RE: Final[re.Pattern[str]] = re.compile(r"://[^@\s/]+@")
-
-#: A bare ``hostname:port`` (2-5 digit port).
-_HOST_PORT_RE: Final[re.Pattern[str]] = re.compile(r"\b[\w.-]+:\d{2,5}\b")
-
-
-def _sanitise(message: object) -> str:
-    """Redact credentials / host:port fragments from an error message.
-
-    Order matters: redact credentials *first* — the DSN ``key=value``
-    fragments and the ``scheme://user:pass@`` URL form — then collapse any
-    remaining bare ``host:port``.  Doing it the other way round risks the
-    ``host:port`` regex mangling an all-digit password fragment (e.g.
-    ``user:1234@``) into ``<host>:<port>`` before the credential redaction
-    sees it.
-    """
-    text = str(message)
-    text = _DSN_KV_RE.sub(lambda m: f"{m.group(1).lower()}=<redacted>", text)
-    text = _CRED_URL_RE.sub("://***@", text)
-    text = _HOST_PORT_RE.sub("<host>:<port>", text)
-    return text
+# Anything headed for a persisted PhaseError must not leak the connection URI
+# or credentials. Delegates to the single canonical hardened redactor
+# (:func:`src.services.db_safety.redact_dsn`), which redacts URL credentials
+# FIRST (greedy to the last ``@`` so ``@``-containing passwords are fully
+# stripped — the previous local URL regex stopped at the first ``@``). The
+# module-local alias preserves the existing call sites / test imports.
+_sanitise = redact_dsn
 
 
 # ---------------------------------------------------------------------------
@@ -840,7 +814,7 @@ async def study_mongo_schema(
         doc = SchemaDocument(
             dialect="mongodb",
             fingerprint="0" * 64,  # placeholder, replaced below
-            generated_at=datetime.now(tz=timezone.utc),
+            generated_at=datetime.now(tz=UTC),
             agent_version=AGENT_VERSION,
             study_duration_ms=duration_ms,
             partial=partial,
