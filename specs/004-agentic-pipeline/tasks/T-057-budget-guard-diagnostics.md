@@ -1,7 +1,7 @@
 # Task: T-057 - budget-guard-diagnostics
 
-**Status**: Pending
-**Created**: 2026-06-04 | **Completed**: N/A
+**Status**: Done
+**Created**: 2026-06-04 | **Completed**: 2026-06-10
 **User Story**: US3 (honest failure), US6 (bounded cost & graceful stop)
 **Requirement**: FR-013, FR-019, FR-020
 **Platform**: web | **Subagents Enabled**: yes
