@@ -445,13 +445,28 @@ def test_parse_pdf_plain_pdf_still_works() -> None:
 
 
 def test_parse_pdf_falls_back_when_unstructured_fails() -> None:
-    """If the new parser raises, the legacy PyPDF2 path is used."""
+    """If the new parser raises, the legacy PyPDF2 path is used.
+
+    ``unstructured.partition.pdf`` pulls in heavy native image deps
+    (libxcb etc.) that are intentionally absent from the runtime image, so
+    the submodule cannot be imported here to patch in place.  We instead
+    inject a stand-in module whose ``partition_pdf`` raises, which exercises
+    the connector's ``except`` branch exactly as a real parser failure
+    would — then assert the PyPDF2 fallback recovered the text.
+    """
+    import sys  # noqa: PLC0415
+    import types  # noqa: PLC0415
+
     pdf_bytes = _build_plain_pdf()
 
-    with patch(
-        "unstructured.partition.pdf.partition_pdf",
-        side_effect=RuntimeError("simulated parser failure"),
-    ):
+    fake_module = types.ModuleType("unstructured.partition.pdf")
+
+    def _boom(*_args: Any, **_kwargs: Any) -> None:
+        raise RuntimeError("simulated parser failure")
+
+    fake_module.partition_pdf = _boom  # type: ignore[attr-defined]
+
+    with patch.dict(sys.modules, {"unstructured.partition.pdf": fake_module}):
         parsed = FileUploadConnector._parse_pdf(pdf_bytes)
 
     assert "Just a plain paragraph" in parsed

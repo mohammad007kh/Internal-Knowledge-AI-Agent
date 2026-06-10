@@ -133,6 +133,7 @@ class FileUploadConnector(BaseConnector):
         self._object_key: str = self._files[0]["object_key"]
         self._file_type: str = self._files[0]["file_type"]
         self._raw_data: bytes | None = None  # bytes for the *first* file (legacy)
+        self._connected: bool = False  # set by connect(); guards extract_documents()
 
     # ------------------------------------------------------------------
     # Config normalisation
@@ -199,10 +200,12 @@ class FileUploadConnector(BaseConnector):
         self._raw_data = await self._download_and_validate(
             object_key=first["object_key"], file_type=first["file_type"]
         )
+        self._connected = True
 
     async def disconnect(self) -> None:
         """Release any in-memory file bytes."""
         self._raw_data = None
+        self._connected = False
 
     async def _download_and_validate(self, object_key: str, file_type: str) -> bytes:
         """Download an object from MinIO, enforce size limits + MIME type."""
@@ -241,7 +244,22 @@ class FileUploadConnector(BaseConnector):
         For the legacy single-file path the bytes are reused from
         :meth:`connect` (preserves existing test behaviour).  Additional
         files are downloaded lazily here.
+
+        Raises
+        ------
+        RuntimeError
+            If called before :meth:`connect` (or outside the async-context
+            manager that calls it).  Extraction has no meaning until the
+            connector has established its MinIO session and pre-downloaded
+            the first object.
         """
+        if not self._connected:
+            raise RuntimeError(
+                "FileUploadConnector.extract_documents() called before connect(). "
+                "Call connect() first or use the connector as an async context "
+                "manager."
+            )
+
         # First file uses pre-downloaded bytes when present.
         first = self._files[0]
         first_bytes = self._raw_data
@@ -440,11 +458,47 @@ class FileUploadConnector(BaseConnector):
                 exc_info=True,
             )
 
+        return FileUploadConnector._parse_docx_python_docx(data)
+
+    @staticmethod
+    def _parse_docx_python_docx(data: bytes) -> str:
+        """Legacy python-docx fallback that also captures table-cell text.
+
+        ``document.paragraphs`` only walks top-level body paragraphs and
+        silently drops every table — which is exactly where résumé skills,
+        project rows, and other structured data live.  Iterating the body
+        XML in document order lets us emit paragraphs *and* table cells, so
+        the fallback no longer loses tabular content when the ``unstructured``
+        path is unavailable.
+        """
+        import io  # noqa: PLC0415
+
         import docx  # type: ignore[import-untyped]  # noqa: PLC0415
+        from docx.oxml.table import CT_Tbl  # type: ignore[import-untyped]  # noqa: PLC0415
+        from docx.oxml.text.paragraph import CT_P  # type: ignore[import-untyped]  # noqa: PLC0415
+        from docx.table import Table as _DocxTable  # type: ignore[import-untyped]  # noqa: PLC0415
+        from docx.text.paragraph import Paragraph as _DocxParagraph  # type: ignore[import-untyped]  # noqa: PLC0415
 
         document = docx.Document(io.BytesIO(data))
-        paragraphs: list[str] = [p.text for p in document.paragraphs if p.text.strip()]
-        return "\n".join(paragraphs)
+        parts: list[str] = []
+
+        # Walk the body in document order so paragraphs and tables interleave
+        # exactly as authored.
+        body = document.element.body
+        for child in body.iterchildren():
+            if isinstance(child, CT_P):
+                text = _DocxParagraph(child, document).text
+                if text.strip():
+                    parts.append(text)
+            elif isinstance(child, CT_Tbl):
+                table = _DocxTable(child, document)
+                for row in table.rows:
+                    cells = [cell.text.strip() for cell in row.cells]
+                    row_text = "\t".join(c for c in cells if c)
+                    if row_text:
+                        parts.append(row_text)
+
+        return "\n".join(parts)
 
     @staticmethod
     def _parse_xlsx(data: bytes) -> str:
