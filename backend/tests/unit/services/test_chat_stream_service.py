@@ -278,7 +278,7 @@ class TestRunPipelineStreamDoneEvent:
     async def test_done_event_carries_session_id_and_message_id(self) -> None:
         pipeline = _make_pipeline([_chain_end_event("ok")])
 
-        async def _persist(_answer: str) -> str:
+        async def _persist(_answer: str, *, activity_summary: dict | None = None) -> str:
             return "msg-42"
 
         frames = [

@@ -122,6 +122,13 @@ class ChatMessage(Base):
     # compute per-source average-feedback signals.
     feedback_rating: Mapped[int | None] = mapped_column(Integer, nullable=True)
     feedback_comment: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Compact agentic activity summary (004-agentic-pipeline US5 / FR-018).
+    # NULL for pre-feature rows and for non-agentic (v2 / legacy) turns; the
+    # activity UI hides what is absent.  Column + 16 KiB CHECK guard added by
+    # migration 0037; only application-generated narration is ever written here
+    # (never raw row slices — security rule 5). The compact shape is built by
+    # ``src.agent.activity_summary.build_activity_summary``.
+    activity_summary: Mapped[dict | None] = mapped_column(_JSONB, nullable=True)
 
     session: Mapped[ChatSession] = relationship(
         "ChatSession",

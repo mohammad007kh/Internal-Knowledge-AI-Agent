@@ -11,6 +11,7 @@ from fastapi import APIRouter, Depends, Request, Response, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.agent.pipeline import build_agent_budget_snapshot
 from src.core.database import get_db
 from src.core.deps import get_current_user, require_admin
 from src.core.problem_details import problem
@@ -71,6 +72,19 @@ def _get_pipeline() -> Any:
     from src.core.container import Container  # noqa: PLC0415
 
     return Container.pipeline()
+
+
+def _get_agentic_pipeline() -> Any:
+    """Sandbox-first agentic pipeline (T-058 / FR-026).
+
+    Returns the plan-and-execute graph when ``PIPELINE_AGENTIC_ENABLED`` is on;
+    otherwise the exact same v2 graph as :func:`_get_pipeline` (the flag is the
+    rollback). Only the admin sandbox endpoint uses this — general chat keeps
+    the proven v2 topology until the eval gates widen the flag.
+    """
+    from src.core.container import Container  # noqa: PLC0415
+
+    return Container.agentic_pipeline()
 
 
 def _get_tracing() -> LangfuseTracingService:
@@ -401,12 +415,17 @@ async def send_message(
         # tee the deltas here so the partial-persist branch can recover.
         partial_answer = ""
 
-        async def _persist_assistant(final_answer: str) -> str:
+        async def _persist_assistant(
+            final_answer: str,
+            *,
+            activity_summary: dict[str, Any] | None = None,
+        ) -> str:
             """Persist the completed assistant turn and return its id.
 
             Runs inside the shared helper's success path. Errors propagate
             up — :func:`run_pipeline_stream` converts them into a
-            ``persist_error`` SSE frame.
+            ``persist_error`` SSE frame. ``activity_summary`` (None on a
+            non-agentic turn) lands on ``chat_messages.activity_summary`` (T-058).
             """
             async with db_session_factory() as fresh_db:
                 assistant_msg = await chat_message_repo.create(
@@ -415,6 +434,7 @@ async def send_message(
                     role=MessageRole.ASSISTANT,
                     content=final_answer,
                     is_partial=False,
+                    activity_summary=activity_summary,
                 )
                 await fresh_db.commit()
                 return str(assistant_msg.id)
@@ -557,7 +577,7 @@ async def sandbox_stream(
     request: Request,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-    pipeline: Any = Depends(_get_pipeline),
+    pipeline: Any = Depends(_get_agentic_pipeline),
     langfuse_tracing: LangfuseTracingService = Depends(_get_tracing),
 ) -> StreamingResponse:
     """Run the agent pipeline against ONE source and stream SSE.
@@ -650,6 +670,17 @@ async def sandbox_stream(
         "sources": [],
         "total_input_tokens": 0,
         "total_output_tokens": 0,
+        # --- agentic plan-state seeds (T-058) ------------------------------
+        # When the agentic graph is selected (PIPELINE_AGENTIC_ENABLED on) the
+        # planner reads raw_user_intent and the loop edges read budget. These
+        # are inert on the v2 graph (it never reads them), so seeding them
+        # unconditionally keeps the flag a clean rollback.
+        "raw_user_intent": body.query,
+        "plan": [],
+        "past_steps": [],
+        "current_step": None,
+        "plan_revision": 0,
+        "budget": build_agent_budget_snapshot(),
     }
 
     async def _sandbox_event_generator() -> AsyncGenerator[str, None]:

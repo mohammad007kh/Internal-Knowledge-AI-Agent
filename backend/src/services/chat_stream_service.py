@@ -35,6 +35,7 @@ from typing import Any
 
 from langchain_core.messages import AIMessage, HumanMessage
 
+from src.agent.activity_summary import build_activity_summary
 from src.schemas.chat import ChatStreamEvent
 
 logger = logging.getLogger(__name__)
@@ -77,7 +78,7 @@ async def run_pipeline_stream(
     session_id: str,
     langfuse_tracing: Any,
     persist_assistant: bool,
-    on_done: Callable[[str], Awaitable[str]] | None = None,
+    on_done: Callable[..., Awaitable[str]] | None = None,
     pre_yield: list[str] | None = None,
 ) -> AsyncGenerator[str, None]:
     """Drive the LangGraph pipeline and yield SSE frames.
@@ -110,10 +111,13 @@ async def run_pipeline_stream(
         sandbox path: ``message_id`` is emitted as ``""`` and ``on_done``
         is not invoked.
     on_done
-        Async callback that receives ``final_answer`` and returns the
-        persisted ``message_id``.  Required when ``persist_assistant=True``,
-        ignored otherwise. Errors raised by the callback are converted to
-        an SSE ``error`` frame so the frontend can exit its pending state.
+        Async callback invoked as ``on_done(final_answer,
+        activity_summary=...)`` that returns the persisted ``message_id``.
+        ``activity_summary`` is the compact agentic summary (or ``None`` on a
+        non-agentic turn) so the caller can persist it on the same row.
+        Required when ``persist_assistant=True``, ignored otherwise. Errors
+        raised by the callback are converted to an SSE ``error`` frame so the
+        frontend can exit its pending state.
     pre_yield
         Pre-formatted SSE strings to emit BEFORE the pipeline starts (e.g.
         the auto-generated session title). They flow through unchanged.
@@ -130,6 +134,7 @@ async def run_pipeline_stream(
     final_answer = ""
     streamed_answer = ""  # Tokens already shipped via ``on_chat_model_stream``.
     sources: list[Any] = []
+    final_state: dict[str, Any] = {}  # full LangGraph output — read for activity_summary
 
     try:
         async for event in pipeline.astream_events(
@@ -143,6 +148,8 @@ async def run_pipeline_stream(
                     yield ChatStreamEvent.delta(token.content).to_sse()
             elif kind == "on_chain_end" and event.get("name") == "LangGraph":
                 output = event.get("data", {}).get("output", {})
+                if isinstance(output, dict):
+                    final_state = output
                 final_answer = output.get("final_answer", final_answer)
                 sources = output.get("sources", sources)
         # If the synthesizer streamed real tokens, prefer the streamed
@@ -220,6 +227,22 @@ async def run_pipeline_stream(
         tail = final_answer[len(streamed_answer):]
         yield ChatStreamEvent.delta(tail).to_sse()
 
+    # Compact agentic activity summary (T-058 / FR-018, FR-021). Built from the
+    # final LangGraph state (past_steps / plan / tokens). Returns None on a
+    # non-agentic (v2 / legacy) turn so the done event + persisted column stay
+    # null and the UI degrades gracefully. Defensive: a builder error must never
+    # break the user-facing stream — fall back to None.
+    activity_summary: dict[str, Any] | None
+    try:
+        activity_summary = build_activity_summary(final_state)
+    except Exception:  # noqa: BLE001
+        logger.warning(
+            "build_activity_summary failed for session=%s — omitting summary",
+            session_id,
+            exc_info=True,
+        )
+        activity_summary = None
+
     # Success path. The session-chat caller passes a ``persist_assistant``
     # callback that writes ``chat_messages`` and returns the new message id.
     # The sandbox caller skips this — its contract explicitly does NOT
@@ -231,7 +254,9 @@ async def run_pipeline_stream(
                 "persist_assistant=True requires an on_done callback"
             )
         try:
-            message_id = await on_done(final_answer)
+            message_id = await on_done(
+                final_answer, activity_summary=activity_summary
+            )
         except Exception:  # noqa: BLE001
             logger.exception(
                 "on_done callback failed for session=%s — emitting error frame",
@@ -256,6 +281,7 @@ async def run_pipeline_stream(
         message_id=message_id,
         trace_id=trace_id,
         sources=sources,
+        activity_summary=activity_summary,
     ).to_sse()
     try:
         langfuse_tracing.end_trace(trace_id, output=final_answer)

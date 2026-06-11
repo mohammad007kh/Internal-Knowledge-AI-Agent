@@ -202,6 +202,29 @@ class TestRevisionCap:
 
         assert result["plan_revision"] == 1
 
+    @pytest.mark.asyncio
+    async def test_success_clears_current_step(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """C1 regression: the success delta MUST clear current_step.
+
+        The verifier routes here leaving the stale superseded step in
+        ``current_step`` (retry_count>0). If replan did not clear it, the
+        post-replan ``_advance_step`` would treat it as a pending retry and
+        re-run the OLD step, silently dropping the revised plan. So the success
+        delta sets ``current_step`` to None to promote the revised plan fresh.
+        """
+        resolver = _make_resolver(_plan_payload(2))
+        _patch_prompt(monkeypatch)
+
+        result = await replan_step(
+            _state(),  # input has a stale current_step (s1, retry_count=1)
+            langfuse=_langfuse(),
+            ai_model_resolver=resolver,
+            source_meta_loader=_fake_meta_loader,
+        )
+
+        assert "current_step" in result
+        assert result["current_step"] is None
+
 
 # ---------------------------------------------------------------------------
 # Event sequence + reason propagation

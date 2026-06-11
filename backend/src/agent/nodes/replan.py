@@ -218,9 +218,20 @@ async def replan_step(
             len(plan_steps),
             _safe_log(reason),
         )
+        # C1 fix: CLEAR current_step on the success path. The verifier routed here
+        # leaving the stale (superseded) step in current_step with retry_count>0.
+        # If it lingered, the post-replan budget_guard_step → _advance_step would
+        # see _is_pending_retry()==True and RE-RUN the old step, silently dropping
+        # the entire revised plan (FR-007/FR-008). Promoting the revised plan's
+        # first step fresh requires current_step=None so _advance_step pops plan[0].
+        # Safe for the budget cap: budget_guard_replan already did its retry-cap
+        # check on the pre-replan retry_count; the next budget_guard_step reads
+        # ``current_step or {}`` → retry_count 0 (correct for a fresh step), and the
+        # revision cap reads plan_revision (unaffected by current_step).
         return {
             **base_delta,
             "plan": plan_steps,
+            "current_step": None,
             "replan_event_data": replan_event_data,
             "plan_event_data": plan_event_data,
         }

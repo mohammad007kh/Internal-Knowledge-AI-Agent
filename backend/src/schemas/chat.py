@@ -168,6 +168,11 @@ class ChatStreamEvent(BaseModel):
         message_id: str
         trace_id: str | None = None
         sources: list[dict[str, Any]] = Field(default_factory=list)
+        # Compact agentic activity summary (T-058 / FR-018, FR-021). None for
+        # non-agentic (v2 / legacy) turns — the activity UI hides what is
+        # absent. Built by ``src.agent.activity_summary.build_activity_summary``
+        # and persisted to ``chat_messages.activity_summary``.
+        activity_summary: dict[str, Any] | None = None
 
     class ClarificationData(BaseModel):
         question: str
@@ -212,6 +217,7 @@ class ChatStreamEvent(BaseModel):
         message_id: str,
         trace_id: str | None = None,
         sources: list[dict[str, Any]] | None = None,
+        activity_summary: dict[str, Any] | None = None,
     ) -> ChatStreamEvent:
         return cls(
             event=StreamEventType.DONE,
@@ -220,6 +226,9 @@ class ChatStreamEvent(BaseModel):
                 "message_id": message_id,
                 "trace_id": trace_id,
                 "sources": sources or [],
+                # Only included when the turn was agentic; None on v2/legacy so
+                # the wire frame degrades gracefully (frontend hides what is absent).
+                "activity_summary": activity_summary,
             },
         )
 

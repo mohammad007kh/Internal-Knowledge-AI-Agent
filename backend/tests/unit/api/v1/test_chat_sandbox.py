@@ -34,6 +34,7 @@ from fastapi.testclient import TestClient  # noqa: E402
 
 from src.api.middleware.error_handler import register_exception_handlers  # noqa: E402
 from src.api.v1.chat import (  # noqa: E402
+    _get_agentic_pipeline,
     _get_chat_message_repo,
     _get_chat_session_repo,
     _get_chat_session_service,
@@ -140,6 +141,10 @@ def app(
     app.dependency_overrides[get_current_user] = lambda: admin_user
     app.dependency_overrides[get_db] = lambda: db
     app.dependency_overrides[_get_pipeline] = lambda: mock_pipeline
+    # T-058: the sandbox endpoint now resolves the sandbox-first agentic
+    # pipeline. Override both so the same mock drives the stream regardless of
+    # which provider the endpoint depends on.
+    app.dependency_overrides[_get_agentic_pipeline] = lambda: mock_pipeline
     app.dependency_overrides[_get_tracing] = lambda: mock_tracing
     # Plumb the unrelated chat deps to no-op mocks so the router instantiates.
     app.dependency_overrides[_get_db_session_factory] = lambda: _make_db_factory(db)

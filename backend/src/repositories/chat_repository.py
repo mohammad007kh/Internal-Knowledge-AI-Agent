@@ -122,6 +122,7 @@ class ChatMessageRepository:
         message_type: str = "normal",
         is_partial: bool = False,
         sources_cited: list[dict] | None = None,
+        activity_summary: dict | None = None,
     ) -> ChatMessage:
         """Insert a single message and return the refreshed ORM object."""
         obj = ChatMessage(
@@ -135,6 +136,10 @@ class ChatMessageRepository:
             obj.is_partial = is_partial
         if hasattr(obj, "sources_cited") and sources_cited is not None:
             obj.sources_cited = sources_cited
+        # Compact agentic activity summary (T-058). Only set when present so
+        # non-agentic turns leave the column NULL (the UI hides what is absent).
+        if hasattr(obj, "activity_summary") and activity_summary is not None:
+            obj.activity_summary = activity_summary
         session.add(obj)
         await session.flush()
         await session.refresh(obj)
