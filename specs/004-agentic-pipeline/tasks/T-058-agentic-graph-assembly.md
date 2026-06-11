@@ -1,7 +1,7 @@
 # Task: T-058 - agentic-graph-assembly
 
-**Status**: Pending
-**Created**: 2026-06-04 | **Completed**: N/A
+**Status**: Done
+**Created**: 2026-06-04 | **Completed**: 2026-06-10
 **User Story**: US2 (multi-step planning), US5 (activity persistence), US6 (rollout)
 **Requirement**: FR-026, FR-018 (partial), FR-021
 **Platform**: web | **Subagents Enabled**: yes

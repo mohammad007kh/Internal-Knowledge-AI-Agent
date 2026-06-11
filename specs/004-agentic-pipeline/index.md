@@ -11,8 +11,8 @@
 | Metric      | Value |
 | ----------- | ----- |
 | Total Tasks | 41    |
-| Completed   | 23    |
-| Verified    | 23    |
+| Completed   | 24    |
+| Verified    | 24    |
 | Coverage    | 100% (26/26 FRs mapped; FR-025 is a scope constraint — see traceability) |
 
 **Current Phase**: Implementation (pending `/atomicspec.implement`)
@@ -56,7 +56,7 @@
 | [T-055](./tasks/T-055-verify-heavy-sql.md) | US3 | C5: heavy SQL verification | ✅ Done | 77 unit tests; 295 agent tests pass; ruff clean; dual security review |
 | [T-056](./tasks/T-056-replan-node.md) | US2 | C6: replan node + events | ✅ Done | 17 unit tests; 340 agent tests pass; ruff clean; reviewed |
 | [T-057](./tasks/T-057-budget-guard-diagnostics.md) | US3/6 | C7: budget guard + diagnostics + honest-failure | ✅ Done | 21 unit tests; 364 agent tests pass; ruff clean; reviewed |
-| [T-058](./tasks/T-058-agentic-graph-assembly.md) | US2/3 | C8: graph assembly + flag + done extension | 🔴 Todo | `pytest graph` |
+| [T-058](./tasks/T-058-agentic-graph-assembly.md) | US2/3 | C8: graph assembly + flag + done extension | ✅ Done | 27 new tests; 1810 unit pass; ruff clean; reviewed (C1 replan bug caught+fixed) |
 | [T-059](./tasks/T-059-integration-us2-us3.md) | US2/3 | Integration: chained/honesty/budget e2e | 🔴 Todo | `pytest integration` |
 | [T-070](./tasks/T-070-shared-sse-activity-state.md) | US5 | Shared SSE module + activityLog state | 🔴 Todo | `vitest + tsc` |
 | [T-071](./tasks/T-071-status-line.md) | US5 | Status line (Layer 1) | 🔴 Todo | `vitest + tsc` |
