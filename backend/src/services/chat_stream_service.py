@@ -29,11 +29,13 @@ the loading state.
 
 from __future__ import annotations
 
+import html
 import logging
 from collections.abc import AsyncGenerator, Awaitable, Callable
 from typing import Any
 
 from langchain_core.messages import AIMessage, HumanMessage
+from pydantic import ValidationError
 
 from src.agent.activity_summary import build_activity_summary
 from src.schemas.chat import ChatStreamEvent, StreamEventType
@@ -42,6 +44,100 @@ logger = logging.getLogger(__name__)
 
 
 SANDBOX_SESSION_ID = "__sandbox__"
+
+# Clarification options surfaced on the wire must obey the 2-4 contract
+# (contracts/sse-events.md §"Extended event: clarification").  Below the
+# minimum we degrade to a legacy free-text clarification rather than emit an
+# under-filled (and contract-violating) option list.
+_CLARIFY_MIN_OPTIONS = 2
+_CLARIFY_MAX_OPTIONS = 4
+
+
+def _build_clarification_frame(
+    *,
+    question: str,
+    raw_options: list[Any] | None,
+    permitted_ids: list[str],
+) -> str:
+    """Build the TERMINAL clarification SSE frame for the agentic path (T-080).
+
+    Decision (b): the agentic graph ends the clarification turn NORMALLY
+    (``planner → handle_clarification → END``) — no ``interrupt()``, no
+    ``GraphInterrupt``.  The planner writes ``clarification_question`` +
+    ``clarification_options`` (shape ``{source_id, source_name}``, already
+    clipped to the permitted set node-side with the ``source_name`` re-keyed to
+    the TRUSTED server-loaded display name of that permitted source); this
+    emitter RE-CLIPS defensively against the requesting user's permitted source
+    set (Security Rule 2 / FX41) before mapping onto the wire shape
+    ``{id, label, recommended?}``.
+
+    Security Rule 2 has TWO clauses, both enforced here (FX41 boundary
+    re-clip parity):
+
+    * **Permission re-clip (clause 1)** — an option whose ``source_id`` is NOT
+      in *permitted_ids* is dropped; an inaccessible source never reaches the
+      wire even if it leaked into state.
+    * **Trusted-name re-clip (clause 2)** — the wire ``label`` is the TRUSTED
+      ``source_name`` the planner keyed to THIS permitted ``source_id`` (never
+      the LLM-authored free-text label, which could NAME an inaccessible
+      source).  A planner ``label`` / ``hint`` are deliberately IGNORED: there
+      is no trusted per-source hint, so ``hint`` is dropped entirely rather than
+      risk passing free text that names another source.  Fallback when the
+      trusted name is absent is the ``source_id`` itself — never LLM text.
+    * **Sanitization** — the trusted name is still HTML-escaped (``quote=True``),
+      mirroring the planner's ``_render_sources_block`` discipline.
+    * **2-4 enforcement** — capped at 4; if fewer than 2 survive the clip we
+      degrade to a legacy free-text clarification (``options`` omitted) rather
+      than emit a contract-violating single option.
+
+    Returns a ready-to-yield SSE string. Never raises: any malformed option or
+    schema failure falls back to the legacy free-text clarification so a bad
+    node delta can never break the user-facing stream.
+    """
+    permitted = set(permitted_ids or [])
+    options_payload: list[dict[str, Any]] = []
+    seen_ids: set[str] = set()
+    for opt in raw_options or []:
+        if not isinstance(opt, dict):
+            continue
+        sid = opt.get("source_id") or opt.get("id")
+        if not isinstance(sid, str) or sid not in permitted or sid in seen_ids:
+            continue
+        seen_ids.add(sid)
+        # Trusted name keyed by the (already re-clipped) permitted source_id.
+        # NEVER the LLM-authored ``label``: it is free text that could NAME an
+        # inaccessible source.  Absent trusted name → fall back to the id, not
+        # to any LLM-provided string.
+        trusted_name = opt.get("source_name")
+        label = trusted_name if isinstance(trusted_name, str) and trusted_name else sid
+        wire_opt: dict[str, Any] = {
+            "id": sid,
+            # Trusted source display name → HTML-escape (planner parity).
+            "label": html.escape(label, quote=True),
+        }
+        # ``hint`` deliberately dropped — no trusted per-source hint exists, and
+        # the planner's free-text hint could name another source.
+        recommended = opt.get("recommended")
+        if isinstance(recommended, bool):
+            wire_opt["recommended"] = recommended
+        options_payload.append(wire_opt)
+        if len(options_payload) >= _CLARIFY_MAX_OPTIONS:
+            break
+
+    # Below the contract minimum → free-text clarification (still terminal).
+    emit_options = options_payload if len(options_payload) >= _CLARIFY_MIN_OPTIONS else None
+    try:
+        return ChatStreamEvent.clarification(
+            question, options=emit_options
+        ).to_sse()
+    except ValidationError:
+        # Defensive: should be unreachable (we already bound 2-4), but never let
+        # a schema edge case break the stream — fall back to free-text.
+        logger.warning(
+            "clarification options failed validation — emitting free-text fallback",
+            exc_info=True,
+        )
+        return ChatStreamEvent.clarification(question).to_sse()
 
 # Intermediate agentic node names whose ``on_chain_end`` output carries the
 # per-node SSE state-deltas (``*_event_data``).  Keyed on the EXACT
@@ -267,6 +363,37 @@ async def run_pipeline_stream(
         # model entirely (e.g. clarification / handle_clarification).
         if streamed_answer and not final_answer:
             final_answer = streamed_answer
+
+        # ── Terminal clarification (T-080, decision b) ──────────────────────
+        # The agentic graph ends the needs_clarification turn NORMALLY (no
+        # exception): planner → handle_clarification → END, with
+        # ``requires_clarification`` + ``clarification_question`` +
+        # ``clarification_options`` on the final state.  Detect that here and
+        # emit the extended ``clarification`` event TERMINALLY — suppressing the
+        # normal delta/done answer flow (handle_clarification also echoes the
+        # question into final_answer, which we deliberately do NOT ship as an
+        # answer). Options are re-clipped to the requesting user's permitted
+        # source set (Security Rule 2) before emission.  The legacy
+        # GraphInterrupt-string path below stays as the additive fallback.
+        if final_state.get("requires_clarification"):
+            question = (
+                final_state.get("clarification_question")
+                or "Could you clarify your question?"
+            )
+            permitted_ids = list(initial_state.get("source_ids") or [])
+            raw_options = final_state.get("clarification_options")
+            yield _build_clarification_frame(
+                question=str(question),
+                raw_options=raw_options if isinstance(raw_options, list) else None,
+                permitted_ids=permitted_ids,
+            )
+            try:
+                langfuse_tracing.end_trace(trace_id, output="[clarification]")
+            except Exception:  # noqa: BLE001
+                logger.debug(
+                    "end_trace failed after terminal clarification", exc_info=True
+                )
+            return
 
     except Exception as exc:  # noqa: BLE001
         if GraphInterrupt is not None and isinstance(exc, GraphInterrupt):

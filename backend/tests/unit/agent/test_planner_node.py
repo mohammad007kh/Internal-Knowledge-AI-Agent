@@ -391,6 +391,49 @@ class TestClarifyWithOptions:
         assert "clarification_question" in result
         options = result.get("clarification_options", [])
         assert 2 <= len(options) <= 4
+        # FX41 clause 2: each emitted option carries the TRUSTED source_name
+        # keyed by its permitted source_id — NOT the LLM-authored free-text
+        # label.  The free-text label key must be absent from the output shape.
+        by_id = {o["source_id"]: o for o in options}
+        assert by_id["src-001"]["source_name"] == "Sales DB"
+        assert by_id["src-002"]["source_name"] == "HR Policies"
+        assert all("label" not in o for o in options)
+
+    @pytest.mark.asyncio
+    async def test_clarification_option_label_naming_inaccessible_source_dropped(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """FX41 clause 2 (planner side): a PERMITTED option whose LLM label/hint
+        NAMES an inaccessible source is re-keyed to the trusted name; the free
+        text never reaches ``clarification_options``."""
+        payload = {
+            "decision": "needs_clarification",
+            "question": "Which source?",
+            "options": [
+                {"label": "See SECRET-PAYROLL-DB", "source_id": "src-001",
+                 "hint": "joins PAYROLL-PII"},
+                {"label": "CONFIDENTIAL-VAULT", "source_id": "src-002"},
+            ],
+            "allow_free_text": True,
+        }
+        resolver = _make_resolver(payload)
+        monkeypatch.setattr("src.agent.nodes.planner.load_prompt", lambda *a, **kw: "{SOURCES_BLOCK}")
+
+        result = await plan_query(
+            _state(),
+            langfuse=_langfuse(),
+            ai_model_resolver=resolver,
+            source_meta_loader=_fake_meta_loader,
+        )
+
+        options = result.get("clarification_options", [])
+        # Trusted names only — the leaked free text is gone from the state delta.
+        names = {o["source_name"] for o in options}
+        assert names == {"Sales DB", "HR Policies"}
+        serialized = json.dumps(options)
+        assert "SECRET-PAYROLL-DB" not in serialized
+        assert "PAYROLL-PII" not in serialized
+        assert "CONFIDENTIAL-VAULT" not in serialized
 
     @pytest.mark.asyncio
     async def test_clarification_options_filtered_to_permitted_set(

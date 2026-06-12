@@ -174,9 +174,24 @@ async def plan_query(
                 or "Could you clarify which data source you'd like to query?"
             )
             raw_options: list[dict[str, Any]] = list(payload.get("options") or [])
-            # Security Rule 2 — clarification path: options must ∈ permitted_set.
+            # Security Rule 2 — clarification path (BOTH clauses, FX41 parity):
+            #   1. an option's ``source_id`` must be ∈ permitted_set; and
+            #   2. an option may never NAME an inaccessible source.
+            # The LLM-authored ``label`` is FREE TEXT and could name any source
+            # (incl. one outside the permitted set), so we DROP it and re-key the
+            # human-readable name to the TRUSTED, server-loaded display name of
+            # the SAME permitted ``source_id`` — the very ``source_name_map`` the
+            # plan path uses below.  The emitter (chat_stream_service) then has a
+            # trusted ``source_name`` keyed by the (re-clipped) ``source_id`` and
+            # never has to trust the LLM's free-text label/hint.
+            clarify_name_map = {s["id"]: s.get("name", "") for s in sources}
             safe_options = [
-                opt for opt in raw_options if opt.get("source_id") in permitted_set
+                {
+                    "source_id": opt["source_id"],
+                    "source_name": clarify_name_map.get(opt["source_id"], ""),
+                }
+                for opt in raw_options
+                if opt.get("source_id") in permitted_set
             ][:4]
             span.update(
                 output={"decision": "needs_clarification", "n_options": len(safe_options)}
