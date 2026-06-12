@@ -2,6 +2,7 @@ import asyncio
 import os
 import subprocess
 from pathlib import Path
+from typing import Any
 
 import pytest
 import pytest_asyncio
@@ -55,6 +56,25 @@ if _INTEGRATION:
 def event_loop_policy():
     """Use default asyncio event loop policy."""
     return asyncio.DefaultEventLoopPolicy()
+
+
+# ---------------------------------------------------------------------------
+# Shared helper (module level — importable regardless of the integration guard)
+# ---------------------------------------------------------------------------
+# Several integration modules do ``from tests.conftest import get_access_token``
+# at import time. It must live at module scope so the import resolves even when
+# ``RUN_INTEGRATION_TESTS`` is unset (those modules are simply not collected in
+# that regime, but Python still needs the name to exist). The ``client`` arg is
+# an httpx ``AsyncClient`` at call time; annotated ``Any`` here so this helper
+# carries NO dependency on the conditionally-imported ``AsyncClient`` symbol.
+async def get_access_token(client: Any, email: str, password: str) -> str:
+    """Login and return the access_token string."""
+    resp = await client.post(
+        "/api/v1/auth/login",
+        json={"email": email, "password": password},
+    )
+    resp.raise_for_status()
+    return resp.json()["access_token"]
 
 
 if _INTEGRATION:
@@ -196,19 +216,6 @@ if _INTEGRATION:
             )
         await engine.dispose()
         yield
-
-    # ---------------------------------------------------------------------------
-    # Shared helper
-    # ---------------------------------------------------------------------------
-
-    async def get_access_token(client: AsyncClient, email: str, password: str) -> str:
-        """Login and return the access_token string."""
-        resp = await client.post(
-            "/api/v1/auth/login",
-            json={"email": email, "password": password},
-        )
-        resp.raise_for_status()
-        return resp.json()["access_token"]
 
     # ---------------------------------------------------------------------------
     # User fixtures

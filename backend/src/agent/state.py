@@ -116,3 +116,6 @@ class AgentState(TypedDict, total=False):
     budget_hit: bool  # set by budget_guard (T-057) when a cap trips → synthesizer honest wrap-up
     budget_event_data: dict[str, Any]  # SSE budget payload; set by budget_guard (T-057)
     _verify_route: str | None  # pre-computed by verify_step to avoid retry_count timing ambiguity
+    # set by synthesize_failure node (T-057) → honest-failure prompt; MUST be a
+    # declared channel or LangGraph drops it
+    _synthesize_failure: bool

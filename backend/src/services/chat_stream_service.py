@@ -36,12 +36,85 @@ from typing import Any
 from langchain_core.messages import AIMessage, HumanMessage
 
 from src.agent.activity_summary import build_activity_summary
-from src.schemas.chat import ChatStreamEvent
+from src.schemas.chat import ChatStreamEvent, StreamEventType
 
 logger = logging.getLogger(__name__)
 
 
 SANDBOX_SESSION_ID = "__sandbox__"
+
+# Intermediate agentic node names whose ``on_chain_end`` output carries the
+# per-node SSE state-deltas (``*_event_data``).  Keyed on the EXACT
+# ``add_node(...)`` names from :func:`src.agent.pipeline._build_agentic_pipeline`
+# so a v2/v1 turn (which never produces these node names) is byte-identical to
+# before — those graphs simply never fire an ``on_chain_end`` for these names.
+_AGENTIC_NODE_NAMES = frozenset(
+    {
+        "planner",
+        "replan",
+        "execute_step",
+        "budget_guard_step",
+        "budget_guard_replan",
+    }
+)
+
+
+def _agentic_frames_from_node_output(output: dict[str, Any]) -> list[str]:
+    """Translate one agentic node's state-delta into ordered SSE frames.
+
+    Maps the per-node ``*_event_data`` deltas written into ``AgentState`` by the
+    planner / executor / budget_guard / replan nodes onto the ``plan`` / ``step``
+    / ``budget`` / ``replan`` wire frames (contract: ``contracts/sse-events.md``).
+    The node deltas are ALREADY in the wire-contract shape, so each is emitted as
+    the SSE ``data`` payload verbatim under the matching event name — never
+    reshaped (reshaping would drop contract fields like ``budget.ceiling_hit``).
+
+    Ordering within a single node delta:
+
+    * ``replan`` node returns BOTH ``replan_event_data`` and a fresh
+      ``plan_event_data`` (revision 1) in one delta — emit ``replan`` THEN
+      ``plan`` (T-056 order).
+    * ``step_event_data`` is a LIST (started / finished / failed) — emit one
+      ``step`` frame per entry in list order.
+
+    Resilient by contract: a missing / malformed field is skipped, never raised,
+    so a single bad node delta can never break the user-facing stream.
+    """
+    frames: list[str] = []
+    if not isinstance(output, dict):
+        return frames
+
+    # replan FIRST, then its fresh plan (T-056 order).  ``replan_event_data`` is
+    # only ever present on a replan node delta.
+    replan_data = output.get("replan_event_data")
+    if isinstance(replan_data, dict):
+        frames.append(
+            ChatStreamEvent(event=StreamEventType.REPLAN, data=replan_data).to_sse()
+        )
+
+    plan_data = output.get("plan_event_data")
+    if isinstance(plan_data, dict):
+        frames.append(
+            ChatStreamEvent(event=StreamEventType.PLAN, data=plan_data).to_sse()
+        )
+
+    step_events = output.get("step_event_data")
+    if isinstance(step_events, list):
+        for step_payload in step_events:
+            if isinstance(step_payload, dict):
+                frames.append(
+                    ChatStreamEvent(
+                        event=StreamEventType.STEP, data=step_payload
+                    ).to_sse()
+                )
+
+    budget_data = output.get("budget_event_data")
+    if isinstance(budget_data, dict):
+        frames.append(
+            ChatStreamEvent(event=StreamEventType.BUDGET, data=budget_data).to_sse()
+        )
+
+    return frames
 
 
 def history_to_lc_messages(
@@ -135,6 +208,11 @@ async def run_pipeline_stream(
     streamed_answer = ""  # Tokens already shipped via ``on_chat_model_stream``.
     sources: list[Any] = []
     final_state: dict[str, Any] = {}  # full LangGraph output — read for activity_summary
+    # Dedup guard for the intermediate agentic node frames.  ``astream_events``
+    # gives every node-completion a unique ``run_id``; keying on it guarantees
+    # each node's ``*_event_data`` is translated to wire frames EXACTLY once even
+    # if LangGraph surfaces the same node output more than once.
+    emitted_node_run_ids: set[str] = set()
 
     try:
         async for event in pipeline.astream_events(
@@ -152,6 +230,36 @@ async def run_pipeline_stream(
                     final_state = output
                 final_answer = output.get("final_answer", final_answer)
                 sources = output.get("sources", sources)
+            elif (
+                kind == "on_chain_end"
+                and event.get("name") in _AGENTIC_NODE_NAMES
+            ):
+                # Intermediate agentic node finished — translate its state-delta
+                # (``*_event_data``) into ``plan`` / ``step`` / ``budget`` /
+                # ``replan`` frames in natural stream (execution) order.  The v2
+                # / v1 paths never produce these node names, so this branch is a
+                # no-op there and the wire grammar stays byte-identical.
+                run_id = str(event.get("run_id") or "")
+                if run_id and run_id in emitted_node_run_ids:
+                    continue
+                node_output = event.get("data", {}).get("output", {})
+                try:
+                    node_frames = _agentic_frames_from_node_output(node_output)
+                except Exception:  # noqa: BLE001
+                    # Mirror the streamer's defensive hygiene: a malformed node
+                    # delta must never break the user-facing stream.
+                    logger.warning(
+                        "agentic SSE emitter failed for node=%s session=%s — "
+                        "skipping its intermediate frames",
+                        event.get("name"),
+                        session_id,
+                        exc_info=True,
+                    )
+                    node_frames = []
+                if run_id:
+                    emitted_node_run_ids.add(run_id)
+                for frame in node_frames:
+                    yield frame
         # If the synthesizer streamed real tokens, prefer the streamed
         # text — it's the canonical source of truth for what the user
         # actually saw on-wire.  Falling back to the LangGraph

@@ -72,6 +72,103 @@ def _chain_end_event(
     }
 
 
+_node_run_seq = 0
+
+
+def _node_end_event(
+    name: str,
+    output: dict[str, Any],
+    *,
+    run_id: str | None = None,
+) -> dict[str, Any]:
+    """An intermediate agentic node ``on_chain_end`` event.
+
+    Mirrors ``astream_events(version="v2")``: ``event["name"]`` is the node
+    name, ``event["data"]["output"]`` is the node's returned state-delta, and
+    ``event["run_id"]`` is unique per node completion (the dedup key).
+    """
+    global _node_run_seq  # noqa: PLW0603
+    if run_id is None:
+        _node_run_seq += 1
+        run_id = f"run-{_node_run_seq}"
+    return {
+        "event": "on_chain_end",
+        "name": name,
+        "run_id": run_id,
+        "data": {"output": output},
+    }
+
+
+def _plan_delta(*, revision: int = 0, reason: Any = None, n_steps: int = 2) -> dict[str, Any]:
+    """A planner node delta carrying ``plan_event_data`` (contract shape)."""
+    return {
+        "plan": [{"id": f"s{i}"} for i in range(1, n_steps + 1)],
+        "plan_event_data": {
+            "revision": revision,
+            "reason": reason,
+            "steps": [
+                {
+                    "id": f"s{i}",
+                    "label": f"step {i}",
+                    "source_id": f"src-{i}",
+                    "source_name": f"Source {i}",
+                    "depends_on": [],
+                }
+                for i in range(1, n_steps + 1)
+            ],
+        },
+    }
+
+
+def _step_delta(step_id: str, states: list[str]) -> dict[str, Any]:
+    """An executor node delta carrying a LIST of step events (started/finished…)."""
+    return {
+        "step_event_data": [
+            {
+                "step_id": step_id,
+                "role": "executor",
+                "state": st,
+                "label": f"{step_id} {st}",
+                "summary": None,
+                "progress": {"current": 1, "total": 1},
+            }
+            for st in states
+        ],
+    }
+
+
+def _budget_delta(not_completed: list[str] | None = None) -> dict[str, Any]:
+    """A budget_guard node delta carrying ``budget_event_data`` (contract shape)."""
+    return {
+        "budget_hit": True,
+        "budget_event_data": {
+            "ceiling_hit": True,
+            "not_completed": not_completed or ["finish the answer"],
+            "offer_continue": True,
+        },
+    }
+
+
+def _replan_delta(reason: str = "switching sources") -> dict[str, Any]:
+    """A replan node delta carrying BOTH replan + fresh plan event data (T-056)."""
+    return {
+        "replan_event_data": {"reason": reason, "superseded_revision": 0},
+        "plan_event_data": {
+            "revision": 1,
+            "reason": reason,
+            "steps": [
+                {
+                    "id": "s1",
+                    "label": "revised step",
+                    "source_id": "src-1",
+                    "source_name": "Source 1",
+                    "depends_on": [],
+                }
+            ],
+        },
+    }
+
+
 def _make_pipeline(
     events: list[dict[str, Any]] | None = None,
     *,
@@ -428,3 +525,140 @@ class TestRunPipelineStreamErrorPaths:
         assert "delta" in events
         assert events[-1] == "error"
         assert parsed[-1][1]["code"] == "persist_error"
+
+
+# ---------------------------------------------------------------------------
+# run_pipeline_stream — agentic intermediate-frame emitter (PART 1)
+# ---------------------------------------------------------------------------
+
+
+async def _collect(pipeline: MagicMock, *, session_id: str = "sess-1") -> list[str]:
+    return [
+        f
+        async for f in run_pipeline_stream(
+            pipeline=pipeline,
+            initial_state={"session_id": session_id},
+            config={"configurable": {"thread_id": session_id}},
+            trace_id="trace-1",
+            session_id=session_id,
+            langfuse_tracing=_make_tracing(),
+            persist_assistant=False,
+            on_done=None,
+        )
+    ]
+
+
+class TestRunPipelineStreamAgenticEmitter:
+    """The agentic SSE emitter: per-node ``*_event_data`` → wire frames.
+
+    Locks frame ordering, one-frame-per-event, the replan-then-plan order
+    (T-056), and that the v2 path (no ``*_event_data``) is byte-identical to
+    before (only ``delta`` + ``done``).
+    """
+
+    @pytest.mark.asyncio
+    async def test_plan_steps_budget_then_done_in_order(self) -> None:
+        # Synthetic node completions in execution order: planner → executor
+        # (started + finished) → budget → terminal LangGraph end.
+        pipeline = _make_pipeline(
+            [
+                _node_end_event("planner", _plan_delta(n_steps=2)),
+                _node_end_event("execute_step", _step_delta("s1", ["started", "finished"])),
+                _node_end_event("budget_guard_step", _budget_delta()),
+                _chain_end_event("Final answer"),
+            ]
+        )
+        frames = await _collect(pipeline)
+        parsed = _parse_sse_frames(frames)
+        events = [name for name, _ in parsed]
+
+        # plan, two steps, budget, then a delta (synthetic fallback) and done.
+        assert events[0] == "plan"
+        assert events[1] == "step"
+        assert events[2] == "step"
+        assert events[3] == "budget"
+        assert events[-1] == "done"
+        # Exactly one of each intermediate type, two steps.
+        assert events.count("plan") == 1
+        assert events.count("step") == 2
+        assert events.count("budget") == 1
+
+        # Payloads pass through verbatim (contract shape — NOT reshaped).
+        plan_payload = parsed[0][1]
+        assert plan_payload["revision"] == 0
+        assert len(plan_payload["steps"]) == 2
+        step_states = [d["state"] for n, d in parsed if n == "step"]
+        assert step_states == ["started", "finished"]
+        budget_payload = parsed[3][1]
+        assert budget_payload == {
+            "ceiling_hit": True,
+            "not_completed": ["finish the answer"],
+            "offer_continue": True,
+        }
+
+    @pytest.mark.asyncio
+    async def test_each_node_frame_emitted_exactly_once(self) -> None:
+        # Same planner node output surfaced TWICE with the SAME run_id — the
+        # dedup must collapse it to a single plan frame.
+        plan_evt = _node_end_event("planner", _plan_delta(n_steps=1), run_id="dup-1")
+        pipeline = _make_pipeline(
+            [plan_evt, plan_evt, _chain_end_event("ok")]
+        )
+        frames = await _collect(pipeline)
+        events = [name for name, _ in _parse_sse_frames(frames)]
+        assert events.count("plan") == 1
+
+    @pytest.mark.asyncio
+    async def test_replan_then_plan_order(self) -> None:
+        # The replan node returns BOTH replan + fresh plan in one delta; the
+        # emitter must yield replan FIRST, then the fresh plan (T-056).
+        pipeline = _make_pipeline(
+            [
+                _node_end_event("planner", _plan_delta(n_steps=1)),
+                _node_end_event("execute_step", _step_delta("s1", ["started", "failed"])),
+                _node_end_event("replan", _replan_delta()),
+                _node_end_event("execute_step", _step_delta("s1", ["started", "finished"])),
+                _chain_end_event("ok"),
+            ]
+        )
+        frames = await _collect(pipeline)
+        events = [name for name, _ in _parse_sse_frames(frames)]
+        # The replan event sits immediately before the revised plan event.
+        replan_idx = events.index("replan")
+        assert events[replan_idx + 1] == "plan"
+        # Two plans total (initial + revision), one replan.
+        assert events.count("replan") == 1
+        assert events.count("plan") == 2
+
+    @pytest.mark.asyncio
+    async def test_v2_path_unchanged_only_delta_and_done(self) -> None:
+        # A v2 turn: token stream + terminal end, NO ``*_event_data`` node deltas.
+        # The emitter must be a no-op → byte-identical to the pre-emitter wire.
+        pipeline = _make_pipeline(
+            [
+                _delta_event("Hello"),
+                _delta_event(" world"),
+                _chain_end_event("Hello world"),
+            ]
+        )
+        frames = await _collect(pipeline)
+        events = [name for name, _ in _parse_sse_frames(frames)]
+        assert events == ["delta", "delta", "done"]
+
+    @pytest.mark.asyncio
+    async def test_malformed_node_delta_does_not_break_stream(self) -> None:
+        # A node whose output is not the expected dict shape (e.g. event_data is
+        # a string) must be skipped silently — the stream still completes.
+        pipeline = _make_pipeline(
+            [
+                _node_end_event("planner", {"plan_event_data": "not-a-dict"}),
+                _node_end_event("execute_step", {"step_event_data": "not-a-list"}),
+                _chain_end_event("Final answer"),
+            ]
+        )
+        frames = await _collect(pipeline)
+        events = [name for name, _ in _parse_sse_frames(frames)]
+        # No plan/step frames from the malformed deltas; stream still ends.
+        assert "plan" not in events
+        assert "step" not in events
+        assert events[-1] == "done"
