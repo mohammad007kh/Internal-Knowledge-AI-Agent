@@ -11,8 +11,8 @@
 | Metric      | Value |
 | ----------- | ----- |
 | Total Tasks | 41    |
-| Completed   | 25    |
-| Verified    | 25    |
+| Completed   | 26    |
+| Verified    | 26    |
 | Coverage    | 100% (26/26 FRs mapped; FR-025 is a scope constraint — see traceability) |
 
 **Current Phase**: Implementation (pending `/atomicspec.implement`)
@@ -65,7 +65,7 @@
 | [T-074](./tasks/T-074-budget-footer-cost-note.md) | US5/6 | Budget footer + quiet cost note | 🔴 Todo | `vitest + tsc` |
 | [T-075](./tasks/T-075-honest-failure-ui-optionbuttons.md) | US3/5 | Abstain turn UI + OptionButtonGroup | 🔴 Todo | `vitest + tsc` |
 | [T-077](./tasks/T-077-wire-us5-sandbox.md) | US5 | WIRE US5: sandbox first, then main chat | 🔴 Todo | `vitest integration` |
-| [T-080](./tasks/T-080-clarify-options-backend.md) | US4 | Clarify options event (backend, terminal) | 🔴 Todo | `pytest clarify` |
+| [T-080](./tasks/T-080-clarify-options-backend.md) | US4 | Clarify options event (backend, terminal) | ✅ Done | 23 tests; 415 agent pass; ruff clean; 007 Rule-2 (both clauses) verified |
 | [T-081](./tasks/T-081-clarify-options-ui.md) | US4 | ClarificationCard options UI | 🔴 Todo | `vitest + tsc` |
 | [T-082](./tasks/T-082-wire-us4.md) | US4 | WIRE US4: ambiguous→options→proceed e2e | 🔴 Todo | `pytest + vitest` |
 | [T-090](./tasks/T-090-gate-run-and-calibration.md) | US6 | Gate run + p95 ceiling calibration | 🔴 Todo | `evals compare GATES-PASS` |

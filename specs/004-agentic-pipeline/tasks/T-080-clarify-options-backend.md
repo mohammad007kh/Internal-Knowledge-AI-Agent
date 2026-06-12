@@ -1,6 +1,6 @@
 # Task: T-080 - clarify-options-backend
 
-**Status**: Pending
+**Status**: Done | **Completed**: 2026-06-10
 **Created**: 2026-06-04 | **Completed**: N/A
 **Platform**: web | **Task Target**: backend
 **User Story**: US4 (when the question is ambiguous, ask — with choices)
