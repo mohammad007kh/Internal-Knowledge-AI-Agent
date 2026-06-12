@@ -99,6 +99,8 @@ docker exec internalknowledgeaiagent-backend-1 python -m pytest tests/unit/ --no
 - Lint on the **host** (not the container): `cd backend && python -m ruff check <changed files>` (and `--fix` for import-sort).
 - For a single module, sync the full dirs anyway, then target the file: `pytest tests/unit/<path> -q`.
 
+**Frontend tests run on the HOST, not in a container.** The `internalknowledgeaiagent-frontend-1` container is a runtime image (no devDeps/test binaries, source not live-mounted). Run from `frontend/`: `pnpm exec vitest run <file>` (unit), `pnpm exec tsc --noEmit` (types), `pnpm lint` / `pnpm exec biome check <paths>` (Biome — NEVER eslint). If `node_modules/.bin` is empty, `pnpm install --frozen-lockfile` first.
+
 ## Active Technologies
 - Python 3.12 (backend), TypeScript 5.6 (frontend) + FastAPI, LangChain+LangGraph (existing pins), SQLAlchemy 2 async, Next.js 15, shadcn/ui, TanStack Query v5 — NO new runtime dependencies (004-agentic-pipeline)
 - PostgreSQL 16 + pgvector (2 expand-only migrations: source-intent columns, message activity_summary JSONB); Redis (unchanged); MinIO (unchanged) (004-agentic-pipeline)

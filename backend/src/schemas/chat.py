@@ -291,46 +291,64 @@ class ChatStreamEvent(BaseModel):
         cls,
         *,
         step_id: str,
+        role: str,
+        state: str,
         label: str,
-        status: str,
-        narration: str = "",
+        summary: str | None = None,
+        progress: dict[str, int] | None = None,
     ) -> ChatStreamEvent:
-        """Emit progress for a single executor step."""
+        """Emit progress for a single step (contracts/sse-events.md `step`).
+
+        Shape matches what ``executor._step_event`` writes and the emitter sends
+        verbatim: ``{step_id, role, state, label, summary, progress}``.
+        """
         return cls(
             event=StreamEventType.STEP,
-            data={"step_id": step_id, "label": label, "status": status, "narration": narration},
+            data={
+                "step_id": step_id,
+                "role": role,
+                "state": state,
+                "label": label,
+                "summary": summary,
+                "progress": progress or {"current": 0, "total": 0},
+            },
         )
 
     @classmethod
     def replan(
         cls,
         *,
-        revision: int,
         reason: str,
-        steps: list[dict[str, Any]],
+        superseded_revision: int,
     ) -> ChatStreamEvent:
-        """Emit a revised plan after a failed verification step."""
+        """Emit a replan notice (contracts/sse-events.md `replan`).
+
+        Always followed by a fresh ``plan`` event with ``revision: 1``; the
+        revised steps ride on that ``plan`` event, not here.
+        """
         return cls(
             event=StreamEventType.REPLAN,
-            data={"revision": revision, "reason": reason, "steps": steps},
+            data={"reason": reason, "superseded_revision": superseded_revision},
         )
 
     @classmethod
     def budget(
         cls,
         *,
-        steps_used: int,
-        steps_max: int,
-        tokens_used: int,
-        tokens_max: int,
+        ceiling_hit: bool,
+        not_completed: list[str],
+        offer_continue: bool,
     ) -> ChatStreamEvent:
-        """Emit a budget-ceiling diagnostic when the agent nears its limits."""
+        """Emit a budget-ceiling notice (contracts/sse-events.md `budget`).
+
+        Shape matches ``budget_guard``'s ``budget_event_data`` sent verbatim:
+        ``{ceiling_hit, not_completed, offer_continue}``.
+        """
         return cls(
             event=StreamEventType.BUDGET,
             data={
-                "steps_used": steps_used,
-                "steps_max": steps_max,
-                "tokens_used": tokens_used,
-                "tokens_max": tokens_max,
+                "ceiling_hit": ceiling_hit,
+                "not_completed": not_completed,
+                "offer_continue": offer_continue,
             },
         )
