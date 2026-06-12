@@ -1,5 +1,11 @@
 'use client'
 
+import {
+  type ActivityState,
+  activityLogReducer,
+  emptyActivityState,
+  parseAgentEvent,
+} from '@/lib/sse/agent-events'
 import { getToken } from '@/lib/token-store'
 import { useCallback, useEffect, useRef, useState } from 'react'
 
@@ -44,11 +50,7 @@ export interface UseChatStreamReturn {
    * and emits `event: session_created` as the first frame; the resulting id
    * surfaces via `lastCreatedSessionId` so the consumer can swap the URL.
    */
-  sendMessage: (
-    sessionId: string,
-    query: string,
-    sourceIds?: string[],
-  ) => Promise<void>
+  sendMessage: (sessionId: string, query: string, sourceIds?: string[]) => Promise<void>
   abortStream: () => void
   isStreaming: boolean
   currentResponse: string
@@ -75,6 +77,13 @@ export interface UseChatStreamReturn {
    * existing session. Reset on every `sendMessage()` call.
    */
   lastCreatedSessionId: string | null
+  /**
+   * Per-turn agentic activity log folded from the INTERMEDIATE SSE events
+   * (`plan`/`step`/`replan`/`budget`). Additive only — these events never end
+   * the turn (no terminal flag, not in the `sawTerminalEvent` set). Reset on
+   * every `sendMessage()`. Consumed by the T-071+ thinking UI.
+   */
+  activityLog: ActivityState
   /**
    * Clears local stream state — useful after the caller has persisted the
    * final assistant message into the query cache and wants a fresh buffer.
@@ -144,6 +153,7 @@ export function useChatStream(): UseChatStreamReturn {
   const [lastMessageId, setLastMessageId] = useState<string | null>(null)
   const [lastTitle, setLastTitle] = useState<string | null>(null)
   const [lastCreatedSessionId, setLastCreatedSessionId] = useState<string | null>(null)
+  const [activityLog, setActivityLog] = useState<ActivityState>(emptyActivityState)
 
   const controllerRef = useRef<AbortController | null>(null)
 
@@ -170,6 +180,7 @@ export function useChatStream(): UseChatStreamReturn {
     setLastMessageId(null)
     setLastTitle(null)
     setLastCreatedSessionId(null)
+    setActivityLog(emptyActivityState)
   }, [])
 
   const sendMessage = useCallback(
@@ -191,6 +202,7 @@ export function useChatStream(): UseChatStreamReturn {
       setLastMessageId(null)
       setLastTitle(null)
       setLastCreatedSessionId(null)
+      setActivityLog(emptyActivityState)
 
       const token = getToken()
       const url = `${API_BASE}/api/v1/chat/sessions/${sessionId}/messages`
@@ -342,9 +354,19 @@ export function useChatStream(): UseChatStreamReturn {
                 sawTerminalEvent = true
                 break
               }
-              default:
-                // Unknown event types are ignored — forward compatibility.
+              default: {
+                // INTERMEDIATE agentic events (plan/step/replan/budget) are
+                // additive to the activity log and NEVER terminal: they do NOT
+                // set messageType, do NOT set lastMessageId, do NOT touch
+                // `sawTerminalEvent`, and are folded through the shared,
+                // immutable reducer. parseAgentEvent returns null for any other
+                // (unknown / future) event → silent drop (forward compat).
+                const agentEvent = parseAgentEvent(frame.event, safeJsonParse(frame.data))
+                if (agentEvent) {
+                  setActivityLog((prev) => activityLogReducer(prev, agentEvent))
+                }
                 break
+              }
             }
           }
         }
@@ -389,6 +411,7 @@ export function useChatStream(): UseChatStreamReturn {
     lastMessageId,
     lastTitle,
     lastCreatedSessionId,
+    activityLog,
     reset,
   }
 }

@@ -15,6 +15,12 @@
  * hard refresh wipes everything. That property is part of the UX contract.
  */
 import { openSandboxStream } from '@/lib/api/chat'
+import {
+  type ActivityState,
+  activityLogReducer,
+  emptyActivityState,
+  parseAgentEvent,
+} from '@/lib/sse/agent-events'
 import { useCallback, useEffect, useRef, useState } from 'react'
 
 export type SandboxMessageType = 'normal' | 'clarification' | 'guardrail_blocked' | 'error'
@@ -32,6 +38,13 @@ export interface SandboxStreamResult {
   guardrailMessage: string | null
   /** Populated when messageType==='error' (or fetch failed). */
   errorMessage: string | null
+  /**
+   * Per-turn agentic activity log folded from the INTERMEDIATE SSE events
+   * (`plan`/`step`/`replan`/`budget`). Additive only — these events never end
+   * the turn (no terminal flag, not in the `sawTerminal` set). Reset on every
+   * `sendMessage()`. Consumed by the T-071+ thinking UI.
+   */
+  activityLog: ActivityState
   /** True for the brief gap between `sendMessage()` and the first event. */
   isPending: boolean
   /** Open the SSE stream, accumulate tokens. Returns once terminated. */
@@ -81,6 +94,7 @@ export function useSandboxStream(): SandboxStreamResult {
   const [clarificationQuestion, setClarificationQuestion] = useState<string | null>(null)
   const [guardrailMessage, setGuardrailMessage] = useState<string | null>(null)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
+  const [activityLog, setActivityLog] = useState<ActivityState>(emptyActivityState)
 
   const controllerRef = useRef<AbortController | null>(null)
 
@@ -104,6 +118,7 @@ export function useSandboxStream(): SandboxStreamResult {
     setClarificationQuestion(null)
     setGuardrailMessage(null)
     setErrorMessage(null)
+    setActivityLog(emptyActivityState)
   }, [])
 
   const sendMessage = useCallback(
@@ -125,6 +140,7 @@ export function useSandboxStream(): SandboxStreamResult {
       setClarificationQuestion(null)
       setGuardrailMessage(null)
       setErrorMessage(null)
+      setActivityLog(emptyActivityState)
 
       try {
         const response = await openSandboxStream(
@@ -199,9 +215,18 @@ export function useSandboxStream(): SandboxStreamResult {
                 sawTerminal = true
                 break
               }
-              default:
-                // Ignore unknown frames — forward compatibility.
+              default: {
+                // INTERMEDIATE agentic events (plan/step/replan/budget) are
+                // additive to the activity log and NEVER terminal: they do NOT
+                // set messageType, do NOT touch `sawTerminal`, and are folded
+                // through the shared, immutable reducer. parseAgentEvent returns
+                // null for any other (unknown / future) event → silent drop.
+                const agentEvent = parseAgentEvent(frame.event, safeJsonParse(frame.data))
+                if (agentEvent) {
+                  setActivityLog((prev) => activityLogReducer(prev, agentEvent))
+                }
                 break
+              }
             }
           }
         }
@@ -236,6 +261,7 @@ export function useSandboxStream(): SandboxStreamResult {
     clarificationQuestion,
     guardrailMessage,
     errorMessage,
+    activityLog,
     sendMessage,
     abort,
     reset,
