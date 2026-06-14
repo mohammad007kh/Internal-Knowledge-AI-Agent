@@ -58,15 +58,16 @@
 | [T-057](./tasks/T-057-budget-guard-diagnostics.md) | US3/6 | C7: budget guard + diagnostics + honest-failure | ✅ Done | 21 unit tests; 364 agent tests pass; ruff clean; reviewed |
 | [T-058](./tasks/T-058-agentic-graph-assembly.md) | US2/3 | C8: graph assembly + flag + done extension | ✅ Done | 27 new tests; 1810 unit pass; ruff clean; reviewed (C1 replan bug caught+fixed) |
 | [T-059](./tasks/T-059-integration-us2-us3.md) | US2/3 | Integration: chained/honesty/budget e2e | ✅ Done | SSE emitter + 3 e2e scenarios; 20 pass; 1815 unit; reviewed |
-| [T-070](./tasks/T-070-shared-sse-activity-state.md) | US5 | Shared SSE module + activityLog state | 🔴 Todo | `vitest + tsc` |
-| [T-071](./tasks/T-071-status-line.md) | US5 | Status line (Layer 1) | 🔴 Todo | `vitest + tsc` |
-| [T-072](./tasks/T-072-summary-chip-persistence.md) | US5 | Summary chip + compact persistence | 🔴 Todo | `vitest + tsc` |
-| [T-073](./tasks/T-073-activity-accordion-plan-card.md) | US5 | Activity accordion + plan card (Layer 2) | 🔴 Todo | `vitest + tsc` |
-| [T-074](./tasks/T-074-budget-footer-cost-note.md) | US5/6 | Budget footer + quiet cost note | 🔴 Todo | `vitest + tsc` |
-| [T-075](./tasks/T-075-honest-failure-ui-optionbuttons.md) | US3/5 | Abstain turn UI + OptionButtonGroup | 🔴 Todo | `vitest + tsc` |
-| [T-077](./tasks/T-077-wire-us5-sandbox.md) | US5 | WIRE US5: sandbox first, then main chat | 🔴 Todo | `vitest integration` |
+| [T-070](./tasks/T-070-shared-sse-activity-state.md) | US5 | Shared SSE module + activityLog state | ✅ Done | reducer + parse; 22 vitest |
+| T-073a (split) | US5 | StepStatusBadge + activity selectors (primitives) | ✅ Done | 8 vitest + selectors; `f0882bb` |
+| [T-071](./tasks/T-071-status-line.md) | US5 | Status line (Layer 1) | 🟡 Component done | 16 vitest; clean; **render wire = T-077**; `f0882bb` |
+| [T-072](./tasks/T-072-summary-chip-persistence.md) | US5 | Summary chip + compact persistence | 🔴 Todo | needs MessageThread snapshot map |
+| [T-073](./tasks/T-073-activity-accordion-plan-card.md) | US5 | Activity accordion + plan card (Layer 2) | 🟡 Component done | accordion 9 + plan 11 + panel 9; **wire = T-077**; `f1e599b` |
+| [T-074](./tasks/T-074-budget-footer-cost-note.md) | US5/6 | Budget footer + quiet cost note | 🟡 Component done | 4 vitest; **wire = T-077**; `eaa91a2` |
+| [T-075](./tasks/T-075-honest-failure-ui-optionbuttons.md) | US3/5 | Abstain turn UI + OptionButtonGroup | 🟡 Component done | OBG 8 + abstain 7; **wire = T-077**; `eaa91a2` |
+| [T-077](./tasks/T-077-wire-us5-sandbox.md) | US5 | WIRE US5: sandbox first, then main chat | 🔴 Todo | 3-layer adapter + flag-OFF regression (see HANDOFF) |
 | [T-080](./tasks/T-080-clarify-options-backend.md) | US4 | Clarify options event (backend, terminal) | ✅ Done | 23 tests; 415 agent pass; ruff clean; 007 Rule-2 (both clauses) verified |
-| [T-081](./tasks/T-081-clarify-options-ui.md) | US4 | ClarificationCard options UI | 🔴 Todo | `vitest + tsc` |
+| [T-081](./tasks/T-081-clarify-options-ui.md) | US4 | ClarificationCard options UI | 🟡 Component done | 10 vitest; calm redesign; 007 PASS; **wire = T-082**; `7eeb437` |
 | [T-082](./tasks/T-082-wire-us4.md) | US4 | WIRE US4: ambiguous→options→proceed e2e | 🔴 Todo | `pytest + vitest` |
 | [T-090](./tasks/T-090-gate-run-and-calibration.md) | US6 | Gate run + p95 ceiling calibration | 🔴 Todo | `evals compare GATES-PASS` |
 | [T-091](./tasks/T-091-rollout-checklist.md) | US6 | ⚠️ HUMAN-GATE: deadline + flag widening | 🔴 Todo | config assert + ROLLOUT.md |

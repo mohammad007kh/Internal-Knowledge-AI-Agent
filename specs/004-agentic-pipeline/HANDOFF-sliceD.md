@@ -116,5 +116,61 @@ Build sandbox-first → per visual component run `/design-review` (slop/spacing/
 ## T-091 human gate (decision package, decide LAST)
 Everything else can merge "dark" behind the default-off flag. Tee up a one-page rollout brief: current flag state, proposed widening (sandbox → internal → % main-chat), the **T-090 eval evidence** (p95 + success criteria), rollback = flip flag off, proposed deadline. T-090 → T-091 is producer→consumer (bind them). Draft ACCEPTANCE.md's 8 criteria UP FRONT as the build checklist.
 
+## ⚑ INTEGRATION HANDOFF (2026-06-14 — components done, wiring remains)
+
+All 9 presentational components are built, reviewed (code-reviewer + ui-ux + 007),
+and committed: `f0882bb` (StatusLine, StepStatusBadge, selectors), `f1e599b`
+(ActivityAccordion, PlanCard, DetailPanel), `eaa91a2` (OptionButtonGroup,
+BudgetFooter, AbstainTurn), `7eeb437` (ClarificationCard). All prop-driven + unit
+tested; full chat suite (123) + sse green; tsc + Biome clean. What remains is
+WIRING only.
+
+### T-077 — wire Slice D (the 3-layer adapter; verified facts from reading the code)
+- `useChat` (`components/chat/useChat.ts`) wraps `useChatStream` but does NOT expose
+  `activityLog`. Step 1: add `activityLog: stream.activityLog` to `UseChatReturn` + the
+  return object.
+- `ChatLayout` (`components/chat/ChatLayout.tsx`) destructures useChat and renders
+  `<MessageThread ... />` (line ~113). Step 2: pass `activityLog` down.
+- `MessageThread`: the in-flight bubble renders `<PulsingDots/>` at lines ~205. Step 3:
+  - in-flight: if the live activityLog has step/plan content → `<StatusLine
+    activeStep={selectActiveStep(log)} budget={selectLatestBudget(log)} isStreaming={hasToken}/>`;
+    ELSE `<PulsingDots/>` (unchanged).
+  - finished assistant turns: render `<ActivityAccordion activity={snapshotForMsg} onStepSelect={…} mode="live|review"/>` (returns null when empty).
+  - slide-over: MessageThread already owns `openCitation`; generalize its state to
+    `PanelContent` and pass `onStepSelect={(step)=>setPanel({kind:'step',step})}` →
+    `<DetailPanel content={panel} .../>` (the thin CitationPanel wrapper still serves citations).
+- **FLAG GATE (the regression bar):** do NOT add frontend flag plumbing. The backend
+  `PIPELINE_AGENTIC_ENABLED` gate is transitive — flag OFF ⇒ no plan/step events ⇒ empty
+  activityLog ⇒ StatusLine path not taken (PulsingDots shown) + accordion renders null ⇒
+  **ZERO rendered change**. Encode this as the flag-OFF regression test: MessageThread with
+  empty activityLog renders the existing PulsingDots + no StatusLine/accordion nodes. (An
+  explicit `NEXT_PUBLIC_*` kill-switch can wrap it later for staged rollout / T-091; not v1.)
+- **Sandbox-first:** the admin sandbox (`useSandboxStream` already exposes activityLog)
+  renders the same components first; wire it before main chat per the original order.
+
+### T-072 — summary chip + in-memory persistence (the harder half; do WITH T-077)
+- `useRef<Map<messageId, ActivityState>>` in MessageThread. When a turn terminates (assistant
+  message id appears in the persisted list AND the live activityLog is non-empty), snapshot
+  `map.set(assistantMessageId, liveLog)`. Finished-turn accordions read from the map.
+- Summary chip reads the COMPACT `activity_summary` (migration 0037, on chat_messages) for
+  persisted turns; clicking it re-expands the accordion. **Re-expand is LIVE-SESSION-ONLY**:
+  after reload the rich log is gone (snapshot map died) → chip shows the compact summary +
+  rows disabled (review mode). State this in T-072 acceptance.
+- No localStorage; do NOT edit the stream hooks (architecture ruling).
+
+### T-082 — wire clarification options (Slice E)
+- `use-chat-stream.ts` `case 'clarification'` currently parses only `{question}`. Extend to
+  parse `{question, options?, allow_free_text}` and surface them (e.g. on the `clarification`
+  state / `useChat`'s `Clarification` type).
+- `ChatLayout` passes `options`/`allowFreeText`/`resetKey={messageId}` into `<ClarificationCard>`
+  (already supports them). `onReply` already routes to `handleSend` (re-enters as a normal
+  turn → backend re-authorizes — the documented Rule-2 invariant).
+- e2e: ambiguous → options shown → pick/free-text → proceed.
+
+### Slice F reality (cannot all be auto-completed)
+- T-090 needs the eval harness run vs the live backend+Langfuse (infra). T-093 needs Playwright
+  e2e against a running app. **T-091 is a HUMAN GATE by design.** T-092 (constitution Art. IV
+  amendment) is a pure doc edit — tractable any time.
+
 ## Open follow-ups (tracked, separate)
 - Dockerfile spaCy/libxcb gap (prod parity for the structure-aware doc parser).
