@@ -1,7 +1,8 @@
+import type { StepActivityEntry } from '@/lib/sse/agent-events'
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { vi } from 'vitest'
-import { CitationPanel } from '../CitationPanel'
+import { CitationPanel, DetailPanel } from '../CitationPanel'
 
 const citation = {
   id: 'c1',
@@ -50,4 +51,36 @@ test('hidden when citation is null', () => {
   render(<CitationPanel citation={null} onClose={vi.fn()} />)
   const panel = screen.getByRole('complementary', { hidden: true })
   expect(panel).toHaveAttribute('aria-hidden', 'true')
+})
+
+// --- DetailPanel: step variant (T-073b generalization) ---
+
+const step: StepActivityEntry = {
+  kind: 'step',
+  stepId: 's1',
+  role: 'verifier',
+  state: 'finished',
+  label: 'Cross-checked the figures',
+  summary: 'Compared 7 rows against the source table; all matched.',
+  progress: { current: 3, total: 4 },
+}
+
+test('DetailPanel renders an agent step payload (role, label, summary)', () => {
+  render(<DetailPanel content={{ kind: 'step', step }} onClose={vi.fn()} />)
+  expect(screen.getByText('Cross-checked the figures')).toBeInTheDocument()
+  expect(screen.getByText('Verifying')).toBeInTheDocument()
+  expect(screen.getByText(/compared 7 rows/i)).toBeInTheDocument()
+  expect(screen.getByRole('complementary')).toHaveAttribute('aria-label', 'Step details')
+})
+
+test('DetailPanel shows a fallback when a step has no summary', () => {
+  render(
+    <DetailPanel content={{ kind: 'step', step: { ...step, summary: null } }} onClose={vi.fn()} />
+  )
+  expect(screen.getByText(/no additional detail/i)).toBeInTheDocument()
+})
+
+test('DetailPanel renders a citation via the discriminated union', () => {
+  render(<DetailPanel content={{ kind: 'citation', citation }} onClose={vi.fn()} />)
+  expect(screen.getByText('Architecture Overview')).toBeInTheDocument()
 })

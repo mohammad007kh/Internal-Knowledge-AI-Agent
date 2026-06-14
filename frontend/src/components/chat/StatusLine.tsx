@@ -1,18 +1,10 @@
 'use client'
 
-import type { AgentRole, BudgetActivityEntry, StepActivityEntry } from '@/lib/sse/agent-events'
+import type { BudgetActivityEntry, StepActivityEntry } from '@/lib/sse/agent-events'
 import { cn } from '@/lib/utils'
-import { Check, Compass, FileText, PenLine, ShieldCheck } from 'lucide-react'
+import { Check, PenLine } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
-import type { IconGlyph } from './types'
-
-/** Role identity is the icon (never colour). 4 wire roles → 4 glyphs. */
-const ROLE_ICON: Record<AgentRole, IconGlyph> = {
-  planner: Compass,
-  executor: FileText,
-  verifier: ShieldCheck,
-  synthesizer: PenLine,
-}
+import { ROLE_ICON } from './agent-roles'
 
 const WRAP_UP_LABEL = 'Wrapping up with what I found'
 const FLASH_MS = 600

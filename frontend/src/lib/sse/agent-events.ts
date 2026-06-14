@@ -447,3 +447,44 @@ export function selectLatestBudget(state: ActivityState): BudgetActivityEntry | 
   }
   return null
 }
+
+/**
+ * Latest observed state per step id (last write wins), for resolving the
+ * PlanCard tick glyphs (T-073b). A plan step with no observed `step` event yet
+ * is absent from the map → the caller treats it as `'pending'`.
+ */
+export function selectStepStates(state: ActivityState): Record<string, StepState> {
+  const out: Record<string, StepState> = {}
+  for (const entry of state.entries) {
+    if (entry.kind === 'step') out[entry.stepId] = entry.state
+  }
+  return out
+}
+
+/** True if any step retried or failed this turn — bubbles an amber dot to the
+ *  collapsed activity-accordion header (T-073b). */
+export function selectHasTrouble(state: ActivityState): boolean {
+  return state.entries.some(
+    (e) => e.kind === 'step' && (e.state === 'retrying' || e.state === 'failed')
+  )
+}
+
+/** A run of consecutive same-role step entries — one ActivityAccordion block.
+ *  Consecutive (not deduped) so a return to an earlier role shows the real
+ *  hand-off flow (planner → executor → verifier → executor). */
+export interface StepRun {
+  role: AgentRole
+  steps: StepActivityEntry[]
+}
+
+/** Group the log's step entries into ordered same-role runs (T-073b). */
+export function selectStepRuns(state: ActivityState): StepRun[] {
+  const runs: StepRun[] = []
+  for (const entry of state.entries) {
+    if (entry.kind !== 'step') continue
+    const last = runs[runs.length - 1]
+    if (last && last.role === entry.role) last.steps.push(entry)
+    else runs.push({ role: entry.role, steps: [entry] })
+  }
+  return runs
+}

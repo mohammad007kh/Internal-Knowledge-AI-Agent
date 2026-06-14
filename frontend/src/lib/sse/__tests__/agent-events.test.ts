@@ -21,7 +21,10 @@ import {
   emptyActivityState,
   parseAgentEvent,
   selectActiveStep,
+  selectHasTrouble,
   selectLatestBudget,
+  selectStepRuns,
+  selectStepStates,
 } from '../agent-events'
 
 /** Fold a scripted list of wire frames through the REAL reducer (locked test
@@ -449,5 +452,64 @@ describe('selectLatestBudget', () => {
     expect(b?.ceilingHit).toBe(true)
     expect(b?.offerContinue).toBe(true)
     expect(b?.notCompleted).toEqual(['x'])
+  })
+})
+
+describe('selectStepStates', () => {
+  it('returns the latest state per step id (last write wins)', () => {
+    const state = foldFrames([
+      ['step', { step_id: 's1', role: 'executor', state: 'started' }],
+      ['step', { step_id: 's1', role: 'executor', state: 'finished' }],
+      ['step', { step_id: 's2', role: 'verifier', state: 'retrying' }],
+    ])
+    expect(selectStepStates(state)).toEqual({ s1: 'finished', s2: 'retrying' })
+  })
+
+  it('is empty when no steps have narrated', () => {
+    expect(selectStepStates(emptyActivityState)).toEqual({})
+  })
+})
+
+describe('selectHasTrouble', () => {
+  it('is false for a clean run', () => {
+    const state = foldFrames([
+      ['step', { step_id: 's1', role: 'executor', state: 'started' }],
+      ['step', { step_id: 's1', role: 'executor', state: 'finished' }],
+    ])
+    expect(selectHasTrouble(state)).toBe(false)
+  })
+
+  it('is true when any step retried or failed', () => {
+    const retry = foldFrames([['step', { step_id: 's1', role: 'executor', state: 'retrying' }]])
+    const fail = foldFrames([['step', { step_id: 's1', role: 'executor', state: 'failed' }]])
+    expect(selectHasTrouble(retry)).toBe(true)
+    expect(selectHasTrouble(fail)).toBe(true)
+  })
+})
+
+describe('selectStepRuns', () => {
+  it('groups consecutive same-role steps into ordered runs (handoffs at role changes)', () => {
+    const state = foldFrames([
+      ['step', { step_id: 's1', role: 'planner', state: 'finished' }],
+      ['step', { step_id: 's2', role: 'executor', state: 'started' }],
+      ['step', { step_id: 's3', role: 'executor', state: 'finished' }],
+      ['step', { step_id: 's4', role: 'verifier', state: 'finished' }],
+    ])
+    const runs = selectStepRuns(state)
+    expect(runs.map((r) => r.role)).toEqual(['planner', 'executor', 'verifier'])
+    expect(runs[1].steps.map((s) => s.stepId)).toEqual(['s2', 's3'])
+  })
+
+  it('starts a new run when execution returns to an earlier role', () => {
+    const state = foldFrames([
+      ['step', { step_id: 's1', role: 'executor', state: 'finished' }],
+      ['step', { step_id: 's2', role: 'verifier', state: 'finished' }],
+      ['step', { step_id: 's3', role: 'executor', state: 'started' }],
+    ])
+    expect(selectStepRuns(state).map((r) => r.role)).toEqual(['executor', 'verifier', 'executor'])
+  })
+
+  it('is empty when no steps have narrated', () => {
+    expect(selectStepRuns(emptyActivityState)).toEqual([])
   })
 })
