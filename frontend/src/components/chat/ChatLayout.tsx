@@ -49,6 +49,7 @@ export function ChatLayout({ sessionId: propSessionId }: ChatLayoutProps = {}) {
     dismissClarification,
     guardrailMessage,
     dismissGuardrail,
+    activityLog,
   } = useChat({ sessionId })
 
   // U15 lazy creation: `send` is now safe to call with a null `sessionId`.
@@ -98,12 +99,7 @@ export function ChatLayout({ sessionId: propSessionId }: ChatLayoutProps = {}) {
                 Start a conversation grounded in your indexed sources.
               </p>
             </div>
-            <Button
-              type="button"
-              size="lg"
-              className="mt-2 gap-2"
-              onClick={handleStartNewChat}
-            >
+            <Button type="button" size="lg" className="mt-2 gap-2" onClick={handleStartNewChat}>
               <MessageSquarePlusIcon className="h-4 w-4" aria-hidden />
               Start a new chat
             </Button>
@@ -117,6 +113,7 @@ export function ChatLayout({ sessionId: propSessionId }: ChatLayoutProps = {}) {
           isPending={isPending}
           extraMessages={optimisticMessages}
           onSend={handleSend}
+          activityLog={activityLog}
         />
       )}
       {clarification && (

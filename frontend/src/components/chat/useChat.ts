@@ -1,6 +1,7 @@
 'use client'
 
 import { NEW_SESSION_SENTINEL, useChatStream } from '@/hooks/use-chat-stream'
+import type { ActivityState } from '@/lib/sse/agent-events'
 import { useQueryClient } from '@tanstack/react-query'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useSelectedSession } from './SelectedSessionContext'
@@ -66,6 +67,13 @@ export interface UseChatReturn {
   dismissClarification: () => void
   guardrailMessage: string | null
   dismissGuardrail: () => void
+  /**
+   * Per-turn agentic activity log (plan/step/replan/budget), forwarded verbatim
+   * from the stream hook. Empty unless the backend agentic pipeline is enabled
+   * and emitting intermediate events — so consumers gating on its content get a
+   * transitive flag-off guard (no events ⇒ empty ⇒ zero rendered change).
+   */
+  activityLog: ActivityState
 }
 
 export function useChat({ sessionId }: { sessionId: string | null }): UseChatReturn {
@@ -429,9 +437,7 @@ export function useChat({ sessionId }: { sessionId: string | null }): UseChatRet
       if (cached.title !== null && !PLACEHOLDERS.has(cached.title)) return prev
       return {
         ...prev,
-        sessions: prev.sessions.map((s) =>
-          s.id === targetId ? { ...s, title: newTitle } : s
-        ),
+        sessions: prev.sessions.map((s) => (s.id === targetId ? { ...s, title: newTitle } : s)),
       }
     })
     queryClient.invalidateQueries({ queryKey: ['chat-sessions'] })
@@ -449,5 +455,6 @@ export function useChat({ sessionId }: { sessionId: string | null }): UseChatRet
     dismissClarification,
     guardrailMessage: localGuardrail,
     dismissGuardrail,
+    activityLog: stream.activityLog,
   }
 }

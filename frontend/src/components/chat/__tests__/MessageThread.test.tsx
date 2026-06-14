@@ -1,8 +1,22 @@
+import {
+  type ActivityState,
+  type AgentEvent,
+  activityLogReducer,
+  emptyActivityState,
+  parseAgentEvent,
+} from '@/lib/sse/agent-events'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { vi } from 'vitest'
 import { MessageThread } from '../MessageThread'
+
+function fold(frames: ReadonlyArray<[string, unknown]>): ActivityState {
+  return frames
+    .map(([t, d]) => parseAgentEvent(t, d))
+    .filter((e): e is AgentEvent => e !== null)
+    .reduce(activityLogReducer, emptyActivityState)
+}
 
 vi.mock('@/lib/api-client', () => ({
   apiClient: {
@@ -83,4 +97,35 @@ test('shows pulsing dots when isPending and !isStreaming and !streamingToken', a
   // assert the thinking-dots placeholder bubble is in the document.
   expect(await screen.findByTestId('thinking-dots')).toBeInTheDocument()
   expect(screen.getByLabelText(/assistant is thinking/i)).toBeInTheDocument()
+})
+
+// --- T-077 in-flight Layer-1 wiring + flag-off regression ---
+
+test('flag-off regression: empty activityLog keeps the classic PulsingDots, no StatusLine', async () => {
+  render(<MessageThread sessionId="s1" isPending activityLog={emptyActivityState} />, { wrapper })
+  // Identical to pre-004 behaviour: the thinking-dots bubble, nothing agentic.
+  expect(await screen.findByTestId('thinking-dots')).toBeInTheDocument()
+  expect(screen.queryByText(/reading|verifying|planning|thinking…/i)).not.toBeInTheDocument()
+})
+
+test('replaces PulsingDots with the live StatusLine once the agent narrates a step', async () => {
+  const activityLog = fold([
+    [
+      'plan',
+      { revision: 0, steps: [{ id: 's1', label: 'Read it', source_id: 'u', source_name: 'p' }] },
+    ],
+    [
+      'step',
+      {
+        step_id: 's1',
+        role: 'executor',
+        state: 'started',
+        label: 'Reading the policy',
+        progress: { current: 1, total: 2 },
+      },
+    ],
+  ])
+  render(<MessageThread sessionId="s1" isPending activityLog={activityLog} />, { wrapper })
+  expect(await screen.findByText('Reading the policy')).toBeInTheDocument()
+  expect(screen.queryByTestId('thinking-dots')).not.toBeInTheDocument()
 })

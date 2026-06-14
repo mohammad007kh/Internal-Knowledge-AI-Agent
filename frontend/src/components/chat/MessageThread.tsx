@@ -1,6 +1,12 @@
 'use client'
 
 import { apiClient } from '@/lib/api-client'
+import {
+  type ActivityState,
+  emptyActivityState,
+  selectActiveStep,
+  selectLatestBudget,
+} from '@/lib/sse/agent-events'
 import { cn } from '@/lib/utils'
 import { useQuery } from '@tanstack/react-query'
 import { BotIcon, CopyIcon, InfoIcon, SparklesIcon, UserIcon } from 'lucide-react'
@@ -9,6 +15,7 @@ import { toast } from 'sonner'
 import { CitationPanel } from './CitationPanel'
 import { FeedbackButtons } from './FeedbackButtons'
 import { MarkdownLite } from './MarkdownLite'
+import { StatusLine } from './StatusLine'
 import type { Citation, Message, SessionMessagesResponse } from './types'
 
 interface MessageThreadProps {
@@ -23,6 +30,13 @@ interface MessageThreadProps {
   isPending?: boolean
   extraMessages?: Message[]
   onSend?: (text: string) => void
+  /**
+   * Per-turn agentic activity log for the in-flight turn. When it carries
+   * plan/step content the in-flight indicator becomes the Layer-1 StatusLine;
+   * otherwise the existing PulsingDots render unchanged (transitive flag-off
+   * guard — an empty log means the agentic pipeline emitted nothing).
+   */
+  activityLog?: ActivityState
 }
 
 const SUGGESTED_PROMPTS: string[] = [
@@ -43,6 +57,7 @@ export function MessageThread({
   isPending = false,
   extraMessages = [],
   onSend,
+  activityLog = emptyActivityState,
 }: MessageThreadProps) {
   const bottomRef = useRef<HTMLDivElement>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -187,6 +202,11 @@ export function MessageThread({
           const showThinkingBubble = isPending && !isStreaming
           if (!isStreaming && !showThinkingBubble) return null
           const hasToken = isStreaming && streamingToken.length > 0
+          // Layer-1: once the agentic pipeline has narrated a plan/step, the
+          // in-flight indicator becomes the live StatusLine. With no agentic
+          // activity (flag off / classic pipeline) the log is empty and we keep
+          // the existing PulsingDots — byte-identical to pre-004 behaviour.
+          const hasAgenticActivity = activityLog.entries.length > 0
           return (
             <div className="flex items-start gap-3">
               <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-muted">
@@ -201,6 +221,12 @@ export function MessageThread({
                       aria-hidden="true"
                     />
                   </div>
+                ) : hasAgenticActivity ? (
+                  <StatusLine
+                    activeStep={selectActiveStep(activityLog)}
+                    budget={selectLatestBudget(activityLog)}
+                    isStreaming={false}
+                  />
                 ) : (
                   <PulsingDots />
                 )}
