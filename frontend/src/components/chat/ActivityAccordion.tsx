@@ -130,7 +130,7 @@ export function ActivityAccordion({
 
 function Handoff({ from, to }: { from: StepRun['role']; to: StepRun['role'] }) {
   return (
-    <div className="flex items-center gap-1 py-0.5 pl-0.5 text-[11px] text-muted-foreground">
+    <div className="flex items-center gap-1 py-0.5 pl-0.5 text-xs text-muted-foreground">
       <CornerDownRight className="h-3 w-3 shrink-0" aria-hidden />
       <span>
         {ROLE_LABEL[from]} → {ROLE_LABEL[to]}
