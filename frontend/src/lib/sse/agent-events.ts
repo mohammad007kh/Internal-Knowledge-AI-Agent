@@ -405,3 +405,45 @@ export function activityLogReducer(state: ActivityState, event: AgentEvent): Act
       return state
   }
 }
+
+// ---------------------------------------------------------------------------
+// Pure selectors — narrow ActivityState into per-component slices (T-073a)
+// ---------------------------------------------------------------------------
+//
+// These let each thinking-UI component take the MINIMAL slice it renders
+// (architecture ruling: only the accordion consumes the whole ActivityState).
+// Keeping them here — next to the reducer — means the projection logic is
+// itself unit-tested once, folded through the same fixtures.
+
+/**
+ * The "current" step for the Layer-1 status line: the LATEST step entry in the
+ * log, regardless of state. Returns `null` before any step has narrated.
+ *
+ * Latest-by-order (not latest-non-finished) on purpose:
+ *  - a just-`finished` step stays selected so the status line can play its
+ *    ~600ms ✓ flash before the next step's `started` entry is appended;
+ *  - `retrying` / `failed` steps stay visible so a stalled retry doesn't
+ *    silently vanish while the turn is still alive.
+ * The consumer clears the line at turn terminal (by passing `isStreaming`),
+ * not this selector.
+ */
+export function selectActiveStep(state: ActivityState): StepActivityEntry | null {
+  for (let i = state.entries.length - 1; i >= 0; i--) {
+    const entry = state.entries[i]
+    if (entry.kind === 'step') return entry
+  }
+  return null
+}
+
+/**
+ * The latest budget note, or `null` if the agent never hit a ceiling/budget
+ * boundary this turn. Drives the Layer-1 wrap-up label (T-071), the quiet cost
+ * footnote (T-074), and the honest-failure continue/stop affordance (T-075).
+ */
+export function selectLatestBudget(state: ActivityState): BudgetActivityEntry | null {
+  for (let i = state.entries.length - 1; i >= 0; i--) {
+    const entry = state.entries[i]
+    if (entry.kind === 'budget') return entry
+  }
+  return null
+}

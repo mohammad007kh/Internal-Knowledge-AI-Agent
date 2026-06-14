@@ -20,7 +20,18 @@ import {
   activityLogReducer,
   emptyActivityState,
   parseAgentEvent,
+  selectActiveStep,
+  selectLatestBudget,
 } from '../agent-events'
+
+/** Fold a scripted list of wire frames through the REAL reducer (locked test
+ *  strategy: never hand-author ActivityState). Skips unparseable frames. */
+function foldFrames(frames: ReadonlyArray<[string, unknown]>): ActivityState {
+  return frames
+    .map(([type, data]) => parseAgentEvent(type, data))
+    .filter((e): e is AgentEvent => e !== null)
+    .reduce(activityLogReducer, emptyActivityState)
+}
 
 // ---------------------------------------------------------------------------
 // parseAgentEvent — wire → typed event
@@ -369,5 +380,74 @@ describe('activityLogReducer — no-op safety', () => {
       'replanReason',
       'supersededPlan',
     ])
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Pure selectors (T-073a) — projections folded through the real reducer
+// ---------------------------------------------------------------------------
+
+describe('selectActiveStep', () => {
+  it('returns null for a truly empty activity state', () => {
+    expect(selectActiveStep(emptyActivityState)).toBeNull()
+  })
+
+  it('returns null when no step has narrated yet', () => {
+    const state = foldFrames([['plan', { revision: 0, steps: [{ id: 's1' }, { id: 's2' }] }]])
+    expect(selectActiveStep(state)).toBeNull()
+  })
+
+  it('returns the latest step entry (most recently appended)', () => {
+    const state = foldFrames([
+      ['step', { step_id: 's1', role: 'executor', state: 'started' }],
+      ['step', { step_id: 's2', role: 'verifier', state: 'started' }],
+    ])
+    expect(selectActiveStep(state)?.stepId).toBe('s2')
+  })
+
+  it('keeps a just-finished step selected (so the ✓ flash can play before the next)', () => {
+    const state = foldFrames([
+      ['step', { step_id: 's1', role: 'executor', state: 'started' }],
+      ['step', { step_id: 's1', role: 'executor', state: 'finished', summary: 'done' }],
+    ])
+    const active = selectActiveStep(state)
+    expect(active?.stepId).toBe('s1')
+    expect(active?.state).toBe('finished')
+  })
+
+  it('keeps a retrying/failed step visible (does not skip to an earlier finished one)', () => {
+    const state = foldFrames([
+      ['step', { step_id: 's1', role: 'executor', state: 'finished' }],
+      ['step', { step_id: 's2', role: 'executor', state: 'retrying' }],
+    ])
+    const active = selectActiveStep(state)
+    expect(active?.stepId).toBe('s2')
+    expect(active?.state).toBe('retrying')
+  })
+
+  it('ignores non-step entries (plan / replan / budget) when choosing the latest step', () => {
+    const state = foldFrames([
+      ['step', { step_id: 's1', role: 'executor', state: 'finished' }],
+      ['budget', { ceiling_hit: true, offer_continue: true }],
+    ])
+    expect(selectActiveStep(state)?.stepId).toBe('s1')
+  })
+})
+
+describe('selectLatestBudget', () => {
+  it('returns null when no budget event has arrived', () => {
+    const state = foldFrames([['step', { step_id: 's1', role: 'executor', state: 'started' }]])
+    expect(selectLatestBudget(state)).toBeNull()
+  })
+
+  it('returns the latest budget entry', () => {
+    const state = foldFrames([
+      ['budget', { ceiling_hit: false, offer_continue: false }],
+      ['budget', { ceiling_hit: true, not_completed: ['x'], offer_continue: true }],
+    ])
+    const b = selectLatestBudget(state)
+    expect(b?.ceilingHit).toBe(true)
+    expect(b?.offerContinue).toBe(true)
+    expect(b?.notCompleted).toEqual(['x'])
   })
 })

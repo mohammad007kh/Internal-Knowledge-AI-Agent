@@ -1,3 +1,12 @@
+import type { ComponentType } from 'react'
+
+/**
+ * A lucide-style icon component accepting the className + aria-hidden props we
+ * pass to every glyph. Shared so the agentic thinking-UI components
+ * (StatusLine, StepStatusBadge, …) declare the icon-prop shape in ONE place.
+ */
+export type IconGlyph = ComponentType<{ className?: string; 'aria-hidden'?: boolean }>
+
 export interface Citation {
   id: string
   document_id: string

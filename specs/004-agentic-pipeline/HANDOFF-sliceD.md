@@ -4,6 +4,51 @@
 > (Context Pinning). Synthesized from a 3-expert panel (frontend / UX / architecture)
 > + supervisor ruling. Read this + `index.md` + the relevant task file + `traceability.md`.
 
+## ⚑ LOCKED BUILD PLAN (post-verification, 2026-06-14 — supersedes conflicting notes below)
+
+Re-verified against real code by a 2-expert panel (ui-ux-pro-max + architect-review). Two
+prior-panel claims were FALSE and are corrected here:
+
+1. **T-077 is NOT "one-line" on main chat.** `useChat` (`components/chat/useChat.ts`) is a
+   facade over `use-chat-stream` and does NOT expose `activityLog`. Main-chat wire = 3 steps:
+   add `activityLog` to `UseChatReturn` → thread through `ChatLayout` → consume in `MessageThread`.
+   Read the agentic flag as a **render guard in `MessageThread`**, NEVER in the hook (gating the
+   hook would change stream consumption — the exact regression the flag-OFF test forbids).
+2. **No Radix Accordion/Collapsible exists** (not in `components/ui`, not in `package.json`) and
+   004 forbids new runtime deps. Layer 2 uses **native controlled disclosure**: a real
+   `<button aria-expanded aria-controls>` + a `hidden={!open}` region, `useState(false)` default.
+   (NOT Radix `Accordion.Item`.)
+
+Locked decisions:
+- **Props**: per-slice narrowed props; only `ActivityAccordion` takes full `ActivityState`.
+  `StatusLineProps{activeStep:StepActivityEntry|null; isStreaming:boolean}`,
+  `PlanCardProps{activePlan,supersededPlan,replanReason}`,
+  `BudgetFooterProps{budget:BudgetActivityEntry|null; onContinue?}`. Add pure selectors
+  `selectActiveStep(state)` + `selectLatestBudget(state)` to `agent-events.ts`.
+- **Slide-over**: refactor `CitationPanel` body to a discriminated
+  `PanelContent = {kind:'citation';citation}|{kind:'step';step}`; keep a thin `CitationPanel`
+  wrapper (maps `citation`→`{kind:'citation'}`) so existing tests + `MessageBubble` call sites
+  are untouched. `MessageThread` OWNS the panel open state; accordion `onStepSelect` calls up.
+- **Persistence (T-072)**: `useRef<Map<messageId, ActivityState>>` in `MessageThread`, snapshot at
+  turn-terminal. No localStorage; hooks untouched. Re-expand is LIVE-SESSION-ONLY (after reload the
+  chip is absent or shallow/disabled — state this in T-072 acceptance).
+- **Build order (split T-073)**: T-073a (`StepStatusBadge` + step-row renderer + the 2 selectors)
+  FIRST → T-071 StatusLine → T-073b (PlanCard, RoleSection, ActivityAccordion) → T-072 → T-074 →
+  T-075 (+OptionButtonGroup) → T-077. Then E: T-081 → T-082. Then F: T-090→T-093.
+- **OptionButtonGroup** (built in T-075, reused by T-081): ONE superset contract —
+  `options:{id;label;value;recommended?;description?}[]; onSelect(value,opt); label?; allowFreeText?;
+  freeTextPlaceholder?; onFreeText?; disabled?; className?`. Real `<button>`s in `role="group"`.
+- **Tests**: fold typed `AgentEvent[]` fixtures through the REAL reducer; component tests assert
+  DOM ONLY (never reducer internals). Reducer correctness stays in `agent-events.test.ts`.
+- **Tokens/a11y (feature-defining)**: dual-theme pairs (`text-muted-foreground` floor,
+  `text-muted-foreground/80` only for ≤13px non-essential, `bg-muted/40`, `border-border`,
+  `text-amber-600 dark:text-amber-400`, ✓=`text-emerald-600 dark:text-emerald-400`); status line
+  `aria-live="polite" aria-atomic="true"` on a STABLE wrapper that goes silent (inner→null) at
+  terminal; every animation `motion-safe:`-gated (✓-flash ~600ms is the one >200ms exception);
+  color is NEVER the sole signal (every amber/recommended state pairs with `sr-only` text).
+- **StatusLine on trouble**: shows the latest NON-`finished` step (incl. `failed`/`retrying`) so a
+  stalled retry stays visible; clears only at turn terminal.
+
 ## Status: 26/41 done, all committed, full unit suite green (~1838)
 
 **Backend is COMPLETE + verified.** Slice C (T-050→T-059) + Slice E backend (T-080) done.
