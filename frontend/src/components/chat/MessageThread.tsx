@@ -14,6 +14,7 @@ import { BotIcon, CopyIcon, InfoIcon, SparklesIcon, UserIcon } from 'lucide-reac
 import { useEffect, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import { ActivityAccordion } from './ActivityAccordion'
+import { BudgetFooter } from './BudgetFooter'
 import { DetailPanel, type PanelContent } from './CitationPanel'
 import { FeedbackButtons } from './FeedbackButtons'
 import { MarkdownLite } from './MarkdownLite'
@@ -391,11 +392,16 @@ function MessageBubble({
             agentic turn (T-072/T-073). Only present when a snapshot exists
             (agentic activity occurred this session). */}
         {!isUser && activitySnapshot && activitySnapshot.entries.length > 0 && (
-          <ActivityAccordion
-            activity={activitySnapshot}
-            mode="live"
-            onStepSelect={(step) => onInspectStep?.(step)}
-          />
+          <>
+            <ActivityAccordion
+              activity={activitySnapshot}
+              mode="live"
+              onStepSelect={(step) => onInspectStep?.(step)}
+            />
+            {/* Quiet cost / over-ceiling footnote (T-074) — renders only when the
+                research ceiling was actually hit. */}
+            <BudgetFooter budget={selectLatestBudget(activitySnapshot)} />
+          </>
         )}
 
         {/* Bottom meta row: timestamp + (assistant only) feedback + copy.

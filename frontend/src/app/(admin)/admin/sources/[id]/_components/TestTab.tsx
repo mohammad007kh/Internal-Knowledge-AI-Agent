@@ -13,6 +13,7 @@
  * `done` matches what users see in production.
  */
 import { ActivityAccordion } from '@/components/chat/ActivityAccordion'
+import { BudgetFooter } from '@/components/chat/BudgetFooter'
 import { DetailPanel, type PanelContent } from '@/components/chat/CitationPanel'
 import { StatusLine } from '@/components/chat/StatusLine'
 import { Button } from '@/components/ui/button'
@@ -458,11 +459,14 @@ function SandboxBubble({ message, onInspectStep }: SandboxBubbleProps) {
         <p className="whitespace-pre-wrap break-words text-sm">{message.content}</p>
         {/* Layer-2 activity accordion for a finished agentic sandbox turn. */}
         {!isUser && message.activity && message.activity.entries.length > 0 && (
-          <ActivityAccordion
-            activity={message.activity}
-            mode="live"
-            onStepSelect={(step) => onInspectStep?.(step)}
-          />
+          <>
+            <ActivityAccordion
+              activity={message.activity}
+              mode="live"
+              onStepSelect={(step) => onInspectStep?.(step)}
+            />
+            <BudgetFooter budget={selectLatestBudget(message.activity)} />
+          </>
         )}
       </div>
     </div>
