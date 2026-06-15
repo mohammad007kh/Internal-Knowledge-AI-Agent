@@ -11,14 +11,16 @@
 | Metric      | Value |
 | ----------- | ----- |
 | Total Tasks | 42 (41 + T-073a split) |
-| Completed   | 36    |
-| Verified    | 36    |
+| Completed   | 38    |
+| Verified    | 38    |
 | Coverage    | 100% (FRs mapped; FR-025 is a scope constraint — see traceability) |
 
-**Current Phase**: Implementation — Slices D + E fully wired (both surfaces).
-**Remaining (6):** T-075 abstain continue/stop live-mount (needs a "Keep searching"
-action decision); Slice F — T-090 eval gate (needs harness run), ⚠️ T-091 HUMAN-GATE
-rollout, T-092 constitution amendment (doc — tractable), T-093 final e2e + ACCEPTANCE.md.
+**Current Phase**: Implementation — Slices D + E fully wired + verified (both
+surfaces); T-092 constitution amended. **All code-complete tasks done.**
+**Remaining (4) — environment / human-gated, cannot complete from a dev session:**
+T-090 eval gate calibration (needs the eval harness run vs live backend+Langfuse);
+⚠️ T-091 HUMAN-GATE rollout (deadline + flag widening); T-093 final e2e (Playwright
+vs running app) + ACCEPTANCE.md (8 SCs).
 
 ## 🚦 Execution Order (slices — respect dependencies)
 
@@ -67,7 +69,7 @@ rollout, T-092 constitution amendment (doc — tractable), T-093 final e2e + ACC
 | [T-072](./tasks/T-072-summary-chip-persistence.md) | US5 | Summary chip + compact persistence | ✅ Done | snapshot map keyed by stream msg id; live-only; `6931ba0` |
 | [T-073](./tasks/T-073-activity-accordion-plan-card.md) | US5 | Activity accordion + plan card (Layer 2) | ✅ Done | wired finished turns + slide-over; `f1e599b`/`6931ba0` |
 | [T-074](./tasks/T-074-budget-footer-cost-note.md) | US5/6 | Budget footer + quiet cost note | ✅ Done | mounted both surfaces; `2a9d4bf` |
-| [T-075](./tasks/T-075-honest-failure-ui-optionbuttons.md) | US3/5 | Abstain turn UI + OptionButtonGroup | 🟡 Component done | OBG+AbstainTurn built/tested `eaa91a2`; **continue/stop live-mount pending a "Keep searching" action decision** |
+| [T-075](./tasks/T-075-honest-failure-ui-optionbuttons.md) | US3/5 | Abstain turn UI + OptionButtonGroup | ✅ Done | ContinueSearchAffordance wired both surfaces (live-edge gate, honest "Search again" copy); `38ad9fb8` |
 | [T-077](./tasks/T-077-wire-us5-sandbox.md) | US5 | WIRE US5: sandbox first, then main chat | ✅ Done | 3-layer adapter + flag-off regression; both surfaces; `940cf18`/`6931ba0`/`d332cd3` |
 | [T-080](./tasks/T-080-clarify-options-backend.md) | US4 | Clarify options event (backend, terminal) | ✅ Done | 23 tests; 415 agent pass; ruff clean; 007 Rule-2 (both clauses) verified |
 | [T-081](./tasks/T-081-clarify-options-ui.md) | US4 | ClarificationCard options UI | ✅ Done | 10 vitest; calm redesign; 007 PASS; `7eeb437` |
