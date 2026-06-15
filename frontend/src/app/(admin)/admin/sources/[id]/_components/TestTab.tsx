@@ -15,6 +15,10 @@
 import { ActivityAccordion } from '@/components/chat/ActivityAccordion'
 import { BudgetFooter } from '@/components/chat/BudgetFooter'
 import { DetailPanel, type PanelContent } from '@/components/chat/CitationPanel'
+import {
+  ContinueSearchAffordance,
+  KEEP_SEARCHING_PROMPT,
+} from '@/components/chat/ContinueSearchAffordance'
 import { StatusLine } from '@/components/chat/StatusLine'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
@@ -119,8 +123,13 @@ function TestTabBody({ source }: TestTabBodyProps) {
   const [input, setInput] = useState('')
   // Step slide-over (agentic transparency) — sandbox is the validation surface.
   const [panel, setPanel] = useState<PanelContent | null>(null)
+  // Turn ids where the user chose "Leave it here" on the budget-continue prompt.
+  const [continueDismissed, setContinueDismissed] = useState<Set<string>>(() => new Set())
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
+
+  // Only the most recent assistant turn may offer "Search again" (live edge).
+  const lastAssistantId = [...messages].reverse().find((m) => m.role === 'assistant')?.id ?? null
 
   const schemaFailed =
     sourceKindOf(source.source_type) === 'database' && source.schema_status === 'failed'
@@ -268,6 +277,11 @@ function TestTabBody({ source }: TestTabBodyProps) {
               key={m.id}
               message={m}
               onInspectStep={(step) => setPanel({ kind: 'step', step })}
+              isLastAssistant={m.id === lastAssistantId}
+              isStreaming={stream.isStreaming}
+              continueDismissed={continueDismissed.has(m.id)}
+              onSearchAgain={() => send(KEEP_SEARCHING_PROMPT)}
+              onLeaveBudget={() => setContinueDismissed((prev) => new Set(prev).add(m.id))}
             />
           ))}
 
@@ -431,10 +445,30 @@ function SandboxEmptyState({ starters, onStarterClick, disabled }: SandboxEmptyS
 interface SandboxBubbleProps {
   message: SandboxMessage
   onInspectStep?: (step: StepActivityEntry) => void
+  isLastAssistant?: boolean
+  isStreaming?: boolean
+  continueDismissed?: boolean
+  onSearchAgain?: () => void
+  onLeaveBudget?: () => void
 }
 
-function SandboxBubble({ message, onInspectStep }: SandboxBubbleProps) {
+function SandboxBubble({
+  message,
+  onInspectStep,
+  isLastAssistant = false,
+  isStreaming = false,
+  continueDismissed = false,
+  onSearchAgain,
+  onLeaveBudget,
+}: SandboxBubbleProps) {
   const isUser = message.role === 'user'
+  const turnBudget = message.activity ? selectLatestBudget(message.activity) : null
+  const showContinue =
+    !isUser &&
+    isLastAssistant &&
+    !isStreaming &&
+    !continueDismissed &&
+    (turnBudget?.offerContinue ?? false)
   return (
     <div className={cn('flex items-start gap-3', isUser && 'flex-row-reverse')}>
       <div
@@ -465,7 +499,14 @@ function SandboxBubble({ message, onInspectStep }: SandboxBubbleProps) {
               mode="live"
               onStepSelect={(step) => onInspectStep?.(step)}
             />
-            <BudgetFooter budget={selectLatestBudget(message.activity)} />
+            <BudgetFooter budget={turnBudget} />
+            {showContinue && (
+              <ContinueSearchAffordance
+                className="mt-2.5"
+                onSearchAgain={() => onSearchAgain?.()}
+                onLeave={() => onLeaveBudget?.()}
+              />
+            )}
           </>
         )}
       </div>

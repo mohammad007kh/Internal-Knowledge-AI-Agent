@@ -9,6 +9,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { vi } from 'vitest'
+import { KEEP_SEARCHING_PROMPT } from '../ContinueSearchAffordance'
 import { MessageThread } from '../MessageThread'
 
 function fold(frames: ReadonlyArray<[string, unknown]>): ActivityState {
@@ -136,6 +137,27 @@ test('attaches a collapsed activity accordion to a finished agentic turn', async
     { wrapper }
   )
   expect(await screen.findByRole('button', { name: /agent activity/i })).toBeInTheDocument()
+})
+
+test('offers "Search again" on a budget-capped last turn and sends the follow-up (T-075)', async () => {
+  const onSend = vi.fn()
+  const activityLog = fold([
+    ['step', { step_id: 's1', role: 'executor', state: 'finished', label: 'Looked' }],
+    ['budget', { ceiling_hit: true, not_completed: ['more'], offer_continue: true }],
+  ])
+  render(
+    <MessageThread
+      sessionId="s1"
+      isStreaming={false}
+      activityLog={activityLog}
+      finishedMessageId="m2"
+      onSend={onSend}
+    />,
+    { wrapper }
+  )
+  const again = await screen.findByRole('button', { name: /search again/i })
+  await userEvent.click(again)
+  expect(onSend).toHaveBeenCalledWith(KEEP_SEARCHING_PROMPT)
 })
 
 test('does NOT snapshot under the wrong turn when finishedMessageId is absent', async () => {

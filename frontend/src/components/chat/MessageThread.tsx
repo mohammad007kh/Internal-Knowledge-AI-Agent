@@ -16,6 +16,7 @@ import { toast } from 'sonner'
 import { ActivityAccordion } from './ActivityAccordion'
 import { BudgetFooter } from './BudgetFooter'
 import { DetailPanel, type PanelContent } from './CitationPanel'
+import { ContinueSearchAffordance, KEEP_SEARCHING_PROMPT } from './ContinueSearchAffordance'
 import { FeedbackButtons } from './FeedbackButtons'
 import { MarkdownLite } from './MarkdownLite'
 import { StatusLine } from './StatusLine'
@@ -82,6 +83,8 @@ export function MessageThread({
   // into showing its accordion. In-memory only → re-expand works for the LIVE
   // session; a hard reload starts empty (the rich log is stream-only).
   const [snapshots, setSnapshots] = useState<Map<string, ActivityState>>(() => new Map())
+  // Turn ids where the user chose "Leave it here" on the budget-continue prompt.
+  const [continueDismissed, setContinueDismissed] = useState<Set<string>>(() => new Set())
 
   const { data, error, isLoading } = useQuery({
     queryKey: ['chat-session-messages', sessionId],
@@ -101,6 +104,11 @@ export function MessageThread({
   const allMessages: Message[] = [...persisted, ...extraMessages]
   const notFoundError = (error as { response?: { status?: number } } | null)?.response?.status
   const isMissingSession = notFoundError === 404 || notFoundError === 403
+
+  // Only the most recent assistant turn may offer "Search again" — a follow-up
+  // turn appends to the live edge, so offering it on a scrolled-up turn would
+  // misrepresent what the click does.
+  const lastAssistantId = [...allMessages].reverse().find((m) => m.role === 'assistant')?.id ?? null
 
   // T-072: when a turn finishes, snapshot the live activityLog under the
   // stream-provided assistant message id (NOT the most-recent persisted id,
@@ -224,6 +232,11 @@ export function MessageThread({
             onCitationClick={(citation) => setPanel({ kind: 'citation', citation })}
             activitySnapshot={snapshots.get(msg.id)}
             onInspectStep={(step) => setPanel({ kind: 'step', step })}
+            isLastAssistant={msg.id === lastAssistantId}
+            isStreaming={isStreaming}
+            continueDismissed={continueDismissed.has(msg.id)}
+            onSearchAgain={() => onSend?.(KEEP_SEARCHING_PROMPT)}
+            onLeaveBudget={() => setContinueDismissed((prev) => new Set(prev).add(msg.id))}
           />
         ))}
 
@@ -287,6 +300,16 @@ interface MessageBubbleProps {
   activitySnapshot?: ActivityState
   /** Open a step's payload in the slide-over (live snapshots only). */
   onInspectStep?: (step: StepActivityEntry) => void
+  /** True if this is the most recent assistant turn (gates the budget-continue affordance). */
+  isLastAssistant?: boolean
+  /** True while a new turn is streaming (hides the affordance to prevent double-send). */
+  isStreaming?: boolean
+  /** True if the user already chose "Leave it here" on this turn. */
+  continueDismissed?: boolean
+  /** Start a fresh follow-up turn (budget "Search again"). */
+  onSearchAgain?: () => void
+  /** Locally dismiss the budget-continue affordance for this turn. */
+  onLeaveBudget?: () => void
 }
 
 /**
@@ -313,9 +336,23 @@ function MessageBubble({
   onCitationClick,
   activitySnapshot,
   onInspectStep,
+  isLastAssistant = false,
+  isStreaming = false,
+  continueDismissed = false,
+  onSearchAgain,
+  onLeaveBudget,
 }: MessageBubbleProps) {
   const isUser = message.role === 'user'
   const isFallback = !isUser && isFallbackReply(message.content)
+  const turnBudget = activitySnapshot ? selectLatestBudget(activitySnapshot) : null
+  // Offer "Search again" only on the live edge: the most recent assistant turn,
+  // when the agent offered to continue, not yet dismissed, and nothing streaming.
+  const showContinue =
+    !isUser &&
+    isLastAssistant &&
+    !isStreaming &&
+    !continueDismissed &&
+    (turnBudget?.offerContinue ?? false)
 
   const handleCopy = () => {
     navigator.clipboard
@@ -400,7 +437,15 @@ function MessageBubble({
             />
             {/* Quiet cost / over-ceiling footnote (T-074) — renders only when the
                 research ceiling was actually hit. */}
-            <BudgetFooter budget={selectLatestBudget(activitySnapshot)} />
+            <BudgetFooter budget={turnBudget} />
+            {/* Honest "take another pass?" affordance (T-075) — live edge only. */}
+            {showContinue && (
+              <ContinueSearchAffordance
+                className="mt-2.5"
+                onSearchAgain={() => onSearchAgain?.()}
+                onLeave={() => onLeaveBudget?.()}
+              />
+            )}
           </>
         )}
 

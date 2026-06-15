@@ -3,9 +3,8 @@
 import type { BudgetActivityEntry } from '@/lib/sse/agent-events'
 import { cn } from '@/lib/utils'
 import { InfoIcon } from 'lucide-react'
-import { useState } from 'react'
 import { BudgetFooter } from './BudgetFooter'
-import { OptionButtonGroup } from './OptionButtonGroup'
+import { ContinueSearchAffordance } from './ContinueSearchAffordance'
 
 interface AbstainTurnProps {
   /** The calm abstain message (e.g. "I couldn't find enough grounded info…"). */
@@ -28,8 +27,6 @@ const DEFAULT_ABSTAIN = "I couldn't find enough grounded information to answer t
  */
 export function AbstainTurn({ message, budget, costNote, onContinue, onStop }: AbstainTurnProps) {
   const offerContinue = budget?.offerContinue ?? false
-  // Lock the choice after the first click so a double-click can't double-fire.
-  const [chosen, setChosen] = useState(false)
 
   return (
     <div className="max-w-[75%] rounded-2xl rounded-tl-sm bg-muted/40 px-4 py-2.5">
@@ -40,21 +37,12 @@ export function AbstainTurn({ message, budget, costNote, onContinue, onStop }: A
 
       <BudgetFooter budget={budget ?? null} costNote={costNote} />
 
+      {/* Shared continue/stop affordance (single source of truth, T-075). */}
       {offerContinue && (
-        <OptionButtonGroup
+        <ContinueSearchAffordance
           className="mt-2.5"
-          label="Would you like me to keep going?"
-          disabled={chosen}
-          options={[
-            { id: 'continue', label: 'Keep searching', value: 'continue', recommended: true },
-            { id: 'stop', label: 'Stop here', value: 'stop' },
-          ]}
-          onSelect={(value) => {
-            if (chosen) return
-            setChosen(true)
-            if (value === 'continue') onContinue?.()
-            else onStop?.()
-          }}
+          onSearchAgain={() => onContinue?.()}
+          onLeave={() => onStop?.()}
         />
       )}
     </div>

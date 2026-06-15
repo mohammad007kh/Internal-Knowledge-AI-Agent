@@ -18,13 +18,13 @@ describe('AbstainTurn', () => {
 
   it('does NOT offer continue/stop when the budget did not offer it', () => {
     render(<AbstainTurn message="No grounded answer." budget={budget({ offerContinue: false })} />)
-    expect(screen.queryByRole('button', { name: /keep searching/i })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /search again/i })).not.toBeInTheDocument()
   })
 
-  it('offers Keep searching / Stop here when offerContinue is true', () => {
+  it('offers Search again / Leave it here when offerContinue is true', () => {
     render(<AbstainTurn message="No grounded answer." budget={budget({ offerContinue: true })} />)
-    expect(screen.getByRole('button', { name: /keep searching/i })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /stop here/i })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /search again/i })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /leave it here/i })).toBeInTheDocument()
   })
 
   it('routes the continue choice to onContinue', async () => {
@@ -36,7 +36,7 @@ describe('AbstainTurn', () => {
         onContinue={onContinue}
       />
     )
-    await userEvent.click(screen.getByRole('button', { name: /keep searching/i }))
+    await userEvent.click(screen.getByRole('button', { name: /search again/i }))
     expect(onContinue).toHaveBeenCalledTimes(1)
   })
 
@@ -49,7 +49,7 @@ describe('AbstainTurn', () => {
         onStop={onStop}
       />
     )
-    await userEvent.click(screen.getByRole('button', { name: /stop here/i }))
+    await userEvent.click(screen.getByRole('button', { name: /leave it here/i }))
     expect(onStop).toHaveBeenCalledTimes(1)
   })
 
@@ -62,7 +62,7 @@ describe('AbstainTurn', () => {
         onContinue={onContinue}
       />
     )
-    const keep = screen.getByRole('button', { name: /keep searching/i })
+    const keep = screen.getByRole('button', { name: /search again/i })
     await userEvent.click(keep)
     await userEvent.click(keep) // second click must be a no-op (group disabled)
     expect(onContinue).toHaveBeenCalledTimes(1)
