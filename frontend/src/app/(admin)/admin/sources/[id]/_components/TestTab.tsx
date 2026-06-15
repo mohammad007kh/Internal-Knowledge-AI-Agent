@@ -12,10 +12,19 @@
  * persistent chat, so behavior on `delta` / `error` / `clarification` /
  * `done` matches what users see in production.
  */
+import { ActivityAccordion } from '@/components/chat/ActivityAccordion'
+import { DetailPanel, type PanelContent } from '@/components/chat/CitationPanel'
+import { StatusLine } from '@/components/chat/StatusLine'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { useAuth } from '@/features/auth/context/AuthContext'
 import type { SourceDetail } from '@/lib/api/sources'
+import {
+  type ActivityState,
+  type StepActivityEntry,
+  selectActiveStep,
+  selectLatestBudget,
+} from '@/lib/sse/agent-events'
 import { cn } from '@/lib/utils'
 import {
   AlertTriangleIcon,
@@ -41,6 +50,8 @@ interface SandboxMessage {
   id: string
   role: 'user' | 'assistant'
   content: string
+  /** Agentic activity snapshot for an assistant turn (drives the accordion). */
+  activity?: ActivityState
 }
 
 const HISTORY_TURN_CAP = 20
@@ -105,6 +116,8 @@ function TestTabBody({ source }: TestTabBodyProps) {
   const stream = useSandboxStream()
   const [messages, setMessages] = useState<SandboxMessage[]>([])
   const [input, setInput] = useState('')
+  // Step slide-over (agentic transparency) — sandbox is the validation surface.
+  const [panel, setPanel] = useState<PanelContent | null>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
 
@@ -119,13 +132,16 @@ function TestTabBody({ source }: TestTabBodyProps) {
     if (stream.isStreaming) return
     if (stream.isPending) return
     if (stream.messageType === 'normal' && stream.currentResponse.length > 0) {
-      // Append the assistant turn and reset stream state.
+      // Append the assistant turn (with its agentic activity snapshot, if any)
+      // and reset stream state. Capture activity BEFORE reset clears it.
+      const activity = stream.activityLog.entries.length > 0 ? stream.activityLog : undefined
       setMessages((prev) => [
         ...prev,
         {
           id: `a-${Date.now()}`,
           role: 'assistant',
           content: stream.currentResponse,
+          activity,
         },
       ])
       stream.reset()
@@ -247,7 +263,11 @@ function TestTabBody({ source }: TestTabBodyProps) {
           ) : null}
 
           {messages.map((m) => (
-            <SandboxBubble key={m.id} message={m} />
+            <SandboxBubble
+              key={m.id}
+              message={m}
+              onInspectStep={(step) => setPanel({ kind: 'step', step })}
+            />
           ))}
 
           {(stream.isStreaming || stream.isPending) && (
@@ -264,6 +284,13 @@ function TestTabBody({ source }: TestTabBodyProps) {
                       aria-hidden="true"
                     />
                   </div>
+                ) : stream.activityLog.entries.length > 0 ? (
+                  // Layer-1 live status once the agent narrates (same as main chat).
+                  <StatusLine
+                    activeStep={selectActiveStep(stream.activityLog)}
+                    budget={selectLatestBudget(stream.activityLog)}
+                    isStreaming={false}
+                  />
                 ) : (
                   <div
                     className="flex items-center gap-1 py-0.5"
@@ -365,6 +392,8 @@ function TestTabBody({ source }: TestTabBodyProps) {
           </Button>
         </div>
       )}
+
+      <DetailPanel content={panel} onClose={() => setPanel(null)} />
     </div>
   )
 }
@@ -377,10 +406,7 @@ interface SandboxEmptyStateProps {
 
 function SandboxEmptyState({ starters, onStarterClick, disabled }: SandboxEmptyStateProps) {
   return (
-    <div
-      className="mx-auto mt-6 max-w-md space-y-4 text-center"
-      data-testid="sandbox-empty-state"
-    >
+    <div className="mx-auto mt-6 max-w-md space-y-4 text-center" data-testid="sandbox-empty-state">
       <SparklesIcon className="mx-auto h-10 w-10 text-primary/40" aria-hidden />
       <h3 className="text-base font-semibold">Try a question against this source</h3>
       <div className="grid gap-2 pt-2">
@@ -401,7 +427,12 @@ function SandboxEmptyState({ starters, onStarterClick, disabled }: SandboxEmptyS
   )
 }
 
-function SandboxBubble({ message }: { message: SandboxMessage }) {
+interface SandboxBubbleProps {
+  message: SandboxMessage
+  onInspectStep?: (step: StepActivityEntry) => void
+}
+
+function SandboxBubble({ message, onInspectStep }: SandboxBubbleProps) {
   const isUser = message.role === 'user'
   return (
     <div className={cn('flex items-start gap-3', isUser && 'flex-row-reverse')}>
@@ -421,12 +452,18 @@ function SandboxBubble({ message }: { message: SandboxMessage }) {
       <div
         className={cn(
           'max-w-[75%] rounded-2xl px-4 py-2.5',
-          isUser
-            ? 'rounded-tr-sm bg-primary text-primary-foreground'
-            : 'rounded-tl-sm bg-muted'
+          isUser ? 'rounded-tr-sm bg-primary text-primary-foreground' : 'rounded-tl-sm bg-muted'
         )}
       >
         <p className="whitespace-pre-wrap break-words text-sm">{message.content}</p>
+        {/* Layer-2 activity accordion for a finished agentic sandbox turn. */}
+        {!isUser && message.activity && message.activity.entries.length > 0 && (
+          <ActivityAccordion
+            activity={message.activity}
+            mode="live"
+            onStepSelect={(step) => onInspectStep?.(step)}
+          />
+        )}
       </div>
     </div>
   )
@@ -451,10 +488,7 @@ function SourceStateWarnings({ source }: SourceStateWarningsProps) {
     })
   }
 
-  if (
-    sourceKindOf(source.source_type) === 'database' &&
-    source.schema_status === 'failed'
-  ) {
+  if (sourceKindOf(source.source_type) === 'database' && source.schema_status === 'failed') {
     warnings.push({
       tone: 'red',
       text: "Schema study failed — text-to-query won't work. Fix in Sync tab first.",
