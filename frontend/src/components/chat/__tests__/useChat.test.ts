@@ -94,6 +94,44 @@ describe('useChat', () => {
     expect(result.current.isPending).toBe(false)
   })
 
+  it('surfaces clarification options + allow_free_text from the clarification frame (T-082)', async () => {
+    const sseBody =
+      'event: clarification\n' +
+      'data: {"question":"Which source?","options":[{"id":"src-1","label":"Q4 Financials","recommended":true},{"id":"src-2","label":"Board Notes"}],"allow_free_text":false}\n\n'
+
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, body: makeStream([sseBody]) }))
+
+    const { result } = renderHook(() => useChat({ sessionId: 'session-1' }), { wrapper })
+
+    await act(async () => {
+      result.current.send('ambiguous question')
+    })
+
+    await waitFor(() => {
+      expect(result.current.clarification).not.toBeNull()
+    })
+    expect(result.current.clarification?.question).toBe('Which source?')
+    expect(result.current.clarification?.options?.map((o) => o.id)).toEqual(['src-1', 'src-2'])
+    expect(result.current.clarification?.options?.[0].recommended).toBe(true)
+    expect(result.current.clarification?.allowFreeText).toBe(false)
+  })
+
+  it('defaults clarification to no options + free-text allowed when the frame omits them', async () => {
+    const sseBody = 'event: clarification\ndata: {"question":"Say more?"}\n\n'
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, body: makeStream([sseBody]) }))
+
+    const { result } = renderHook(() => useChat({ sessionId: 'session-1' }), { wrapper })
+    await act(async () => {
+      result.current.send('vague')
+    })
+
+    await waitFor(() => {
+      expect(result.current.clarification).not.toBeNull()
+    })
+    expect(result.current.clarification?.options).toBeNull()
+    expect(result.current.clarification?.allowFreeText).toBe(true)
+  })
+
   it('unlocks textarea and shows error toast when stream closes without `done`', async () => {
     // SSE body that emits a token but never a terminal frame (no `done`,
     // no `error`, no `clarification`, no `guardrail_blocked`). The reader

@@ -121,9 +121,12 @@ export function ChatLayout({ sessionId: propSessionId }: ChatLayoutProps = {}) {
       {clarification && (
         <ClarificationCard
           question={clarification.question}
+          options={clarification.options ?? undefined}
+          allowFreeText={clarification.allowFreeText}
           onDismiss={dismissClarification}
           onReply={(answer) => handleSend(answer)}
           disabled={isPending}
+          resetKey={clarification.messageId}
         />
       )}
       {guardrailMessage && (

@@ -1,6 +1,10 @@
 'use client'
 
-import { NEW_SESSION_SENTINEL, useChatStream } from '@/hooks/use-chat-stream'
+import {
+  NEW_SESSION_SENTINEL,
+  type StreamClarificationOption,
+  useChatStream,
+} from '@/hooks/use-chat-stream'
 import type { ActivityState } from '@/lib/sse/agent-events'
 import { useQueryClient } from '@tanstack/react-query'
 import { useCallback, useEffect, useRef, useState } from 'react'
@@ -33,6 +37,10 @@ interface SessionsListSnapshot {
 export interface Clarification {
   question: string
   messageId: string
+  /** Permitted-source quick-reply options (from T-080), if the backend offered any. */
+  options: StreamClarificationOption[] | null
+  /** Whether a free-text reply is allowed (default true). */
+  allowFreeText: boolean
 }
 
 export interface UseChatReturn {
@@ -262,12 +270,21 @@ export function useChat({ sessionId }: { sessionId: string | null }): UseChatRet
     setClarification({
       question: stream.clarificationQuestion,
       messageId: stream.lastMessageId ?? '',
+      options: stream.clarificationOptions,
+      allowFreeText: stream.clarificationAllowFreeText,
     })
     clearOptimistic()
     setIsPending(false)
     setIsPendingNewSession(false)
     settledRef.current = true
-  }, [stream.messageType, stream.clarificationQuestion, stream.lastMessageId, clearOptimistic])
+  }, [
+    stream.messageType,
+    stream.clarificationQuestion,
+    stream.clarificationOptions,
+    stream.clarificationAllowFreeText,
+    stream.lastMessageId,
+    clearOptimistic,
+  ])
 
   useEffect(() => {
     if (stream.messageType !== 'guardrail_blocked') return

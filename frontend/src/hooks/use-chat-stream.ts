@@ -34,6 +34,18 @@ export interface StreamCitation {
 export type ChatStreamMessageType = 'normal' | 'clarification' | 'guardrail_blocked' | 'error'
 
 /**
+ * A clarification quick-reply option (wire shape, see contracts/sse-events.md:
+ * `{id, label, hint?, recommended?}`). Drawn server-side from the user's
+ * permitted source set (Security Rule 2 / T-080) — rendered verbatim here.
+ */
+export interface StreamClarificationOption {
+  id: string
+  label: string
+  hint?: string | null
+  recommended?: boolean | null
+}
+
+/**
  * Sentinel passed as the `sessionId` path segment when the caller wants the
  * backend to lazy-create a chat session as part of the first message turn
  * (U15). The backend responds with an `event: session_created` SSE frame
@@ -57,6 +69,10 @@ export interface UseChatStreamReturn {
   citations: StreamCitation[]
   messageType: ChatStreamMessageType
   clarificationQuestion: string | null
+  /** Permitted-source quick-reply options on the last clarification, if any. */
+  clarificationOptions: StreamClarificationOption[] | null
+  /** Whether the clarification allows a free-text reply (default true). */
+  clarificationAllowFreeText: boolean
   guardrailMessage: string | null
   errorMessage: string | null
   lastMessageId: string | null
@@ -148,6 +164,10 @@ export function useChatStream(): UseChatStreamReturn {
   const [citations, setCitations] = useState<StreamCitation[]>([])
   const [messageType, setMessageType] = useState<ChatStreamMessageType>('normal')
   const [clarificationQuestion, setClarificationQuestion] = useState<string | null>(null)
+  const [clarificationOptions, setClarificationOptions] = useState<
+    StreamClarificationOption[] | null
+  >(null)
+  const [clarificationAllowFreeText, setClarificationAllowFreeText] = useState(true)
   const [guardrailMessage, setGuardrailMessage] = useState<string | null>(null)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const [lastMessageId, setLastMessageId] = useState<string | null>(null)
@@ -175,6 +195,8 @@ export function useChatStream(): UseChatStreamReturn {
     setCitations([])
     setMessageType('normal')
     setClarificationQuestion(null)
+    setClarificationOptions(null)
+    setClarificationAllowFreeText(true)
     setGuardrailMessage(null)
     setErrorMessage(null)
     setLastMessageId(null)
@@ -197,6 +219,8 @@ export function useChatStream(): UseChatStreamReturn {
       setCitations([])
       setMessageType('normal')
       setClarificationQuestion(null)
+      setClarificationOptions(null)
+      setClarificationAllowFreeText(true)
       setGuardrailMessage(null)
       setErrorMessage(null)
       setLastMessageId(null)
@@ -304,9 +328,20 @@ export function useChatStream(): UseChatStreamReturn {
                 break
               }
               case 'clarification': {
-                const payload = safeJsonParse<{ question?: string }>(frame.data)
+                const payload = safeJsonParse<{
+                  question?: string
+                  options?: StreamClarificationOption[]
+                  allow_free_text?: boolean
+                }>(frame.data)
                 setMessageType('clarification')
                 setClarificationQuestion(payload?.question ?? '')
+                setClarificationOptions(
+                  Array.isArray(payload?.options) && payload.options.length > 0
+                    ? payload.options
+                    : null
+                )
+                // Default true when omitted, matching the backend wire default.
+                setClarificationAllowFreeText(payload?.allow_free_text ?? true)
                 sawTerminalEvent = true
                 break
               }
@@ -406,6 +441,8 @@ export function useChatStream(): UseChatStreamReturn {
     citations,
     messageType,
     clarificationQuestion,
+    clarificationOptions,
+    clarificationAllowFreeText,
     guardrailMessage,
     errorMessage,
     lastMessageId,
