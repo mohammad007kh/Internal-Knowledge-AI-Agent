@@ -108,6 +108,49 @@ test('flag-off regression: empty activityLog keeps the classic PulsingDots, no S
   expect(screen.queryByText(/reading|verifying|planning|thinking…/i)).not.toBeInTheDocument()
 })
 
+test('attaches a collapsed activity accordion to a finished agentic turn', async () => {
+  const activityLog = fold([
+    [
+      'plan',
+      {
+        revision: 0,
+        steps: [
+          { id: 's1', label: 'Read it', source_id: 'u', source_name: 'p' },
+          { id: 's2', label: 'Check it', source_id: 'u', source_name: 'p' },
+        ],
+      },
+    ],
+    ['step', { step_id: 's1', role: 'executor', state: 'finished', label: 'Read the policy' }],
+    ['step', { step_id: 's2', role: 'verifier', state: 'finished', label: 'Verified it' }],
+  ])
+  // Stream settled (isStreaming false) with a non-empty log; finishedMessageId
+  // names the assistant turn (m2) → the snapshot effect keys it under m2 and the
+  // accordion attaches to that turn's bubble — independent of refetch timing.
+  render(
+    <MessageThread
+      sessionId="s1"
+      isStreaming={false}
+      activityLog={activityLog}
+      finishedMessageId="m2"
+    />,
+    { wrapper }
+  )
+  expect(await screen.findByRole('button', { name: /agent activity/i })).toBeInTheDocument()
+})
+
+test('does NOT snapshot under the wrong turn when finishedMessageId is absent', async () => {
+  const activityLog = fold([
+    ['step', { step_id: 's1', role: 'executor', state: 'finished', label: 'Read it' }],
+  ])
+  // No finishedMessageId (mid-flight / no terminal id yet) → no accordion latched
+  // onto the most-recent persisted message (the Q1 mis-attribution guard).
+  render(<MessageThread sessionId="s1" isStreaming={false} activityLog={activityLog} />, {
+    wrapper,
+  })
+  await screen.findByText('Hi there!')
+  expect(screen.queryByRole('button', { name: /agent activity/i })).not.toBeInTheDocument()
+})
+
 test('replaces PulsingDots with the live StatusLine once the agent narrates a step', async () => {
   const activityLog = fold([
     [

@@ -60,6 +60,10 @@ export function DetailPanel({ content, onClose }: DetailPanelProps) {
       role="complementary"
       aria-label={content?.kind === 'step' ? 'Step details' : 'Citation details'}
       aria-hidden={!content}
+      // When closed the panel is off-screen via transform but still in the DOM;
+      // `inert` removes its close button from the tab order + a11y tree so a
+      // keyboard user can't Tab into a hidden control.
+      inert={!content}
     >
       {content?.kind === 'citation' && (
         <CitationBody citation={content.citation} closeRef={closeRef} onClose={onClose} />
@@ -95,7 +99,7 @@ function PanelHeader({
         variant="ghost"
         className="h-8 w-8 shrink-0"
         onClick={onClose}
-        aria-label="Close panel"
+        aria-label={closeLabel}
       >
         <XIcon className="h-4 w-4" />
       </Button>

@@ -74,6 +74,13 @@ export interface UseChatReturn {
    * transitive flag-off guard (no events ⇒ empty ⇒ zero rendered change).
    */
   activityLog: ActivityState
+  /**
+   * The assistant message id of the just-finished turn (from the stream's
+   * `done` frame), or null mid-flight. Lets the thread snapshot `activityLog`
+   * under the EXACT turn id — not inferred from the most-recent persisted
+   * message, which lags the post-turn refetch and would mis-attribute.
+   */
+  lastMessageId: string | null
 }
 
 export function useChat({ sessionId }: { sessionId: string | null }): UseChatReturn {
@@ -456,5 +463,6 @@ export function useChat({ sessionId }: { sessionId: string | null }): UseChatRet
     guardrailMessage: localGuardrail,
     dismissGuardrail,
     activityLog: stream.activityLog,
+    lastMessageId: stream.lastMessageId,
   }
 }

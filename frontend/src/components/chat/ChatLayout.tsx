@@ -50,6 +50,7 @@ export function ChatLayout({ sessionId: propSessionId }: ChatLayoutProps = {}) {
     guardrailMessage,
     dismissGuardrail,
     activityLog,
+    lastMessageId,
   } = useChat({ sessionId })
 
   // U15 lazy creation: `send` is now safe to call with a null `sessionId`.
@@ -114,6 +115,7 @@ export function ChatLayout({ sessionId: propSessionId }: ChatLayoutProps = {}) {
           extraMessages={optimisticMessages}
           onSend={handleSend}
           activityLog={activityLog}
+          finishedMessageId={lastMessageId}
         />
       )}
       {clarification && (

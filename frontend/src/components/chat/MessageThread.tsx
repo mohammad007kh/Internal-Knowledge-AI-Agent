@@ -3,6 +3,7 @@
 import { apiClient } from '@/lib/api-client'
 import {
   type ActivityState,
+  type StepActivityEntry,
   emptyActivityState,
   selectActiveStep,
   selectLatestBudget,
@@ -12,7 +13,8 @@ import { useQuery } from '@tanstack/react-query'
 import { BotIcon, CopyIcon, InfoIcon, SparklesIcon, UserIcon } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { toast } from 'sonner'
-import { CitationPanel } from './CitationPanel'
+import { ActivityAccordion } from './ActivityAccordion'
+import { DetailPanel, type PanelContent } from './CitationPanel'
 import { FeedbackButtons } from './FeedbackButtons'
 import { MarkdownLite } from './MarkdownLite'
 import { StatusLine } from './StatusLine'
@@ -37,6 +39,13 @@ interface MessageThreadProps {
    * guard — an empty log means the agentic pipeline emitted nothing).
    */
   activityLog?: ActivityState
+  /**
+   * Assistant message id of the just-finished turn (from the stream's `done`
+   * frame), or null mid-flight. Used to snapshot `activityLog` under the EXACT
+   * turn — keying off the most-recent persisted message instead would
+   * mis-attribute during the post-turn refetch window.
+   */
+  finishedMessageId?: string | null
 }
 
 const SUGGESTED_PROMPTS: string[] = [
@@ -58,11 +67,20 @@ export function MessageThread({
   extraMessages = [],
   onSend,
   activityLog = emptyActivityState,
+  finishedMessageId = null,
 }: MessageThreadProps) {
   const bottomRef = useRef<HTMLDivElement>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
   const [pinned, setPinned] = useState(true)
-  const [openCitation, setOpenCitation] = useState<Citation | null>(null)
+  // The right-side slide-over presents either a citation OR an agent step's
+  // payload (T-073b generalization) — one panel, discriminated content.
+  const [panel, setPanel] = useState<PanelContent | null>(null)
+  // T-072: per-turn activity snapshots keyed by the assistant message id, so a
+  // finished turn keeps its Layer-2 accordion after `activityLog` resets on the
+  // next send. State (not a ref) so capturing a snapshot re-renders the turn
+  // into showing its accordion. In-memory only → re-expand works for the LIVE
+  // session; a hard reload starts empty (the rich log is stream-only).
+  const [snapshots, setSnapshots] = useState<Map<string, ActivityState>>(() => new Map())
 
   const { data, error, isLoading } = useQuery({
     queryKey: ['chat-session-messages', sessionId],
@@ -82,6 +100,19 @@ export function MessageThread({
   const allMessages: Message[] = [...persisted, ...extraMessages]
   const notFoundError = (error as { response?: { status?: number } } | null)?.response?.status
   const isMissingSession = notFoundError === 404 || notFoundError === 403
+
+  // T-072: when a turn finishes, snapshot the live activityLog under the
+  // stream-provided assistant message id (NOT the most-recent persisted id,
+  // which lags the post-turn refetch and would mis-attribute turn N's log to
+  // turn N-1). The snapshot survives the next send's `activityLog` reset, so
+  // the finished turn keeps its accordion for the rest of the session. The
+  // once-guard lives inside the functional updater (returns `prev` unchanged →
+  // React bails out, no re-render, no loop).
+  useEffect(() => {
+    if (isStreaming || !finishedMessageId || activityLog.entries.length === 0) return
+    const turnId = finishedMessageId
+    setSnapshots((prev) => (prev.has(turnId) ? prev : new Map(prev).set(turnId, activityLog)))
+  }, [isStreaming, activityLog, finishedMessageId])
 
   const handleScroll = () => {
     const el = scrollRef.current
@@ -189,7 +220,9 @@ export function MessageThread({
             key={msg.id}
             message={msg}
             sessionId={sessionId ?? ''}
-            onCitationClick={setOpenCitation}
+            onCitationClick={(citation) => setPanel({ kind: 'citation', citation })}
+            activitySnapshot={snapshots.get(msg.id)}
+            onInspectStep={(step) => setPanel({ kind: 'step', step })}
           />
         ))}
 
@@ -238,7 +271,7 @@ export function MessageThread({
         <div ref={bottomRef} aria-hidden="true" />
       </div>
 
-      <CitationPanel citation={openCitation} onClose={() => setOpenCitation(null)} />
+      <DetailPanel content={panel} onClose={() => setPanel(null)} />
     </>
   )
 }
@@ -247,6 +280,12 @@ interface MessageBubbleProps {
   message: Message
   sessionId: string
   onCitationClick: (c: Citation) => void
+  /** Per-turn activity snapshot for this assistant message (T-072) — drives the
+   *  Layer-2 accordion. Undefined for user turns and for turns with no agentic
+   *  activity (classic pipeline / flag off). */
+  activitySnapshot?: ActivityState
+  /** Open a step's payload in the slide-over (live snapshots only). */
+  onInspectStep?: (step: StepActivityEntry) => void
 }
 
 /**
@@ -267,7 +306,13 @@ function isFallbackReply(content: string): boolean {
   return FALLBACK_PATTERNS.some((re) => re.test(content))
 }
 
-function MessageBubble({ message, sessionId, onCitationClick }: MessageBubbleProps) {
+function MessageBubble({
+  message,
+  sessionId,
+  onCitationClick,
+  activitySnapshot,
+  onInspectStep,
+}: MessageBubbleProps) {
   const isUser = message.role === 'user'
   const isFallback = !isUser && isFallbackReply(message.content)
 
@@ -340,6 +385,17 @@ function MessageBubble({ message, sessionId, onCitationClick }: MessageBubblePro
               </button>
             ))}
           </div>
+        )}
+
+        {/* Layer-2: collapsed-by-default activity accordion for this finished
+            agentic turn (T-072/T-073). Only present when a snapshot exists
+            (agentic activity occurred this session). */}
+        {!isUser && activitySnapshot && activitySnapshot.entries.length > 0 && (
+          <ActivityAccordion
+            activity={activitySnapshot}
+            mode="live"
+            onStepSelect={(step) => onInspectStep?.(step)}
+          />
         )}
 
         {/* Bottom meta row: timestamp + (assistant only) feedback + copy.
