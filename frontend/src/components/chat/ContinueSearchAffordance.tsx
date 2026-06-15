@@ -27,8 +27,8 @@ interface ContinueSearchAffordanceProps {
 
 /**
  * Calm "take another pass?" affordance shown after the agent stops at its budget
- * ceiling (T-075). The single source of truth for the continue/stop choice —
- * reused by the live chat (mounted under a finished turn) and by `AbstainTurn`.
+ * ceiling (T-075). The single source of truth for the continue/stop choice,
+ * mounted under a finished turn on both surfaces (main chat + admin sandbox).
  * Locks after the first choice so a double-click can't double-fire.
  */
 export function ContinueSearchAffordance({
