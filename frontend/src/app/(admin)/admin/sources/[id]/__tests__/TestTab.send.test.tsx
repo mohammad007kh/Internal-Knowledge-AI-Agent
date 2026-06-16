@@ -218,6 +218,37 @@ describe('TestTab — send → stream → render (regression)', () => {
     expect(screen.getByRole('button', { name: /agent activity/i })).toBeInTheDocument()
   })
 
+  it('renders the real ClarificationCard with permitted-source options (004 review: Fix B)', async () => {
+    fetchMock.mockResolvedValueOnce(
+      makeStreamResponse([
+        sseFrame('clarification', {
+          question: 'Which source did you mean?',
+          options: [
+            { id: 'src-q4', label: 'Q4 Financials', recommended: true },
+            { id: 'src-board', label: 'Board Notes' },
+          ],
+          allow_free_text: true,
+        }),
+      ])
+    )
+
+    const user = userEvent.setup()
+    renderTestTab()
+    await user.type(screen.getByTestId('sandbox-input'), 'summarize it')
+    await user.click(screen.getByTestId('sandbox-send'))
+
+    // The real card + permitted-source option buttons appear — NOT the old
+    // flattened "_Clarification needed:_" string.
+    expect(await screen.findByText('Which source did you mean?')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /q4 financials/i })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /board notes/i })).toBeInTheDocument()
+    expect(screen.queryByText(/clarification needed:/i)).not.toBeInTheDocument()
+
+    // Choosing an option re-enters as a normal turn (a second POST).
+    await user.click(screen.getByRole('button', { name: /q4 financials/i }))
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2))
+  })
+
   it('renders a stream-error message when the backend yields error frame', async () => {
     fetchMock.mockResolvedValueOnce(
       makeStreamResponse([

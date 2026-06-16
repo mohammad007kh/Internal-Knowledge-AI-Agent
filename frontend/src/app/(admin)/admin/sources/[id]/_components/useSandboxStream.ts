@@ -14,6 +14,7 @@
  * State is `useState`-only by design — no React Query, no localStorage. A
  * hard refresh wipes everything. That property is part of the UX contract.
  */
+import type { StreamClarificationOption } from '@/hooks/use-chat-stream'
 import { openSandboxStream } from '@/lib/api/chat'
 import {
   type ActivityState,
@@ -34,6 +35,10 @@ export interface SandboxStreamResult {
   messageType: SandboxMessageType
   /** Populated when messageType==='clarification'. */
   clarificationQuestion: string | null
+  /** Permitted-source options on the last clarification (parity with main chat). */
+  clarificationOptions: StreamClarificationOption[] | null
+  /** Whether the clarification allows a free-text reply (default true). */
+  clarificationAllowFreeText: boolean
   /** Populated when messageType==='guardrail_blocked'. */
   guardrailMessage: string | null
   /** Populated when messageType==='error' (or fetch failed). */
@@ -92,6 +97,10 @@ export function useSandboxStream(): SandboxStreamResult {
   const [currentResponse, setCurrentResponse] = useState('')
   const [messageType, setMessageType] = useState<SandboxMessageType>('normal')
   const [clarificationQuestion, setClarificationQuestion] = useState<string | null>(null)
+  const [clarificationOptions, setClarificationOptions] = useState<
+    StreamClarificationOption[] | null
+  >(null)
+  const [clarificationAllowFreeText, setClarificationAllowFreeText] = useState(true)
   const [guardrailMessage, setGuardrailMessage] = useState<string | null>(null)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const [activityLog, setActivityLog] = useState<ActivityState>(emptyActivityState)
@@ -116,6 +125,8 @@ export function useSandboxStream(): SandboxStreamResult {
     setCurrentResponse('')
     setMessageType('normal')
     setClarificationQuestion(null)
+    setClarificationOptions(null)
+    setClarificationAllowFreeText(true)
     setGuardrailMessage(null)
     setErrorMessage(null)
     setActivityLog(emptyActivityState)
@@ -138,6 +149,8 @@ export function useSandboxStream(): SandboxStreamResult {
       setCurrentResponse('')
       setMessageType('normal')
       setClarificationQuestion(null)
+      setClarificationOptions(null)
+      setClarificationAllowFreeText(true)
       setGuardrailMessage(null)
       setErrorMessage(null)
       setActivityLog(emptyActivityState)
@@ -191,9 +204,19 @@ export function useSandboxStream(): SandboxStreamResult {
                 break
               }
               case 'clarification': {
-                const payload = safeJsonParse<{ question?: string }>(frame.data)
+                const payload = safeJsonParse<{
+                  question?: string
+                  options?: StreamClarificationOption[]
+                  allow_free_text?: boolean
+                }>(frame.data)
                 setMessageType('clarification')
                 setClarificationQuestion(payload?.question ?? '')
+                setClarificationOptions(
+                  Array.isArray(payload?.options) && payload.options.length > 0
+                    ? payload.options
+                    : null
+                )
+                setClarificationAllowFreeText(payload?.allow_free_text ?? true)
                 sawTerminal = true
                 break
               }
@@ -259,6 +282,8 @@ export function useSandboxStream(): SandboxStreamResult {
     currentResponse,
     messageType,
     clarificationQuestion,
+    clarificationOptions,
+    clarificationAllowFreeText,
     guardrailMessage,
     errorMessage,
     activityLog,

@@ -14,6 +14,7 @@
  */
 import { AgenticTurnFooter } from '@/components/chat/AgenticTurnFooter'
 import { DetailPanel, type PanelContent } from '@/components/chat/CitationPanel'
+import { ClarificationCard, type ClarificationOption } from '@/components/chat/ClarificationCard'
 import { KEEP_SEARCHING_PROMPT } from '@/components/chat/ContinueSearchAffordance'
 import { StatusLine } from '@/components/chat/StatusLine'
 import { Button } from '@/components/ui/button'
@@ -53,6 +54,12 @@ interface SandboxMessage {
   content: string
   /** Agentic activity snapshot for an assistant turn (drives the accordion). */
   activity?: ActivityState
+  /** Structured clarification, if this turn asked one (drives ClarificationCard). */
+  clarification?: {
+    question: string
+    options?: ClarificationOption[]
+    allowFreeText: boolean
+  }
 }
 
 const HISTORY_TURN_CAP = 20
@@ -178,12 +185,19 @@ function TestTabBody({ source }: TestTabBodyProps) {
       return
     }
     if (stream.messageType === 'clarification' && stream.clarificationQuestion) {
+      // Capture the STRUCTURED clarification (options + allow_free_text) BEFORE
+      // reset() clears it, so SandboxBubble can render the real ClarificationCard
+      // (parity with the main chat — incl. permitted-source options, Rule 2).
+      const question = stream.clarificationQuestion
+      const options = stream.clarificationOptions
+      const allowFreeText = stream.clarificationAllowFreeText
       setMessages((prev) => [
         ...prev,
         {
           id: `c-${Date.now()}`,
           role: 'assistant',
-          content: `_Clarification needed:_ ${stream.clarificationQuestion}`,
+          content: '',
+          clarification: { question, options: options ?? undefined, allowFreeText },
         },
       ])
       stream.reset()
@@ -198,6 +212,8 @@ function TestTabBody({ source }: TestTabBodyProps) {
     stream.errorMessage,
     stream.guardrailMessage,
     stream.clarificationQuestion,
+    stream.clarificationOptions,
+    stream.clarificationAllowFreeText,
   ])
 
   // Auto-scroll to bottom on new turns / streaming tokens.
@@ -278,6 +294,7 @@ function TestTabBody({ source }: TestTabBodyProps) {
               continueDismissed={continueDismissed.has(m.id)}
               onSearchAgain={() => send(KEEP_SEARCHING_PROMPT)}
               onLeaveBudget={() => setContinueDismissed((prev) => new Set(prev).add(m.id))}
+              onClarifyReply={(answer) => send(answer)}
             />
           ))}
 
@@ -446,6 +463,7 @@ interface SandboxBubbleProps {
   continueDismissed?: boolean
   onSearchAgain?: () => void
   onLeaveBudget?: () => void
+  onClarifyReply?: (answer: string) => void
 }
 
 function SandboxBubble({
@@ -456,8 +474,27 @@ function SandboxBubble({
   continueDismissed = false,
   onSearchAgain,
   onLeaveBudget,
+  onClarifyReply,
 }: SandboxBubbleProps) {
   const isUser = message.role === 'user'
+
+  // A clarification turn renders the real ClarificationCard (parity with the main
+  // chat) as a full-width list item — not inside a bubble. Interactive only on the
+  // live edge (latest turn, not streaming); historical ones render disabled.
+  if (message.clarification) {
+    return (
+      <ClarificationCard
+        question={message.clarification.question}
+        options={message.clarification.options}
+        allowFreeText={message.clarification.allowFreeText}
+        onReply={(answer) => onClarifyReply?.(answer)}
+        onDismiss={() => {}}
+        disabled={!(isLastAssistant && !isStreaming)}
+        resetKey={message.id}
+      />
+    )
+  }
+
   return (
     <div className={cn('flex items-start gap-3', isUser && 'flex-row-reverse')}>
       <div
