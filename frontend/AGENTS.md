@@ -65,38 +65,38 @@ Clarification options are **server-clipped to the user's permitted sources** (ba
 ### Testing pattern
 Fold typed `AgentEvent[]` fixtures through the **real** `activityLogReducer` (see the `fold()`/`foldFrames()` helpers); assert **DOM only** in component tests. Never hand-author `ActivityState`.
 
-## Review fixes — expert-designed + supervisor-validated plan
+## Review fixes — ALL DONE (expert-designed → supervisor-validated → implemented + drilled)
 
-A 4-team review + per-fix design teams + a supervisor validated the following.
-**Sequencing (supervisor): A is independent; B/C/D are STRICTLY SERIAL `C → D → B`**
-(all three edit `TestTab.tsx`; C/D both edit `MessageThread.tsx` — do NOT parallelize).
+A 4-team holistic review + per-fix design teams + a supervisor validated these; all
+shipped in the supervisor's serial order (A independent; then C → D → B):
 
 - **Fix A — DONE** (`4fe0f5b7`): `DetailPanel` restores focus to its trigger on close
   (WCAG 2.4.3), NON-modal (no trap/aria-modal — read alongside live chat). Type-guarded
-  capture before moving focus.
-- **Fix C (do FIRST) — extract `<AgenticTurnFooter>`** (`components/chat/`): stateless;
-  folds the `entries.length>0` guard + `selectLatestBudget` + the 5-clause `showContinue`
-  predicate; renders `ActivityAccordion(mode=live)` + `BudgetFooter` + gated
-  `ContinueSearchAffordance`. Both `MessageBubble` + `SandboxBubble` render it; keep
-  `continueDismissed`/`lastAssistantId` in each parent. **Supervisor correction: add a
-  `messageId`/`turnId` prop** (needed for `continueDismissed.has(id)` + the continue/leave
-  callbacks). Do NOT extract `<InFlightBubble>` (intentional MarkdownLite/testid divergence).
-- **Fix D (do SECOND, on the slimmed call sites)**:
-  - D1 DELETE `hadClarification` chain (PlanCard + ActivityAccordion) → `shouldRenderPlanCard(plan)` = `steps.length>=2 || revision>=1`. **Supervisor correction: first confirm every clarification path yields `≥2 steps || revision≥1`** (else a 1-step/no-revision clarification loses its plan card — keep a clause if so). Record the FR-008 intent in traceability.
-  - D2 DELETE `BudgetFooter.costNote` prop + its test assertion (no live caller).
-  - D3 FIX: add `motion-reduce:animate-none` to the `PulsingDots` in MessageThread + TestTab (+ test), matching StatusLine.
-  - D4 DELETE `ActivityAccordion mode="review"` + its branch/test (supervisor ruling: no reload-restore roadmapped; snapshots are documented live-session-only — reintroduce with a real consumer when specced). Record in traceability.
-- **Fix B (do LAST — HIGH) — sandbox clarification parity**: mirror the main hook in
-  `useSandboxStream` (parse + expose `clarificationOptions`/`clarificationAllowFreeText`,
-  reuse `StreamClarificationOption`); widen `SandboxMessage` with
-  `clarification?:{question;options?;allowFreeText}`; capture it BEFORE `reset()` (mirror the
-  `activity` capture); render the real `ClarificationCard` in `SandboxBubble`
-  (`onReply→send`, `resetKey=message.id`). **Supervisor corrections: gate interactivity on
-  `isLastAssistant && !isStreaming`** (not last alone — avoids a stale-but-interactive card
-  during a following stream); **render non-last clarifications read-only**. Defer `GuardrailCard`
-  (cosmetic, non-interactive). Rule 2 holds: the reply re-enters as a normal re-authorized turn.
+  capture before moving focus; content-swap doesn't re-capture.
+- **Fix C — DONE** (`a84d4017`): extracted stateless `AgenticTurnFooter` (folds the
+  empty guard + `selectLatestBudget` + the `showContinue` predicate; renders accordion +
+  budget + gated continue). Both `MessageBubble` + `SandboxBubble` render it;
+  `continueDismissed`/`lastAssistantId` stay in each parent (the child needs only the
+  resolved boolean + bound callbacks — no `messageId` prop). `InFlightBubble` intentionally
+  NOT extracted.
+- **Fix D — DONE** (`0ab57c8d`): deleted the always-false `hadClarification` chain
+  (`shouldRenderPlanCard(plan)=steps>=2||revision>=1`; FR-008 clarification-path intent noted
+  in the PlanCard docstring — needs cross-turn state to re-implement); deleted
+  `BudgetFooter.costNote`; deleted `ActivityAccordion mode="review"` (rows always interactive —
+  reload ⇒ empty snapshot ⇒ no rows); motion-gated the PulsingDots.
+- **Fix B — DONE** (`7182bb00`, HIGH): sandbox clarification parity — `useSandboxStream`
+  mirrors the main hook (`clarificationOptions`/`clarificationAllowFreeText`), `SandboxMessage`
+  carries the structured clarification (captured before `reset()`), `SandboxBubble` renders the
+  real `ClarificationCard` (live-edge interactive: `isLastAssistant && !isStreaming`; historical
+  disabled; `onReply→send` re-authorized). GuardrailCard deferred (cosmetic).
+- **UX polish — DONE** (`4d6afc1b`): `ClarificationCard` margin moved to a `className` prop so
+  the sandbox renders flush in its `p-4` log (main chat passes `mx-4`).
 
-Each fix lands as its own commit through the drill (TDD → code-reviewer + ui-ux/007 → green).
+Drill applied per fix + a final code-reviewer + ui-ux pass on the batch (source-embedded).
+NOTE: 007 sub-agent reads are unreliable on this host (it fabricated against nonexistent
+files — discarded); the Rule-2 security posture is unchanged from the prior verified passes.
+Known unrelated PRE-EXISTING failure: `DataTab.relabel.test` (SchemaViewer mount) — fails
+identically before these fixes; tracked separately.
 
 ## 004 status
 Slices D + E code-complete + verified on both surfaces. Remaining are environment/
