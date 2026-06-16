@@ -65,11 +65,38 @@ Clarification options are **server-clipped to the user's permitted sources** (ba
 ### Testing pattern
 Fold typed `AgentEvent[]` fixtures through the **real** `activityLogReducer` (see the `fold()`/`foldFrames()` helpers); assert **DOM only** in component tests. Never hand-author `ActivityState`.
 
-## Known follow-ups (from the holistic review — tracked, not done)
-- **a11y (MEDIUM)**: `DetailPanel` slide-over doesn't restore focus to the trigger on close, and doesn't trap focus / isn't `aria-modal`.
-- **Parity (MEDIUM)**: the admin sandbox flattens clarification/guardrail to plain text instead of rendering `ClarificationCard`/`GuardrailCard`, so it can't preview the options UX.
-- **Dedup (MEDIUM)**: the finished-turn footer (accordion + budget + affordance) and the in-flight bubble are duplicated across `MessageThread`/`TestTab` — extract `<AgenticTurnFooter>` (+ `<InFlightBubble>`). Keep the two stream hooks separate (they diverge on session lifecycle).
-- **LOW**: `hadClarification` prop chain (PlanCard ← ActivityAccordion) is unreached — both call sites default `false`; wire it (needs cross-turn state) or remove. `BudgetFooter.costNote` now has no live caller. Pre-existing `PulsingDots` copies aren't `motion-reduce`-gated. `mode="review"` on the accordion is unreached until reload-restore exists.
+## Review fixes — expert-designed + supervisor-validated plan
+
+A 4-team review + per-fix design teams + a supervisor validated the following.
+**Sequencing (supervisor): A is independent; B/C/D are STRICTLY SERIAL `C → D → B`**
+(all three edit `TestTab.tsx`; C/D both edit `MessageThread.tsx` — do NOT parallelize).
+
+- **Fix A — DONE** (`4fe0f5b7`): `DetailPanel` restores focus to its trigger on close
+  (WCAG 2.4.3), NON-modal (no trap/aria-modal — read alongside live chat). Type-guarded
+  capture before moving focus.
+- **Fix C (do FIRST) — extract `<AgenticTurnFooter>`** (`components/chat/`): stateless;
+  folds the `entries.length>0` guard + `selectLatestBudget` + the 5-clause `showContinue`
+  predicate; renders `ActivityAccordion(mode=live)` + `BudgetFooter` + gated
+  `ContinueSearchAffordance`. Both `MessageBubble` + `SandboxBubble` render it; keep
+  `continueDismissed`/`lastAssistantId` in each parent. **Supervisor correction: add a
+  `messageId`/`turnId` prop** (needed for `continueDismissed.has(id)` + the continue/leave
+  callbacks). Do NOT extract `<InFlightBubble>` (intentional MarkdownLite/testid divergence).
+- **Fix D (do SECOND, on the slimmed call sites)**:
+  - D1 DELETE `hadClarification` chain (PlanCard + ActivityAccordion) → `shouldRenderPlanCard(plan)` = `steps.length>=2 || revision>=1`. **Supervisor correction: first confirm every clarification path yields `≥2 steps || revision≥1`** (else a 1-step/no-revision clarification loses its plan card — keep a clause if so). Record the FR-008 intent in traceability.
+  - D2 DELETE `BudgetFooter.costNote` prop + its test assertion (no live caller).
+  - D3 FIX: add `motion-reduce:animate-none` to the `PulsingDots` in MessageThread + TestTab (+ test), matching StatusLine.
+  - D4 DELETE `ActivityAccordion mode="review"` + its branch/test (supervisor ruling: no reload-restore roadmapped; snapshots are documented live-session-only — reintroduce with a real consumer when specced). Record in traceability.
+- **Fix B (do LAST — HIGH) — sandbox clarification parity**: mirror the main hook in
+  `useSandboxStream` (parse + expose `clarificationOptions`/`clarificationAllowFreeText`,
+  reuse `StreamClarificationOption`); widen `SandboxMessage` with
+  `clarification?:{question;options?;allowFreeText}`; capture it BEFORE `reset()` (mirror the
+  `activity` capture); render the real `ClarificationCard` in `SandboxBubble`
+  (`onReply→send`, `resetKey=message.id`). **Supervisor corrections: gate interactivity on
+  `isLastAssistant && !isStreaming`** (not last alone — avoids a stale-but-interactive card
+  during a following stream); **render non-last clarifications read-only**. Defer `GuardrailCard`
+  (cosmetic, non-interactive). Rule 2 holds: the reply re-enters as a normal re-authorized turn.
+
+Each fix lands as its own commit through the drill (TDD → code-reviewer + ui-ux/007 → green).
 
 ## 004 status
 Slices D + E code-complete + verified on both surfaces. Remaining are environment/
