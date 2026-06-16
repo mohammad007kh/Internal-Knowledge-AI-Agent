@@ -95,8 +95,11 @@ shipped in the supervisor's serial order (A independent; then C → D → B):
 Drill applied per fix + a final code-reviewer + ui-ux pass on the batch (source-embedded).
 NOTE: 007 sub-agent reads are unreliable on this host (it fabricated against nonexistent
 files — discarded); the Rule-2 security posture is unchanged from the prior verified passes.
-Known unrelated PRE-EXISTING failure: `DataTab.relabel.test` (SchemaViewer mount) — fails
-identically before these fixes; tracked separately.
+Pre-existing `DataTab.relabel.test` failure — FIXED (`76dbe97f`): the U7 "mounts the
+SchemaViewer" case asserted stale empty-state copy (`/Schema not yet documented/i`, a string
+that only ever lived as the `SchemaNotDocumentedError` message, never rendered). Narrowed it
+to the testid-presence mount contract; full empty-state copy is owned by
+`_components/__tests__/SchemaViewer.test.tsx`.
 
 ## 004 status
 Slices D + E code-complete + verified on both surfaces. Remaining are environment/
