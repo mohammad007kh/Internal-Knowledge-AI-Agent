@@ -12,13 +12,9 @@
  * persistent chat, so behavior on `delta` / `error` / `clarification` /
  * `done` matches what users see in production.
  */
-import { ActivityAccordion } from '@/components/chat/ActivityAccordion'
-import { BudgetFooter } from '@/components/chat/BudgetFooter'
+import { AgenticTurnFooter } from '@/components/chat/AgenticTurnFooter'
 import { DetailPanel, type PanelContent } from '@/components/chat/CitationPanel'
-import {
-  ContinueSearchAffordance,
-  KEEP_SEARCHING_PROMPT,
-} from '@/components/chat/ContinueSearchAffordance'
+import { KEEP_SEARCHING_PROMPT } from '@/components/chat/ContinueSearchAffordance'
 import { StatusLine } from '@/components/chat/StatusLine'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
@@ -462,13 +458,6 @@ function SandboxBubble({
   onLeaveBudget,
 }: SandboxBubbleProps) {
   const isUser = message.role === 'user'
-  const turnBudget = message.activity ? selectLatestBudget(message.activity) : null
-  const showContinue =
-    !isUser &&
-    isLastAssistant &&
-    !isStreaming &&
-    !continueDismissed &&
-    (turnBudget?.offerContinue ?? false)
   return (
     <div className={cn('flex items-start gap-3', isUser && 'flex-row-reverse')}>
       <div
@@ -491,23 +480,17 @@ function SandboxBubble({
         )}
       >
         <p className="whitespace-pre-wrap break-words text-sm">{message.content}</p>
-        {/* Layer-2 activity accordion for a finished agentic sandbox turn. */}
-        {!isUser && message.activity && message.activity.entries.length > 0 && (
-          <>
-            <ActivityAccordion
-              activity={message.activity}
-              mode="live"
-              onStepSelect={(step) => onInspectStep?.(step)}
-            />
-            <BudgetFooter budget={turnBudget} />
-            {showContinue && (
-              <ContinueSearchAffordance
-                className="mt-2.5"
-                onSearchAgain={() => onSearchAgain?.()}
-                onLeave={() => onLeaveBudget?.()}
-              />
-            )}
-          </>
+        {/* Layer-2 finished-turn footer — shared with the main chat (Fix C). */}
+        {!isUser && message.activity && (
+          <AgenticTurnFooter
+            activity={message.activity}
+            isLastAssistant={isLastAssistant}
+            isStreaming={isStreaming}
+            continueDismissed={continueDismissed}
+            onInspectStep={(step) => onInspectStep?.(step)}
+            onSearchAgain={() => onSearchAgain?.()}
+            onLeaveBudget={() => onLeaveBudget?.()}
+          />
         )}
       </div>
     </div>

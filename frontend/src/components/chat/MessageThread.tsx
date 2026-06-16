@@ -13,10 +13,9 @@ import { useQuery } from '@tanstack/react-query'
 import { BotIcon, CopyIcon, InfoIcon, SparklesIcon, UserIcon } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { toast } from 'sonner'
-import { ActivityAccordion } from './ActivityAccordion'
-import { BudgetFooter } from './BudgetFooter'
+import { AgenticTurnFooter } from './AgenticTurnFooter'
 import { DetailPanel, type PanelContent } from './CitationPanel'
-import { ContinueSearchAffordance, KEEP_SEARCHING_PROMPT } from './ContinueSearchAffordance'
+import { KEEP_SEARCHING_PROMPT } from './ContinueSearchAffordance'
 import { FeedbackButtons } from './FeedbackButtons'
 import { MarkdownLite } from './MarkdownLite'
 import { StatusLine } from './StatusLine'
@@ -344,15 +343,6 @@ function MessageBubble({
 }: MessageBubbleProps) {
   const isUser = message.role === 'user'
   const isFallback = !isUser && isFallbackReply(message.content)
-  const turnBudget = activitySnapshot ? selectLatestBudget(activitySnapshot) : null
-  // Offer "Search again" only on the live edge: the most recent assistant turn,
-  // when the agent offered to continue, not yet dismissed, and nothing streaming.
-  const showContinue =
-    !isUser &&
-    isLastAssistant &&
-    !isStreaming &&
-    !continueDismissed &&
-    (turnBudget?.offerContinue ?? false)
 
   const handleCopy = () => {
     navigator.clipboard
@@ -425,28 +415,18 @@ function MessageBubble({
           </div>
         )}
 
-        {/* Layer-2: collapsed-by-default activity accordion for this finished
-            agentic turn (T-072/T-073). Only present when a snapshot exists
-            (agentic activity occurred this session). */}
-        {!isUser && activitySnapshot && activitySnapshot.entries.length > 0 && (
-          <>
-            <ActivityAccordion
-              activity={activitySnapshot}
-              mode="live"
-              onStepSelect={(step) => onInspectStep?.(step)}
-            />
-            {/* Quiet cost / over-ceiling footnote (T-074) — renders only when the
-                research ceiling was actually hit. */}
-            <BudgetFooter budget={turnBudget} />
-            {/* Honest "take another pass?" affordance (T-075) — live edge only. */}
-            {showContinue && (
-              <ContinueSearchAffordance
-                className="mt-2.5"
-                onSearchAgain={() => onSearchAgain?.()}
-                onLeave={() => onLeaveBudget?.()}
-              />
-            )}
-          </>
+        {/* Layer-2 finished-turn footer (accordion + budget + continue affordance).
+            Shared with the admin sandbox via AgenticTurnFooter (004 review: Fix C). */}
+        {!isUser && activitySnapshot && (
+          <AgenticTurnFooter
+            activity={activitySnapshot}
+            isLastAssistant={isLastAssistant}
+            isStreaming={isStreaming}
+            continueDismissed={continueDismissed}
+            onInspectStep={(step) => onInspectStep?.(step)}
+            onSearchAgain={() => onSearchAgain?.()}
+            onLeaveBudget={() => onLeaveBudget?.()}
+          />
         )}
 
         {/* Bottom meta row: timestamp + (assistant only) feedback + copy.
