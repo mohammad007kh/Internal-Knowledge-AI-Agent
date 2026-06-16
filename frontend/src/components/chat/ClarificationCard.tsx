@@ -32,6 +32,8 @@ interface ClarificationCardProps {
   disabled?: boolean
   /** Reset the free-text escape hatch across clarification rounds. */
   resetKey?: string | number
+  /** Extra classes on the card root (e.g. the consumer's own margin). */
+  className?: string
 }
 
 /**
@@ -48,6 +50,7 @@ export function ClarificationCard({
   onDismiss,
   disabled = false,
   resetKey,
+  className,
 }: ClarificationCardProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const hasOptions = !!options && options.length > 0
@@ -99,7 +102,7 @@ export function ClarificationCard({
       role="region"
       aria-label="Clarification needed"
       aria-live="polite"
-      className="mx-4 mb-2 rounded-xl border border-border bg-muted/40 p-3"
+      className={cn('mb-2 rounded-xl border border-border bg-muted/40 p-3', className)}
     >
       <div className="mb-2 flex items-start justify-between gap-2">
         <p className="flex items-start gap-2 text-sm text-foreground">

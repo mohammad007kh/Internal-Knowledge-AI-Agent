@@ -120,6 +120,7 @@ export function ChatLayout({ sessionId: propSessionId }: ChatLayoutProps = {}) {
       )}
       {clarification && (
         <ClarificationCard
+          className="mx-4"
           question={clarification.question}
           options={clarification.options ?? undefined}
           allowFreeText={clarification.allowFreeText}
