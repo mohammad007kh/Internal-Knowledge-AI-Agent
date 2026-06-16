@@ -47,7 +47,7 @@ export function AgenticTurnFooter({
 
   return (
     <>
-      <ActivityAccordion activity={activity} mode="live" onStepSelect={onInspectStep} />
+      <ActivityAccordion activity={activity} onStepSelect={onInspectStep} />
       {/* Quiet cost / over-ceiling footnote — renders only when the ceiling was hit. */}
       <BudgetFooter budget={turnBudget} />
       {/* Honest "take another pass?" affordance — live edge only. */}

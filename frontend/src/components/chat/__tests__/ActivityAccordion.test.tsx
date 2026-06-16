@@ -83,20 +83,12 @@ describe('ActivityAccordion', () => {
     expect(screen.getAllByText('Read the policy').length).toBeGreaterThanOrEqual(1)
   })
 
-  it('calls onStepSelect when a step row is clicked in live mode', async () => {
+  it('calls onStepSelect when a step row is clicked', async () => {
     const onStepSelect = vi.fn()
-    render(<ActivityAccordion activity={TWO_STEP_RUN} onStepSelect={onStepSelect} mode="live" />)
+    render(<ActivityAccordion activity={TWO_STEP_RUN} onStepSelect={onStepSelect} />)
     await userEvent.click(screen.getByRole('button', { name: /agent activity/i }))
     await userEvent.click(screen.getByRole('button', { name: /open source for: read the policy/i }))
     expect(onStepSelect).toHaveBeenCalledWith(expect.objectContaining({ stepId: 's1' }))
-  })
-
-  it('disables step rows in review mode (no slide-over)', async () => {
-    const onStepSelect = vi.fn()
-    render(<ActivityAccordion activity={TWO_STEP_RUN} onStepSelect={onStepSelect} mode="review" />)
-    await userEvent.click(screen.getByRole('button', { name: /agent activity/i }))
-    const rows = screen.getAllByRole('button', { name: /Read the policy|view unavailable/i })
-    for (const row of rows) expect(row).toBeDisabled()
   })
 
   it('renders nothing for an empty activity log', () => {

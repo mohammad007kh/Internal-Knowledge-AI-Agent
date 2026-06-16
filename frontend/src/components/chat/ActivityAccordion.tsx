@@ -17,12 +17,8 @@ import { ROLE_ICON, ROLE_LABEL } from './agent-roles'
 
 interface ActivityAccordionProps {
   activity: ActivityState
-  /** Open a step's payload in the slide-over (live mode only). */
+  /** Open a step's payload in the slide-over. */
   onStepSelect: (step: StepActivityEntry) => void
-  /** `live` = same-turn (rows clickable); `review` = reload (rows disabled). */
-  mode?: 'live' | 'review'
-  /** Whether a clarification occurred this turn (PlanCard FR-008 visibility). */
-  hadClarification?: boolean
 }
 
 /**
@@ -33,12 +29,7 @@ interface ActivityAccordionProps {
  * with hand-off connectors. An amber dot bubbles to the collapsed header on
  * trouble (retry/fail); colour is paired with an sr-only equivalent.
  */
-export function ActivityAccordion({
-  activity,
-  onStepSelect,
-  mode = 'live',
-  hadClarification = false,
-}: ActivityAccordionProps) {
+export function ActivityAccordion({ activity, onStepSelect }: ActivityAccordionProps) {
   const [open, setOpen] = useState(false)
   const panelId = useId()
   const btnId = useId()
@@ -58,9 +49,7 @@ export function ActivityAccordion({
   // Nothing happened (no plan, no steps) → render nothing at all.
   if (entries.length === 0) return null
 
-  const showPlan = activity.activePlan
-    ? shouldRenderPlanCard(activity.activePlan, hadClarification)
-    : false
+  const showPlan = activity.activePlan ? shouldRenderPlanCard(activity.activePlan) : false
 
   return (
     <div className="mt-2">
@@ -112,13 +101,12 @@ export function ActivityAccordion({
                 supersededPlan={activity.supersededPlan}
                 replanReason={activity.replanReason}
                 stepStates={stepStates}
-                hadClarification={hadClarification}
               />
             )}
             {runs.map((run, i) => (
               <div key={`${run.role}-${run.steps[0].stepId}`}>
                 {i > 0 && <Handoff from={runs[i - 1].role} to={run.role} />}
-                <RoleSection run={run} mode={mode} onStepSelect={onStepSelect} />
+                <RoleSection run={run} onStepSelect={onStepSelect} />
               </div>
             ))}
           </>
@@ -141,13 +129,11 @@ function Handoff({ from, to }: { from: StepRun['role']; to: StepRun['role'] }) {
 
 interface RoleSectionProps {
   run: StepRun
-  mode: 'live' | 'review'
   onStepSelect: (step: StepActivityEntry) => void
 }
 
-function RoleSection({ run, mode, onStepSelect }: RoleSectionProps) {
+function RoleSection({ run, onStepSelect }: RoleSectionProps) {
   const RoleGlyph = ROLE_ICON[run.role]
-  const isReview = mode === 'review'
   return (
     <section aria-label={`${ROLE_LABEL[run.role]} activity`} className="agent-block-in">
       <h4 className="flex items-center gap-1.5 text-xs font-medium text-foreground">
@@ -159,18 +145,12 @@ function RoleSection({ run, mode, onStepSelect }: RoleSectionProps) {
           <button
             key={step.stepId}
             type="button"
-            disabled={isReview}
             onClick={() => onStepSelect(step)}
-            aria-label={
-              isReview
-                ? `${step.label} (source view unavailable in review)`
-                : `Open source for: ${step.label}`
-            }
+            aria-label={`Open source for: ${step.label}`}
             className={cn(
               'flex min-h-[44px] w-full items-center gap-1.5 rounded px-1.5 py-2 text-left text-xs text-muted-foreground',
               'transition-colors duration-150 hover:bg-muted/60 hover:text-foreground motion-reduce:transition-none',
-              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-              'disabled:cursor-default disabled:hover:bg-transparent disabled:hover:text-muted-foreground'
+              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring'
             )}
           >
             <StepStatusBadge state={step.state} />

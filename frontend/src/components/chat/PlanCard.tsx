@@ -4,11 +4,17 @@ import { type StepDisplayState, StepStatusBadge } from './StepStatusBadge'
 
 /**
  * FR-008 visibility rule: a plan card is shown ONLY when it carries signal —
- * a multi-step plan, OR a revised plan, OR after a clarification. A trivial
- * 1-step plan surfaces via the status line alone (no card).
+ * a multi-step plan OR a revised plan. A trivial 1-step plan surfaces via the
+ * status line alone (no card).
+ *
+ * NOTE (004 review): a `hadClarification` term was specced to also force the card
+ * for a 1-step plan reached via a clarification, but it required cross-turn state
+ * the chat doesn't carry and was never wired (always false). Removed as dead per
+ * the supervisor; re-add with a real cross-turn clarification signal if FR-008's
+ * clarification path is implemented. See specs/004 traceability.
  */
-export function shouldRenderPlanCard(plan: PlanActivityEntry, hadClarification: boolean): boolean {
-  return plan.steps.length >= 2 || plan.revision >= 1 || hadClarification
+export function shouldRenderPlanCard(plan: PlanActivityEntry): boolean {
+  return plan.steps.length >= 2 || plan.revision >= 1
 }
 
 interface PlanCardProps {
@@ -17,7 +23,6 @@ interface PlanCardProps {
   replanReason: string | null
   /** Latest state per step id (from `selectStepStates`); missing → pending. */
   stepStates: Record<string, StepState>
-  hadClarification?: boolean
 }
 
 /**
@@ -26,14 +31,8 @@ interface PlanCardProps {
  * a one-line `↻ Plan updated — {reason}` note and collapses the superseded plan
  * behind a disclosure — NO strikethrough diff.
  */
-export function PlanCard({
-  activePlan,
-  supersededPlan,
-  replanReason,
-  stepStates,
-  hadClarification = false,
-}: PlanCardProps) {
-  if (!activePlan || !shouldRenderPlanCard(activePlan, hadClarification)) return null
+export function PlanCard({ activePlan, supersededPlan, replanReason, stepStates }: PlanCardProps) {
+  if (!activePlan || !shouldRenderPlanCard(activePlan)) return null
 
   const tickState = (id: string): StepDisplayState => stepStates[id] ?? 'pending'
 

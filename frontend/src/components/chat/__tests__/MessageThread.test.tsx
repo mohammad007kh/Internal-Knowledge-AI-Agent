@@ -96,8 +96,11 @@ test('shows pulsing dots when isPending and !isStreaming and !streamingToken', a
   render(<MessageThread sessionId="s1" isPending />, { wrapper })
   // Wait for the initial messages query to settle so the thread renders, then
   // assert the thinking-dots placeholder bubble is in the document.
-  expect(await screen.findByTestId('thinking-dots')).toBeInTheDocument()
+  const dots = await screen.findByTestId('thinking-dots')
+  expect(dots).toBeInTheDocument()
   expect(screen.getByLabelText(/assistant is thinking/i)).toBeInTheDocument()
+  // Dots respect prefers-reduced-motion (WCAG 2.3.3), matching StatusLine.
+  expect(dots.innerHTML).toMatch(/motion-reduce:animate-none/)
 })
 
 // --- T-077 in-flight Layer-1 wiring + flag-off regression ---

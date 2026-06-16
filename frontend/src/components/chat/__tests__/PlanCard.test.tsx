@@ -16,17 +16,14 @@ function plan(
 }
 
 describe('shouldRenderPlanCard (FR-008 visibility rule)', () => {
-  it('is false for a 1-step, revision-0 plan with no clarification', () => {
-    expect(shouldRenderPlanCard(plan([planStep('s1')]), false)).toBe(false)
+  it('is false for a 1-step, revision-0 plan', () => {
+    expect(shouldRenderPlanCard(plan([planStep('s1')]))).toBe(false)
   })
   it('is true for a >=2-step plan', () => {
-    expect(shouldRenderPlanCard(plan([planStep('s1'), planStep('s2')]), false)).toBe(true)
+    expect(shouldRenderPlanCard(plan([planStep('s1'), planStep('s2')]))).toBe(true)
   })
   it('is true for a 1-step plan at revision >= 1', () => {
-    expect(shouldRenderPlanCard(plan([planStep('s1')], 1), false)).toBe(true)
-  })
-  it('is true for a 1-step plan when a clarification occurred', () => {
-    expect(shouldRenderPlanCard(plan([planStep('s1')]), true)).toBe(true)
+    expect(shouldRenderPlanCard(plan([planStep('s1')], 1))).toBe(true)
   })
 })
 

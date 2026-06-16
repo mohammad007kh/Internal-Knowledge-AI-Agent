@@ -8,20 +8,14 @@ function budget(overrides: Partial<BudgetActivityEntry> = {}): BudgetActivityEnt
 }
 
 describe('BudgetFooter', () => {
-  it('renders nothing within budget and with no cost note', () => {
+  it('renders nothing within budget', () => {
     const { container } = render(<BudgetFooter budget={budget()} />)
     expect(container.firstChild).toBeNull()
   })
 
-  it('renders nothing when budget is null and no cost note', () => {
+  it('renders nothing when budget is null', () => {
     const { container } = render(<BudgetFooter budget={null} />)
     expect(container.firstChild).toBeNull()
-  })
-
-  it('shows a quiet cost note when provided (no colour)', () => {
-    const { container } = render(<BudgetFooter budget={budget()} costNote="Reviewed 4 sources" />)
-    expect(screen.getByText(/reviewed 4 sources/i)).toBeInTheDocument()
-    expect(container.innerHTML).not.toMatch(/amber|text-red|bg-red/)
   })
 
   it('shows an amber-scoped research-limit note when the ceiling was hit', () => {

@@ -310,16 +310,16 @@ function TestTabBody({ source }: TestTabBodyProps) {
                     data-testid="sandbox-thinking"
                   >
                     <span
-                      className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-foreground/40"
+                      className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-foreground/40 motion-reduce:animate-none"
                       aria-hidden
                     />
                     <span
-                      className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-foreground/40"
+                      className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-foreground/40 motion-reduce:animate-none"
                       style={{ animationDelay: '150ms' }}
                       aria-hidden
                     />
                     <span
-                      className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-foreground/40"
+                      className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-foreground/40 motion-reduce:animate-none"
                       style={{ animationDelay: '300ms' }}
                       aria-hidden
                     />
