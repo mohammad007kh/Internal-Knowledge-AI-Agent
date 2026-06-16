@@ -1,8 +1,9 @@
 import type { StepActivityEntry } from '@/lib/sse/agent-events'
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { useState } from 'react'
 import { vi } from 'vitest'
-import { CitationPanel, DetailPanel } from '../CitationPanel'
+import { CitationPanel, DetailPanel, type PanelContent } from '../CitationPanel'
 
 const citation = {
   id: 'c1',
@@ -83,4 +84,25 @@ test('DetailPanel shows a fallback when a step has no summary', () => {
 test('DetailPanel renders a citation via the discriminated union', () => {
   render(<DetailPanel content={{ kind: 'citation', citation }} onClose={vi.fn()} />)
   expect(screen.getByText('Architecture Overview')).toBeInTheDocument()
+})
+
+test('DetailPanel restores focus to the trigger when closed (non-modal a11y)', async () => {
+  function Harness() {
+    const [open, setOpen] = useState(false)
+    const content: PanelContent | null = open ? { kind: 'step', step } : null
+    return (
+      <>
+        <button type="button" onClick={() => setOpen(true)}>
+          open detail
+        </button>
+        <DetailPanel content={content} onClose={() => setOpen(false)} />
+      </>
+    )
+  }
+  render(<Harness />)
+  const trigger = screen.getByRole('button', { name: /open detail/i })
+  await userEvent.click(trigger) // opens → focus moves to the panel's close button
+  expect(trigger).not.toHaveFocus()
+  await userEvent.keyboard('{Escape}') // closes
+  expect(trigger).toHaveFocus() // focus returned to the trigger, not dropped to body
 })

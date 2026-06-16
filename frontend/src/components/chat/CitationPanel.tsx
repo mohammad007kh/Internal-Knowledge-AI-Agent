@@ -35,10 +35,26 @@ interface DetailPanelProps {
  */
 export function DetailPanel({ content, onClose }: DetailPanelProps) {
   const closeRef = useRef<HTMLButtonElement>(null)
+  // Remember the element that opened the panel so focus returns there on close
+  // (WCAG 2.4.3). NON-modal by design — we don't trap focus or inert the chat;
+  // the user reads detail alongside the live conversation.
+  const triggerRef = useRef<HTMLElement | null>(null)
+  const wasOpen = useRef(false)
 
-  // Focus close button when opened.
   useEffect(() => {
-    if (content) closeRef.current?.focus()
+    const open = content !== null
+    if (open && !wasOpen.current) {
+      // Capture the trigger BEFORE we move focus to the close button.
+      const active = document.activeElement
+      triggerRef.current = active instanceof HTMLElement ? active : null
+      closeRef.current?.focus()
+    } else if (!open && wasOpen.current) {
+      // Restore focus to the trigger if it's still in the DOM.
+      const trigger = triggerRef.current
+      if (trigger?.isConnected) trigger.focus()
+      triggerRef.current = null
+    }
+    wasOpen.current = open
   }, [content])
 
   // Close on Escape.
