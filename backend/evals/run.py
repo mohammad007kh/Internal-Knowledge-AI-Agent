@@ -709,7 +709,18 @@ async def _run_with_real_wiring(args: argparse.Namespace) -> RunReport:
     await _ensure_eval_owner(_EVAL_OWNER_ID)
 
     async with AsyncSessionLocal() as session:
-        compiled_graph = container.pipeline()
+        # P1 (T-090): the agentic graph is built ONLY when the pipeline builder
+        # is asked with sandbox=True (see src.agent.pipeline.build_pipeline gate:
+        # PIPELINE_AGENTIC_ENABLED AND sandbox AND source_repository). The plain
+        # ``container.pipeline()`` provider wires sandbox=False, so it ALWAYS
+        # returns v2 — evaluating "agentic" against it would silently grade
+        # v2-vs-v2. Resolve the sandbox-first ``agentic_pipeline`` provider for
+        # the agentic run; the baseline keeps the non-sandbox v2 provider.
+        compiled_graph = (
+            container.agentic_pipeline()
+            if args.pipeline == "agentic"
+            else container.pipeline()
+        )
 
         async def _pipeline_with_session(**kwargs: Any) -> dict[str, Any]:
             """Wrap run_pipeline to pre-create the chat_session FK row."""
