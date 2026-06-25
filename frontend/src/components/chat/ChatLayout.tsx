@@ -51,6 +51,7 @@ export function ChatLayout({ sessionId: propSessionId }: ChatLayoutProps = {}) {
     dismissGuardrail,
     activityLog,
     lastMessageId,
+    resetLazyCreate,
   } = useChat({ sessionId })
 
   // U15 lazy creation: `send` is now safe to call with a null `sessionId`.
@@ -73,8 +74,13 @@ export function ChatLayout({ sessionId: propSessionId }: ChatLayoutProps = {}) {
   // entry between the previously-selected chat and the next one created
   // on first send.
   const handleStartNewChat = useCallback(() => {
+    // Clear any lazy-create pin first: if the prior turn created a session but
+    // never navigated (a clarification/guardrail/error first turn stays on
+    // `/chat`), the pin would otherwise route this brand-new chat's first
+    // message into that old session.
+    resetLazyCreate()
     setSessionId(null, { replace: true })
-  }, [setSessionId])
+  }, [setSessionId, resetLazyCreate])
 
   // First-time canvas: replace the muted "Select or create a session" line
   // with a centered hero + prominent primary CTA so new users have an

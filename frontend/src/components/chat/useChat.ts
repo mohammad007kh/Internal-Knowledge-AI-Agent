@@ -54,6 +54,14 @@ export interface UseChatReturn {
    */
   send: (text: string, overrideSessionId?: string) => void
   abort: () => void
+  /**
+   * Clear the lazy-create target pinned by a prior `session_created`. Call this
+   * when the user explicitly starts a NEW chat, so the next first message mints
+   * a fresh session instead of continuing one created by an earlier
+   * non-navigating turn (clarification/guardrail/error) whose URL never
+   * advanced past `/chat`.
+   */
+  resetLazyCreate: () => void
   isPending: boolean
   /**
    * True only during the U15 lazy-create window: from the moment a send with
@@ -135,18 +143,21 @@ export function useChat({ sessionId }: { sessionId: string | null }): UseChatRet
       // session id, target the `'new'` sentinel. The backend will create
       // the row inline and announce its real UUID via `event: session_created`,
       // which we wire through `lastCreatedSessionId` below.
-      const resolvedSessionId = overrideSessionId ?? sessionId
+      // Resolve the send target. Fall back to the id pinned by a prior
+      // `session_created` (lastSessionIdRef) BEFORE the `'new'` sentinel:
+      // navigation is now deferred until stream-end, so during that window the
+      // `sessionId` prop is still null even though the session already exists.
+      // Without this fallback a fast second send (or a Retry after a first-turn
+      // clarification/guardrail/error) would hit the sentinel again and create
+      // a second orphan session. If the session_created frame hasn't landed yet
+      // (lastSessionIdRef still null), this correctly falls through to the
+      // sentinel — the intended "first attempt died, retry the whole turn".
+      const resolvedSessionId = overrideSessionId ?? sessionId ?? lastSessionIdRef.current
       const targetSessionId = resolvedSessionId ?? NEW_SESSION_SENTINEL
       lastQueryRef.current = trimmed
-      // For lazy-create sends, `resolvedSessionId` is null. If the user
-      // hits Retry BEFORE the `event: session_created` frame lands, we
-      // fall through to undefined → the retry uses the closure's
-      // (still-null) `sessionId` and ends up targeting the sentinel
-      // again, which is exactly the "the first attempt died, try the
-      // whole turn again" semantics we want. After the SSE handler
-      // below pins the freshly-minted id into this ref, subsequent
-      // retries target the real session.
-      lastSessionIdRef.current = resolvedSessionId ?? null
+      // Never clobber a real pinned id back to null (keeps retry/second-send
+      // targeting the real session).
+      lastSessionIdRef.current = resolvedSessionId ?? lastSessionIdRef.current
 
       // Clear any stale optimistic bubble from a previous in-flight send
       // so a rapid second send does not leave a ghost bubble behind.
@@ -212,6 +223,16 @@ export function useChat({ sessionId }: { sessionId: string | null }): UseChatRet
   useEffect(() => {
     sendRef.current = send
   }, [send])
+
+  // Explicit "start a new chat" reset. The `send()` fallback resolves the
+  // target as `overrideSessionId ?? sessionId ?? lastSessionIdRef.current`, so
+  // a pin left over from a prior non-navigating turn would route a brand-new
+  // chat into that old session. Clearing the pin (and the handled-message
+  // guard) here makes the next first message a genuine lazy-create.
+  const resetLazyCreate = useCallback(() => {
+    lastSessionIdRef.current = null
+    lastHandledMessageIdRef.current = null
+  }, [])
 
   const abort = useCallback(() => {
     stream.abortStream()
@@ -385,11 +406,17 @@ export function useChat({ sessionId }: { sessionId: string | null }): UseChatRet
   useEffect(() => {
     const newId = stream.lastCreatedSessionId
     if (!newId) return
-    // 1. Swap the URL so refresh works. `replace`, not `push`, so Back
-    //    doesn't return to the intermediate `/chat` empty state.
-    setSessionId(newId, { replace: true })
-    // 2. Pin the retry target to the real id so re-sends don't hit the
-    //    sentinel a second time (which would create yet another row).
+    // Pin the retry target to the real id so re-sends (and the deferred
+    // navigation effect below) hit the freshly-created session, never the
+    // `'new'` sentinel a second time (which would create another orphan row).
+    //
+    // NOTE: navigation (`setSessionId` → router.replace) is intentionally NOT
+    // done here. The backend emits `session_created` as the FIRST SSE frame,
+    // and navigating to the `/chat/[id]` route segment now would unmount the
+    // `<ChatLayout>` that OWNS this in-flight stream — its unmount cleanup
+    // aborts the fetch and the assistant answer never arrives. Navigation is
+    // deferred to the stream-end effect below, once the AbortController has
+    // settled, so the remount is harmless.
     lastSessionIdRef.current = newId
     // Real id has landed — release the lazy-create gate so the next Enter
     // targets the real session via `lastSessionIdRef`, not the sentinel.
@@ -431,7 +458,35 @@ export function useChat({ sessionId }: { sessionId: string | null }): UseChatRet
         total: prev.total + 1,
       }
     })
-  }, [stream.lastCreatedSessionId, queryClient, setSessionId])
+  }, [stream.lastCreatedSessionId, queryClient])
+
+  // Deferred lazy-create navigation (the fix for the stream-abort bug above).
+  // Wait until the stream has ENDED (isStreaming true→false) AND a real `done`
+  // landed (lastMessageId) before swapping `/chat` → `/chat/[id]`. By then the
+  // stream reader has exited and `useChatStream`'s AbortController has been
+  // nulled in its `finally`, so the route remount can't abort anything.
+  //
+  // Gating on `lastMessageId` (a clean `done`) deliberately means a first-turn
+  // clarification / guardrail / error does NOT navigate — its transient card
+  // lives in this component instance and would be lost on remount. Those paths
+  // stay on `/chat`; orphan safety is handled by the `lastSessionIdRef`
+  // fallback in `send()`, and the URL advances on the next completed turn.
+  const prevStreamingForNavRef = useRef(false)
+  useEffect(() => {
+    const wasStreaming = prevStreamingForNavRef.current
+    prevStreamingForNavRef.current = stream.isStreaming
+    if (!(wasStreaming && !stream.isStreaming)) return
+    const newId = stream.lastCreatedSessionId
+    if (!newId || newId === sessionId) return
+    if (!stream.lastMessageId) return
+    setSessionId(newId, { replace: true })
+  }, [
+    stream.isStreaming,
+    stream.lastCreatedSessionId,
+    stream.lastMessageId,
+    sessionId,
+    setSessionId,
+  ])
 
   // Auto-titling: when the backend emits an SSE `title` frame on the first
   // user turn, optimistically patch the chat-sessions list cache so the
@@ -470,6 +525,7 @@ export function useChat({ sessionId }: { sessionId: string | null }): UseChatRet
   return {
     send,
     abort,
+    resetLazyCreate,
     isPending,
     isPendingNewSession,
     streamingToken: stream.currentResponse,

@@ -8,6 +8,19 @@ vi.mock('sonner', () => ({
   toast: { error: vi.fn() },
 }))
 
+// Spy on the session-selection context so we can assert WHEN navigation
+// (setSessionId → router.replace) fires. The real default context is a no-op,
+// which is why the lazy-create stream-abort bug was invisible to these tests.
+const { setSessionIdSpy } = vi.hoisted(() => ({ setSessionIdSpy: vi.fn() }))
+vi.mock('../SelectedSessionContext', () => ({
+  useSelectedSession: () => ({
+    sessionId: null,
+    setSessionId: setSessionIdSpy,
+    registerAbortStream: () => () => {},
+    abortStream: () => {},
+  }),
+}))
+
 function makeStream(chunks: string[]): ReadableStream<Uint8Array> {
   const encoder = new TextEncoder()
   return new ReadableStream({
@@ -65,6 +78,120 @@ function makeWrapperWithClient(client: QueryClient) {
 describe('useChat', () => {
   afterEach(() => {
     vi.restoreAllMocks()
+    setSessionIdSpy.mockClear()
+  })
+
+  // Regression (lazy-create stream abort): the backend emits `session_created`
+  // as the FIRST SSE frame. If the hook navigates (`setSessionId` → router.replace
+  // to the `/chat/[id]` segment) on THAT frame, the `<ChatLayout>` that owns the
+  // stream unmounts mid-stream and its unmount cleanup aborts the in-flight fetch
+  // → the assistant answer never streams. Navigation MUST be deferred until the
+  // stream has finished (a real `done`), by which point the AbortController is
+  // already settled so the remount is harmless.
+  it('does NOT navigate on session_created; navigates only after `done` (lazy-create stream-abort fix)', async () => {
+    const pending = makePendingStream()
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, body: pending.body }))
+
+    const { result } = renderHook(() => useChat({ sessionId: null }), {
+      wrapper: makeWrapperWithClient(
+        new QueryClient({ defaultOptions: { queries: { retry: false } } })
+      ),
+    })
+
+    await act(async () => {
+      result.current.send('Hello world')
+    })
+
+    // session_created arrives FIRST — navigation must NOT fire yet (stream is live).
+    await act(async () => {
+      pending.push('event: session_created\ndata: {"session_id":"new-id-1"}\n\n')
+    })
+    expect(setSessionIdSpy).not.toHaveBeenCalled()
+
+    // Tokens stream in — still no navigation.
+    await act(async () => {
+      pending.push('event: delta\ndata: {"token":"Hi"}\n\n')
+    })
+    expect(setSessionIdSpy).not.toHaveBeenCalled()
+
+    // `done` lands and the stream closes — NOW navigation fires (controller settled).
+    await act(async () => {
+      pending.push('event: done\ndata: {"message_id":"m1"}\n\n')
+      pending.close()
+    })
+    await waitFor(() => {
+      expect(setSessionIdSpy).toHaveBeenCalledWith('new-id-1', { replace: true })
+    })
+  })
+
+  // Orphan-session safety: while the URL still reads `/chat` (navigation deferred),
+  // a SECOND send must target the freshly-minted id pinned on `session_created`,
+  // NOT the `'new'` sentinel again (which would create a second orphan session).
+  it('targets the real id (not the `new` sentinel) on a second send after session_created', async () => {
+    const pending = makePendingStream()
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, body: pending.body })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const { result } = renderHook(() => useChat({ sessionId: null }), {
+      wrapper: makeWrapperWithClient(
+        new QueryClient({ defaultOptions: { queries: { retry: false } } })
+      ),
+    })
+
+    await act(async () => {
+      result.current.send('first')
+    })
+    expect(fetchMock.mock.calls[0]?.[0]).toMatch(/\/sessions\/new\/messages$/)
+
+    // Real id announced (but navigation deferred — URL/prop still null).
+    await act(async () => {
+      pending.push('event: session_created\ndata: {"session_id":"real-id-9"}\n\n')
+    })
+
+    // A second send (e.g. fast follow-up / retry) must hit the real session.
+    await act(async () => {
+      result.current.send('second')
+    })
+    expect(fetchMock.mock.calls[1]?.[0]).toMatch(/\/sessions\/real-id-9\/messages$/)
+  })
+
+  // Regression (HIGH, caught in review): after a first turn that ends in a
+  // NON-navigating terminal (clarification/guardrail/error → stays on `/chat`),
+  // the lazy-create pin still points at the just-created session. Starting a
+  // fresh chat must clear that pin, or the next first message silently posts
+  // into the previous (abandoned) session.
+  it('clears the lazy-create pin on explicit new-chat so a fresh chat is not routed to the prior session', async () => {
+    const pending = makePendingStream()
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, body: pending.body })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const { result } = renderHook(() => useChat({ sessionId: null }), {
+      wrapper: makeWrapperWithClient(
+        new QueryClient({ defaultOptions: { queries: { retry: false } } })
+      ),
+    })
+
+    // First turn: session A is created, then the turn ends in a clarification
+    // (no `done` → no navigation → URL stays `/chat`, pin = sess-A).
+    await act(async () => {
+      result.current.send('first')
+    })
+    await act(async () => {
+      pending.push('event: session_created\ndata: {"session_id":"sess-A"}\n\n')
+      pending.push('event: clarification\ndata: {"question":"which source?"}\n\n')
+      pending.close()
+    })
+
+    // User explicitly starts a new chat.
+    await act(async () => {
+      result.current.resetLazyCreate()
+    })
+
+    // The brand-new first message MUST hit the `'new'` sentinel, not sess-A.
+    await act(async () => {
+      result.current.send('totally different topic')
+    })
+    expect(fetchMock.mock.calls.at(-1)?.[0]).toMatch(/\/sessions\/new\/messages$/)
   })
 
   it('sets isStreaming to true after send and false after done event', async () => {
