@@ -390,6 +390,41 @@ async def test_unsupported_dialect_raises_phase_error():
     assert excinfo.value.error_key == "UNSUPPORTED_DIALECT"
 
 
+async def test_phase_connecting_maps_dbconnectionfailed_to_phase_error(
+    monkeypatch,
+):
+    """A categorised DBConnectionFailed from the retry seam becomes a CONNECTING
+    SchemaStudyPhaseError carrying the closed category + honest attempt count."""
+    from src.services.db_introspection import sql_inspector as si
+    from src.services.db_safety.connect_retry import (
+        DBConnectionFailed,
+        DBConnFailureCategory,
+    )
+
+    async def _boom(acquire, **_kwargs):  # noqa: ANN001 - stub
+        raise DBConnectionFailed(
+            DBConnFailureCategory.AUTH_FAILED, attempts_made=1
+        )
+
+    monkeypatch.setattr(si, "connect_with_retry", _boom)
+
+    with pytest.raises(si.SchemaStudyPhaseError) as ei:
+        await si._phase_connecting(engine=object())  # engine unused by the stub
+
+    assert ei.value.phase == "CONNECT"  # CONNECTING -> CONNECT failed-state prefix
+    assert ei.value.error_key == "AUTH_FAILED"
+    assert ei.value.failure_category == "AUTH_FAILED"
+    assert ei.value.attempts_made == 1
+    # The admin-facing message stays generic + credential-free.
+    assert "server logs" in ei.value.message
+    # Pin the FR-020 invariant: the `from None` re-raise suppresses the
+    # exception chain so a downstream logger.warning(exc_info=True) cannot
+    # render the underlying driver exception (a future refactor dropping
+    # `from None` would leak it). The DBConnectionFailed must not be the cause.
+    assert ei.value.__suppress_context__ is True
+    assert ei.value.__cause__ is None
+
+
 # ---------------------------------------------------------------------------
 # Binary/BLOB column handling in SAMPLING
 # ---------------------------------------------------------------------------

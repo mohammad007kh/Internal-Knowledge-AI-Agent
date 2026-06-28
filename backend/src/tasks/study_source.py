@@ -211,10 +211,25 @@ async def _run(source_id: uuid.UUID) -> dict[str, Any]:
         except Exception as exc:  # noqa: BLE001 — terminal: persist + re-raise
             sanitised = _sanitise(str(exc))
             phase = _phase_from_exception(exc)
+            # Connection-failure metadata (set only when the seam classified a
+            # DB connect failure; both fields are paired or both None). Read ONLY
+            # off SchemaStudyPhaseError — the type contractually known to carry
+            # credential-free, enum-derived values — rather than duck-typing an
+            # arbitrary exception that might happen to expose these attrs.
+            from src.services.db_introspection._errors import (  # noqa: PLC0415
+                SchemaStudyPhaseError,
+            )
+
+            failure_category: str | None = None
+            attempts_made: int | None = None
+            if isinstance(exc, SchemaStudyPhaseError):
+                failure_category = exc.failure_category
+                attempts_made = exc.attempts_made
             logger.warning(
-                "study_source: study %s failed at phase=%s",
+                "study_source: study %s failed at phase=%s category=%s",
                 study_id,
                 phase,
+                failure_category,
                 exc_info=True,
             )
             async with AsyncSessionLocal() as fail_session:
@@ -222,7 +237,11 @@ async def _run(source_id: uuid.UUID) -> dict[str, Any]:
                     source_id, "failed"
                 )
                 await SchemaStudyRepository(fail_session).mark_failed(
-                    study_id, phase=phase, message=sanitised
+                    study_id,
+                    phase=phase,
+                    message=sanitised,
+                    failure_category=failure_category,
+                    attempts_made=attempts_made,
                 )
                 await fail_session.commit()
             return {

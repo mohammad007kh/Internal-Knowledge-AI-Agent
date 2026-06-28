@@ -74,6 +74,11 @@ from src.services.db_safety import (
     redact_dsn,
     validate_sql,
 )
+from src.services.db_safety.connect_retry import (
+    BACKGROUND_POLICY,
+    DBConnectionFailed,
+    connect_with_retry,
+)
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from src.services.ai_model_resolver import AIModelResolver
@@ -303,26 +308,31 @@ async def _reflect(engine: AsyncEngine, fn: Any) -> Any:
 
 
 async def _phase_connecting(engine: AsyncEngine) -> None:
-    try:
+    """Open the connection and run ``SELECT 1`` under the shared retry seam.
+
+    Transient connect failures retry with full-jitter backoff under a deadline;
+    permanent ones (auth / permission / db-not-found / TLS) fail fast. On
+    exhaustion the categorised, credential-free :class:`DBConnectionFailed` is
+    mapped to a ``CONNECTING`` :class:`SchemaStudyPhaseError` carrying the closed
+    failure category + the honest attempt count, which the orchestrator persists
+    on the study row.
+    """
+
+    async def _acquire() -> None:
+        # Fresh connection per attempt (the seam re-invokes this). NEVER dispose
+        # the engine here — it is pre-built once and reused by later phases.
         async with engine.connect() as conn:
             await conn.execute(sa.text("SELECT 1"))
-    except Exception as exc:  # noqa: BLE001 - classify + re-raise sanitised
-        message = _sanitise(str(exc)).lower()
-        if "timeout" in message or "timed out" in message:
-            error_key = "CONNECT_TIMEOUT"
-        elif (
-            "password" in message
-            or "authentication" in message
-            or "auth failed" in message
-            or "role" in message
-        ):
-            error_key = "AUTH_FAILED"
-        else:
-            error_key = "CONNECT_REFUSED"
+
+    try:
+        await connect_with_retry(_acquire, policy=BACKGROUND_POLICY)
+    except DBConnectionFailed as exc:
         raise SchemaStudyPhaseError(
             phase="CONNECTING",
-            error_key=error_key,
+            error_key=exc.category.value,
             message="Could not connect to the source database (see server logs).",
+            failure_category=exc.category.value,
+            attempts_made=exc.attempts_made,
         ) from None
 
 

@@ -62,12 +62,30 @@ class SchemaStudyPhaseError(Exception):
     message:
         Admin-readable text.  MUST already be sanitised by the caller —
         no connection strings, no credentials, no PII.
+    failure_category:
+        Optional closed ``DBConnFailureCategory`` token, set only when the
+        failure is a DB *connection* failure surfaced by ``connect_with_retry``.
+        Carried through so the orchestrator can persist it on the study row.
+    attempts_made:
+        Optional honest count of connect attempts the retry seam made (1 for a
+        fail-fast permanent failure). Paired with ``failure_category`` — both
+        set together or both ``None``.
     """
 
-    def __init__(self, *, phase: str, error_key: str, message: str) -> None:
+    def __init__(
+        self,
+        *,
+        phase: str,
+        error_key: str,
+        message: str,
+        failure_category: str | None = None,
+        attempts_made: int | None = None,
+    ) -> None:
         self.phase: str = failed_state_prefix(phase)
         self.error_key: str = error_key
         self.message: str = message
+        self.failure_category: str | None = failure_category
+        self.attempts_made: int | None = attempts_made
         super().__init__(message)
 
     def __repr__(self) -> str:  # pragma: no cover - debugging aid only

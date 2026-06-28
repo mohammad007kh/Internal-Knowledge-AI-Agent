@@ -34,7 +34,6 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from src.models.base import Base, TimestampMixin
 
-
 # ---------------------------------------------------------------------------
 # State / phase string vocabularies
 # ---------------------------------------------------------------------------
@@ -149,6 +148,15 @@ class SchemaStudy(Base, TimestampMixin):
     # --- denormalised last-error for fast triage ---------------------------
     last_error_phase: Mapped[str | None] = mapped_column(String(32), nullable=True)
     last_error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    # --- connection-failure metadata (FR: retry-then-officially-fail) -------
+    # Populated together (or both NULL): set only when the failure is a DB
+    # *connection* failure surfaced by the retry seam. ``failure_category`` is a
+    # closed ``DBConnFailureCategory`` token; ``attempts_made`` is the honest
+    # number of connect attempts (1 for a fail-fast permanent failure). NULL for
+    # non-connection failures (e.g. SAMPLING) and user cancellations.
+    failure_category: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    attempts_made: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
     # --- relationships -----------------------------------------------------
     phases: Mapped[list[SchemaStudyPhase]] = relationship(
