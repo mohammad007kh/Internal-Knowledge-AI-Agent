@@ -323,7 +323,10 @@ async def test_chain_is_severed_no_cause_leak() -> None:
             jitter=lambda c: 0.0,
         )
     # The raw driver exception (which embeds host/port) must NOT ride the chain.
+    # __cause__ AND __context__ must both be clear — a chain-walking serializer
+    # (Langfuse/Sentry) must not be able to recover the DSN off __context__.
     assert ei.value.__cause__ is None
+    assert ei.value.__context__ is None
     assert ei.value.__suppress_context__ is True
     assert "secret-db" not in str(ei.value)
 

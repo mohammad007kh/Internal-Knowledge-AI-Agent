@@ -13,11 +13,22 @@ from src.connectors.base import BaseConnector, Document
 from src.connectors.registry import register
 from src.models.enums import SourceType
 from src.services.db_safety import redact_dsn, validate_sql
+from src.services.db_safety.connect_retry import (
+    BACKGROUND_POLICY,
+    TEST_CONNECTION_POLICY,
+    DBConnectionFailed,
+    connect_with_retry,
+)
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from src.services.db_introspection.schema_doc import SchemaDocument
 
 logger = logging.getLogger(__name__)
+
+# Retry policy for the ingestion connect handshake. Module-level so tests can
+# swap in a fast (1-attempt, no-sleep) policy without real backoff waits.
+# Production uses the background budget (≈3 attempts, full-jitter, ~20s deadline).
+_INGEST_CONNECT_POLICY = BACKGROUND_POLICY
 
 
 # ---------------------------------------------------------------------------
@@ -230,26 +241,49 @@ class SqlDatabaseConnector(BaseConnector):
     async def connect(self) -> None:
         """
         Create an async SQLAlchemy engine and perform a connectivity check.
-        Raises ConnectionError (not the raw driver exception, which may contain
-        the connection string in its message) if the test SELECT 1 fails.
+
+        The handshake runs under :func:`connect_with_retry` (background budget):
+        transient failures retry with full-jitter backoff under a deadline,
+        permanent ones (auth / permission / db-not-found / TLS) fail fast. On
+        exhaustion it raises :class:`DBConnectionFailed` — a ``ConnectionError``
+        subclass whose message is credential-free (it never echoes the raw
+        driver exception, which may contain the connection string).
 
         The engine is read-only-hardened per dialect — see
         :meth:`_build_hardened_engine`.
         """
-        try:
+
+        async def _acquire() -> Any:
+            # Build a fresh engine per attempt; dispose it if THIS attempt's
+            # handshake fails so a retry doesn't leak the pool. Catch
+            # BaseException so a cancellation mid-handshake still disposes.
             engine = await self._build_hardened_engine(
                 pool_size=2, pool_pre_ping=True
             )
-            async with engine.connect() as conn:
-                await conn.execute(sa.text("SELECT 1"))
-        except Exception:
-            # Re-raise a sanitised error — original exc may contain credentials
-            raise ConnectionError(
-                f"Database connection failed for source "
-                f"[conn_hash={self._conn_str_hash}]: see server logs for details"
-            ) from None
+            try:
+                async with engine.connect() as conn:
+                    await conn.execute(sa.text("SELECT 1"))
+            except BaseException:
+                await engine.dispose()
+                raise  # raw exc → seam classifies, then severs it with `from None`
+            return engine
 
-        self._engine = engine
+        try:
+            self._engine = await connect_with_retry(
+                _acquire, policy=_INGEST_CONNECT_POLICY
+            )
+        except DBConnectionFailed as exc:
+            # Credential-free, categorised. Log the conn_hash + category for
+            # operator triage (never the DSN), then propagate (it IS a
+            # ConnectionError, so existing handlers are unaffected).
+            logger.warning(
+                "DatabaseConnector: connect failed [conn_hash=%s] "
+                "category=%s attempts=%d",
+                self._conn_str_hash,
+                exc.category.value,
+                exc.attempts_made,
+            )
+            raise
         logger.info(
             "DatabaseConnector: connected [conn_hash=%s]",
             self._conn_str_hash,
@@ -352,30 +386,31 @@ class SqlDatabaseConnector(BaseConnector):
         statement_timeout; MySQL: ``SET SESSION TRANSACTION READ ONLY`` +
         timeouts; MSSQL: lock-timeout + READ UNCOMMITTED — see that method).
         """
-        try:
+        async def _probe() -> None:
             engine = await self._build_hardened_engine(
                 pool_size=1, pool_pre_ping=False
             )
-            async with engine.connect() as conn:
-                await conn.execute(sa.text("SELECT 1"))
-            await engine.dispose()
+            try:
+                async with engine.connect() as conn:
+                    await conn.execute(sa.text("SELECT 1"))
+            finally:
+                # Dispose on BOTH paths — the probe never retains the engine.
+                # (The previous code disposed only on success, leaking the
+                # engine/pool on every failed probe.)
+                await engine.dispose()
+
+        # No retry: the admin is watching live and wants an honest verdict —
+        # a retry that masks a blip is a false green. TEST_CONNECTION_POLICY is
+        # a single attempt.
+        try:
+            await connect_with_retry(_probe, policy=TEST_CONNECTION_POLICY)
             return True
-        except Exception as exc:
-            # Log the exception class + a *sanitised* message so operators can
-            # debug a failed admin "Test connection" without leaking
-            # credentials. Driver exceptions (asyncpg / SQLAlchemy) can embed
-            # the connection string or DSN fragments (host/user/dbname/password)
-            # in ``str(exc)``, so it is scrubbed via ``_sanitise`` (FR-020).
-            # ``exc_info`` is intentionally OMITTED — a traceback frame can
-            # carry the raw connection string passed to ``create_async_engine``,
-            # which the formatter would render verbatim. The caller still gets
-            # a sanitised ConnectionError (see
-            # source_inspection_service.inspect_source).
+        except DBConnectionFailed as exc:
+            # Log the closed-enum category only (never the DSN / raw exc text).
             logger.warning(
-                "DatabaseConnector.test_connection failed [conn_hash=%s]: %s: %s",
+                "DatabaseConnector.test_connection failed [conn_hash=%s]: %s",
                 self._conn_str_hash,
-                type(exc).__name__,
-                _sanitise(exc),
+                exc.category.value,
             )
             return False
 

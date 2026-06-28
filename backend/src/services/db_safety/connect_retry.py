@@ -208,6 +208,13 @@ def classify(exc: BaseException) -> DBConnFailureCategory:
     (specific) signals are tested before transient (generic) ones. Anything that
     matches nothing is :data:`DBConnFailureCategory.UNKNOWN`.
     """
+    # A failure already classified upstream rides through unchanged. This guard
+    # is load-bearing now that :class:`DBConnectionFailed` is a ``ConnectionError``
+    # (hence an ``OSError``): without it, the ``OSError`` branch below would
+    # re-bucket an already-terminal failure as transient ``DB_UNREACHABLE``.
+    if isinstance(exc, DBConnectionFailed):
+        return exc.category
+
     hay = _haystack(exc)
 
     # --- permanent / specific first ---------------------------------------
@@ -321,11 +328,13 @@ TEST_CONNECTION_POLICY: Final[RetryPolicy] = RetryPolicy(
 # ---------------------------------------------------------------------------
 
 
-class DBConnectionFailed(Exception):
+class DBConnectionFailed(ConnectionError):
     """A connect handshake that officially failed after the retry budget.
 
-    Carries the closed :class:`DBConnFailureCategory` and the *actual* number of
-    attempts made (honest: a fail-fast auth error reports 1). The string form is
+    Subclasses :class:`ConnectionError` so every existing ``except ConnectionError``
+    site keeps working while gaining ``.category`` / ``.attempts_made``. Carries
+    the closed :class:`DBConnFailureCategory` and the *actual* number of attempts
+    made (honest: a fail-fast auth error reports 1). The string form is
     intentionally credential-free — render an admin-facing explanation with
     :func:`render_admin_message`.
     """
@@ -379,30 +388,38 @@ async def connect_with_retry(
     attempt = 0
     while True:
         attempt += 1
+        failure: DBConnectionFailed | None = None
+        delay: float = 0.0
         try:
             return await acquire()
         except DBConnectionFailed:
             # Already classified+terminal (nested seam) — never wrap twice.
             raise
-        except Exception as exc:  # noqa: BLE001 - classified + re-raised clean
+        except Exception as exc:  # noqa: BLE001 - classified, never re-exposed
             category = classify_fn(exc)
             max_attempts = policy.max_attempts_for(category)
             if attempt >= max_attempts:
-                raise DBConnectionFailed(
-                    category, attempts_made=attempt
-                ) from None
+                failure = DBConnectionFailed(category, attempts_made=attempt)
+            else:
+                # Full-jitter backoff bounded by an exponential cap; never sleep
+                # past the deadline — fail now rather than overshoot.
+                exp_cap = min(
+                    policy.max_delay, policy.base_delay * (2 ** (attempt - 1))
+                )
+                candidate = jitter(exp_cap)
+                if (now() - start) + candidate >= policy.deadline:
+                    failure = DBConnectionFailed(category, attempts_made=attempt)
+                else:
+                    delay = candidate
 
-            # Full-jitter backoff bounded by an exponential cap; never sleep
-            # past the deadline — fail now rather than overshoot.
-            exp_cap = min(
-                policy.max_delay, policy.base_delay * (2 ** (attempt - 1))
-            )
-            delay = jitter(exp_cap)
-            if (now() - start) + delay >= policy.deadline:
-                raise DBConnectionFailed(
-                    category, attempts_made=attempt
-                ) from None
-            await sleep(delay)
+        # Raise OUTSIDE the ``except`` block so the raw driver exception is NOT
+        # attached to ``failure.__context__``. ``from None`` clears __cause__ but
+        # NOT __context__ — and a chain-walking serializer (Langfuse / Sentry)
+        # could otherwise recover a DSN off __context__. Leaving the except block
+        # first means there is no active exception to attach.
+        if failure is not None:
+            raise failure from None
+        await sleep(delay)
 
 
 # ---------------------------------------------------------------------------
