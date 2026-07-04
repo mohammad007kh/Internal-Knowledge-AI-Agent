@@ -323,22 +323,36 @@ class _FakeExecResult:
 
 
 class _FakeExecConn:
-    async def __aenter__(self):  # type: ignore[no-untyped-def]
-        return self
+    """New contract: `await engine.connect()` returns a started conn that is
+    then `.execute()`d once and `.close()`d (the retry seam awaits the connect;
+    the query runs outside it)."""
 
-    async def __aexit__(self, *exc):  # type: ignore[no-untyped-def]
-        return False
+    def __init__(self) -> None:
+        self.closed = False
+
+    def __await__(self):  # type: ignore[no-untyped-def]
+        async def _self():  # type: ignore[no-untyped-def]
+            return self
+
+        return _self().__await__()
 
     async def execute(self, _stmt):  # type: ignore[no-untyped-def]
         return _FakeExecResult()
 
+    async def close(self):  # type: ignore[no-untyped-def]
+        self.closed = True
+
 
 class _FakeExecEngine:
+    def __init__(self) -> None:
+        self.conn = _FakeExecConn()
+        self.disposed = False
+
     def connect(self):  # type: ignore[no-untyped-def]
-        return _FakeExecConn()
+        return self.conn
 
     async def dispose(self):  # type: ignore[no-untyped-def]
-        return None
+        self.disposed = True
 
 
 def _make_capturing_create(captured: dict):  # type: ignore[no-untyped-def]
@@ -387,3 +401,178 @@ async def test_execute_libpq_passes_empty_connect_args() -> None:
     from urllib.parse import unquote
 
     assert "default_transaction_read_only=on" in unquote(captured["url"])
+
+
+# ---------------------------------------------------------------------------
+# _execute — connect retried via seam; query NOT retried (Slice 4)
+# ---------------------------------------------------------------------------
+
+
+class _ConnAuthFailEngine:
+    """`await engine.connect()` raises a permanent (auth) connect failure."""
+
+    def __init__(self) -> None:
+        self.disposed = False
+        self.query_ran = False
+
+    def connect(self):  # type: ignore[no-untyped-def]
+        class _C:
+            def __await__(self_inner):  # type: ignore[no-untyped-def]
+                async def _boom():  # type: ignore[no-untyped-def]
+                    raise Exception("password authentication failed for user x")
+
+                return _boom().__await__()
+
+        return _C()
+
+    async def dispose(self):  # type: ignore[no-untyped-def]
+        self.disposed = True
+
+
+@pytest.mark.asyncio
+async def test_execute_connect_failure_raises_db_connection_failed_and_disposes() -> None:
+    from src.services.db_safety.connect_retry import (
+        DBConnectionFailed,
+        DBConnFailureCategory,
+    )
+
+    engine = _ConnAuthFailEngine()
+    with patch(
+        "src.agent.nodes.text_to_query.create_async_engine", return_value=engine
+    ):
+        with pytest.raises(DBConnectionFailed) as ei:
+            await _execute(
+                "postgresql+asyncpg://user:pw@host/db",
+                "SELECT 1",
+                db_type="postgresql",
+            )
+    # Auth = permanent → fail fast (1 attempt); the query never ran; engine disposed.
+    assert ei.value.category is DBConnFailureCategory.AUTH_FAILED
+    assert ei.value.attempts_made == 1
+    assert engine.query_ran is False
+    assert engine.disposed is True
+
+
+class _QueryFailConn:
+    def __init__(self) -> None:
+        self.closed = False
+
+    def __await__(self):  # type: ignore[no-untyped-def]
+        async def _self():  # type: ignore[no-untyped-def]
+            return self
+
+        return _self().__await__()
+
+    async def execute(self, _stmt):  # type: ignore[no-untyped-def]
+        raise RuntimeError("syntax error near SELECT")
+
+    async def close(self):  # type: ignore[no-untyped-def]
+        self.closed = True
+
+
+class _QueryFailEngine:
+    def __init__(self) -> None:
+        self.conn = _QueryFailConn()
+        self.disposed = False
+
+    def connect(self):  # type: ignore[no-untyped-def]
+        return self.conn
+
+    async def dispose(self):  # type: ignore[no-untyped-def]
+        self.disposed = True
+
+
+@pytest.mark.asyncio
+async def test_execute_query_error_is_not_classified_as_connect_failure() -> None:
+    """The seam wraps ONLY the connect. A query error (connect succeeded) must
+    propagate as the raw exception, never as a (retried) DBConnectionFailed."""
+    from src.services.db_safety.connect_retry import DBConnectionFailed
+
+    engine = _QueryFailEngine()
+    with patch(
+        "src.agent.nodes.text_to_query.create_async_engine", return_value=engine
+    ):
+        with pytest.raises(RuntimeError):  # raw query error, NOT DBConnectionFailed
+            await _execute(
+                "postgresql+asyncpg://user:pw@host/db",
+                "SELECT bad",
+                db_type="postgresql",
+            )
+    # Boundary proof: a query failure is not a ConnectionError/DBConnectionFailed.
+    assert not issubclass(DBConnectionFailed, RuntimeError)
+    # Resources still released on the query-error path.
+    assert engine.conn.closed is True
+    assert engine.disposed is True
+
+
+@pytest.mark.asyncio
+async def test_execute_success_runs_query_once_and_closes_conn() -> None:
+    engine = _FakeExecEngine()
+    with patch(
+        "src.agent.nodes.text_to_query.create_async_engine", return_value=engine
+    ):
+        rows = await _execute(
+            "postgresql+asyncpg://user:pw@host/db", "SELECT 1", db_type="postgresql"
+        )
+    assert rows == []
+    assert engine.conn.closed is True  # inner finally closed the connection
+    assert engine.disposed is True  # outer finally disposed the engine
+
+
+# ---------------------------------------------------------------------------
+# node — DBConnectionFailed surfaces categorised tag, skips source, no flip
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_connect_failure_skips_source_tags_span_no_status_flip() -> None:
+    from src.services.db_safety.connect_retry import (
+        DBConnectionFailed,
+        DBConnFailureCategory,
+    )
+
+    src = _make_source()
+    repo = AsyncMock()
+    repo.list_by_ids.return_value = [src]
+    resolver = _resolver_for(
+        _openai_returning_text("SELECT id, total FROM orders")
+    )
+    span = MagicMock()
+    lf = MagicMock()
+    lf.span.return_value = span
+
+    with patch(
+        "src.agent.nodes.text_to_query._decrypt_source_config",
+        return_value={"connection_string": "postgresql+asyncpg://x"},
+    ), patch(
+        "src.agent.nodes.text_to_query._load_schema_sketch",
+        new=AsyncMock(return_value=""),
+    ), patch(
+        "src.agent.nodes.text_to_query._execute",
+        new=AsyncMock(
+            side_effect=DBConnectionFailed(
+                DBConnFailureCategory.DB_UNREACHABLE, attempts_made=3
+            )
+        ),
+    ):
+        result = await text_to_query(
+            _state([str(src.id)]),
+            ai_model_resolver=resolver,
+            db_session=AsyncMock(),
+            source_repository=repo,
+            langfuse=lf,
+        )
+
+    # Source skipped → no chunks; Source.status NEVER touched here (the node has
+    # no source-write path at all — a chat blip must not mark a source broken).
+    assert result.get("retrieved_chunks", []) == []
+    # The span carries the closed category + attempts for admin observability
+    # (the node also makes a final summary span.update(output=...), so assert on
+    # the metadata call specifically rather than call-count).
+    meta_calls = [
+        c for c in span.update.call_args_list if "metadata" in c.kwargs
+    ]
+    assert len(meta_calls) == 1
+    meta = meta_calls[0].kwargs["metadata"]
+    assert meta["db_connect_category"] == "DB_UNREACHABLE"
+    assert meta["db_connect_attempts"] == 3

@@ -48,6 +48,11 @@ from src.services.db_safety import (
     redact_dsn,
     validate_sql,
 )
+from src.services.db_safety.connect_retry import (
+    INTERACTIVE_POLICY,
+    DBConnectionFailed,
+    connect_with_retry,
+)
 
 if TYPE_CHECKING:
     from langfuse import Langfuse
@@ -180,9 +185,23 @@ async def _execute(
             max_overflow=0,
         )
     try:
-        async with engine.connect() as conn:
+        # Retry ONLY the connect handshake (INTERACTIVE: 1 quick retry, ~3s,
+        # permanent fails fast). `engine.connect()` performs the real DBAPI
+        # connect/auth eagerly, so connect failures raise here and are
+        # classified by the seam; the SQL query runs ONCE outside the seam so a
+        # bad-query error is never misclassified/retried as a connect failure.
+        # NB: the deadline bounds retry *scheduling*, not a single connect's own
+        # TCP timeout — an unreachable host can still take the driver's connect
+        # timeout per attempt. Acceptable for v1; the source is skipped on
+        # failure (see the node's DBConnectionFailed handler).
+        conn = await connect_with_retry(
+            lambda: engine.connect(), policy=INTERACTIVE_POLICY
+        )
+        try:
             result = await conn.execute(sa.text(sql))
             return list(result.mappings().all())
+        finally:
+            await conn.close()
     finally:
         await engine.dispose()
 
@@ -303,6 +322,37 @@ async def text_to_query(
                     wrapped,
                     db_type=str(config.get("db_type", "")),
                 )
+            except DBConnectionFailed as exc:
+                # Connect officially failed after the retry budget. Tag the span
+                # with the CLOSED category + attempt count for admin observability
+                # (both are a fixed enum token + an int — never any DSN / driver
+                # text, so FR-020 holds; do NOT tag str(exc)). User-facing
+                # behaviour is unchanged: skip this source (NEVER flip
+                # Source.status — a transient blip on one query must not mark a
+                # healthy source broken).
+                try:
+                    span.update(
+                        metadata={
+                            "db_connect_failed_source": sid,
+                            "db_connect_category": exc.category.value,
+                            "db_connect_attempts": exc.attempts_made,
+                        }
+                    )
+                except Exception:  # noqa: BLE001 - observability is best-effort
+                    # Never break the chat turn on a telemetry hiccup, but leave
+                    # a thread to pull if span updates start failing.
+                    logger.debug(
+                        "text_to_query: span.update failed", exc_info=True
+                    )
+                logger.warning(
+                    "text_to_query: connect failed for source=%s — skipping "
+                    "[category=%s attempts=%d]",
+                    sid,
+                    exc.category.value,
+                    exc.attempts_made,
+                )
+                skipped.append(sid)
+                continue
             except Exception as exc:  # noqa: BLE001
                 # ``exc_info`` is intentionally OMITTED: the traceback's final
                 # line renders ``str(exc)``, and a driver (asyncpg/SQLAlchemy)
