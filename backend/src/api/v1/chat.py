@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import logging
 import uuid
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, AsyncIterator
+from contextlib import AsyncExitStack, asynccontextmanager
 from typing import Any
 
 from fastapi import APIRouter, Depends, Request, Response, status
@@ -19,6 +20,10 @@ from src.models.chat import MessageRole
 from src.models.user import User
 from src.repositories.admin_audit_log_repository import AdminAuditLogRepository
 from src.repositories.chat_repository import ChatMessageRepository, ChatSessionRepository
+from src.repositories.chunk_repository import ChunkRepository
+from src.repositories.company_policy_repository import CompanyPolicyRepository
+from src.repositories.guardrail_event_repository import GuardrailEventRepository
+from src.repositories.source_repository import SourceRepository
 from src.schemas.chat import (
     ChatMessageResponse,
     ChatRequest,
@@ -34,6 +39,7 @@ from src.services.chat_stream_service import (
     history_to_lc_messages,
     run_pipeline_stream,
 )
+from src.services.guardrail_service import GuardrailService
 from src.services.langfuse_tracing_service import LangfuseTracingService
 
 logger = logging.getLogger(__name__)
@@ -68,23 +74,86 @@ def _get_chat_message_repo() -> ChatMessageRepository:
     return ChatMessageRepository()
 
 
-def _get_pipeline() -> Any:
-    from src.core.container import Container  # noqa: PLC0415
-
-    return Container.pipeline()
-
-
-def _get_agentic_pipeline() -> Any:
-    """Sandbox-first agentic pipeline (T-058 / FR-026).
-
-    Returns the plan-and-execute graph when ``PIPELINE_AGENTIC_ENABLED`` is on;
-    otherwise the exact same v2 graph as :func:`_get_pipeline` (the flag is the
-    rollback). Only the admin sandbox endpoint uses this — general chat keeps
-    the proven v2 topology until the eval gates widen the flag.
+def _get_pipeline_provider() -> Any:
+    """Return the pipeline PROVIDER (a dependency-injector Factory), NOT a built
+    pipeline. The stream scopes the provider's DB sessions via
+    :func:`_scoped_pipeline`; tests override this to inject a fake provider.
     """
     from src.core.container import Container  # noqa: PLC0415
 
-    return Container.agentic_pipeline()
+    return Container.pipeline
+
+
+@asynccontextmanager
+async def _scoped_pipeline(
+    provider: Any, session_factory: Any
+) -> AsyncIterator[Any]:
+    """Build a pipeline whose every DB session is scoped to this context (#276).
+
+    ``Container.pipeline()`` / ``agentic_pipeline()`` construct ~5 *stateful*
+    sessions — the top-level ``db_session`` plus the chunk / chat-session /
+    chat-message / source repositories, each holding its own ``AsyncSession``.
+    Resolved as a request ``Depends`` they are never scoped to the SSE stream,
+    so on normal completion — and especially on client disconnect
+    (``GeneratorExit`` / ``CancelledError``) — those sessions are orphaned and
+    their pooled connections are only reclaimed at GC ("non-checked-in
+    connection" warnings).
+
+    Here each session-holder gets its OWN session (preserving the pipeline's
+    existing per-repo isolation — no cross-node session sharing / concurrency
+    assumption) via a single :class:`contextlib.AsyncExitStack`, so ALL of them
+    are closed (connections returned to the pool) when the stream ends by ANY
+    path. ``provider`` is ``Container.pipeline`` (chat) or
+    ``Container.agentic_pipeline`` (sandbox); ``session_factory`` is the raw
+    ``AsyncSessionLocal`` sessionmaker.
+    """
+    from src.core.container import Container  # noqa: PLC0415
+
+    async with AsyncExitStack() as stack:
+
+        async def _session() -> AsyncSession:
+            return await stack.enter_async_context(session_factory())
+
+        pipeline = provider(
+            db_session=await _session(),
+            chunk_repository=ChunkRepository(session=await _session()),
+            chat_session_repository=ChatSessionRepository(session=await _session()),
+            chat_message_repository=ChatMessageRepository(
+                session=await _session()
+            ),
+            source_repository=SourceRepository(session=await _session()),
+            # guardrail_service is NOT a bare provider default here: left
+            # unscoped it resolves from the Container with its OWN two
+            # session-bound repos (company_policy + guardrail_event), and
+            # GuardrailService.evaluate_input runs policy_repo.list_active() on
+            # EVERY stream — so those sessions would leak on the exact disconnect
+            # path this fixes. Scope them too. (openai_client / ai_model_resolver
+            # are Singletons — safe to resolve directly.) The durable fix is to
+            # move these repos to the session_factory pattern — tracked follow-up.
+            guardrail_service=GuardrailService(
+                policy_repo=CompanyPolicyRepository(session=await _session()),
+                guardrail_event_repo=GuardrailEventRepository(
+                    session=await _session()
+                ),
+                openai_client=Container.openai_client(),
+                ai_model_resolver=Container.ai_model_resolver(),
+            ),
+        )
+        yield pipeline
+
+
+def _get_agentic_pipeline_provider() -> Any:
+    """Return the sandbox-first agentic pipeline PROVIDER (T-058 / FR-026).
+
+    Like :func:`_get_pipeline_provider` but for ``Container.agentic_pipeline``:
+    the plan-and-execute graph when ``PIPELINE_AGENTIC_ENABLED`` is on, else the
+    same v2 graph (the flag is the rollback). Returns the provider (not a built
+    pipeline) so :func:`_scoped_pipeline` scopes its DB sessions; overridable in
+    tests. Only the admin sandbox endpoint uses this.
+    """
+    from src.core.container import Container  # noqa: PLC0415
+
+    return Container.agentic_pipeline
 
 
 def _get_tracing() -> LangfuseTracingService:
@@ -246,7 +315,7 @@ async def send_message(
     db_session_factory: Any = Depends(_get_db_session_factory),
     chat_session_repo: ChatSessionRepository = Depends(_get_chat_session_repo),
     chat_message_repo: ChatMessageRepository = Depends(_get_chat_message_repo),
-    pipeline: Any = Depends(_get_pipeline),
+    pipeline_provider: Any = Depends(_get_pipeline_provider),
     langfuse_tracing: LangfuseTracingService = Depends(_get_tracing),
     chat_session_service: Any = Depends(_get_chat_session_service),
     title_generator_service: Any = Depends(_get_title_generator),
@@ -439,6 +508,12 @@ async def send_message(
                 await fresh_db.commit()
                 return str(assistant_msg.id)
 
+        # Build the pipeline scoped to THIS stream (#276): its ~5 DB sessions
+        # close on every exit path via the finally below. Enter/exit explicitly
+        # (equivalent to `async with _scoped_pipeline(...)`) to avoid re-indenting
+        # the large try/except body.
+        pipeline_scope = _scoped_pipeline(pipeline_provider, db_session_factory)
+        pipeline = await pipeline_scope.__aenter__()
         try:
             async for frame in run_pipeline_stream(
                 pipeline=pipeline,
@@ -505,6 +580,11 @@ async def send_message(
             except Exception:  # noqa: BLE001
                 logger.debug("end_trace failed after disconnect", exc_info=True)
             return
+        finally:
+            # Close all pipeline-scoped DB sessions (return connections to the
+            # pool) on EVERY exit path — normal completion, GeneratorExit, or
+            # CancelledError (#276). Never yields, so safe during teardown.
+            await pipeline_scope.__aexit__(None, None, None)
 
     return StreamingResponse(
         event_generator(),
@@ -577,7 +657,8 @@ async def sandbox_stream(
     request: Request,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-    pipeline: Any = Depends(_get_agentic_pipeline),
+    db_session_factory: Any = Depends(_get_db_session_factory),
+    pipeline_provider: Any = Depends(_get_agentic_pipeline_provider),
     langfuse_tracing: LangfuseTracingService = Depends(_get_tracing),
 ) -> StreamingResponse:
     """Run the agent pipeline against ONE source and stream SSE.
@@ -684,17 +765,21 @@ async def sandbox_stream(
     }
 
     async def _sandbox_event_generator() -> AsyncGenerator[str, None]:
-        async for frame in run_pipeline_stream(
-            pipeline=pipeline,
-            initial_state=initial_state,
-            config=config,
-            trace_id=trace_id,
-            session_id=SANDBOX_SESSION_ID,
-            langfuse_tracing=langfuse_tracing,
-            persist_assistant=False,  # sandbox never writes to chat_messages
-            on_done=None,
-        ):
-            yield frame
+        # Scope the agentic pipeline's DB sessions to this stream (#276).
+        async with _scoped_pipeline(
+            pipeline_provider, db_session_factory
+        ) as pipeline:
+            async for frame in run_pipeline_stream(
+                pipeline=pipeline,
+                initial_state=initial_state,
+                config=config,
+                trace_id=trace_id,
+                session_id=SANDBOX_SESSION_ID,
+                langfuse_tracing=langfuse_tracing,
+                persist_assistant=False,  # sandbox never writes to chat_messages
+                on_done=None,
+            ):
+                yield frame
 
     return StreamingResponse(
         _sandbox_event_generator(),

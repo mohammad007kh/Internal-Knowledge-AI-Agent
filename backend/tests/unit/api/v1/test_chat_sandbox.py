@@ -34,12 +34,12 @@ from fastapi.testclient import TestClient  # noqa: E402
 
 from src.api.middleware.error_handler import register_exception_handlers  # noqa: E402
 from src.api.v1.chat import (  # noqa: E402
-    _get_agentic_pipeline,
+    _get_agentic_pipeline_provider,
     _get_chat_message_repo,
     _get_chat_session_repo,
     _get_chat_session_service,
     _get_db_session_factory,
-    _get_pipeline,
+    _get_pipeline_provider,
     _get_title_generator,
     _get_tracing,
     router,
@@ -140,11 +140,18 @@ def app(
     # Default to admin auth — tests that need a non-admin override later.
     app.dependency_overrides[get_current_user] = lambda: admin_user
     app.dependency_overrides[get_db] = lambda: db
-    app.dependency_overrides[_get_pipeline] = lambda: mock_pipeline
-    # T-058: the sandbox endpoint now resolves the sandbox-first agentic
-    # pipeline. Override both so the same mock drives the stream regardless of
-    # which provider the endpoint depends on.
-    app.dependency_overrides[_get_agentic_pipeline] = lambda: mock_pipeline
+    # The endpoints now depend on a pipeline PROVIDER (a call-time factory) that
+    # `_scoped_pipeline` invokes with the scoped session kwargs (#276). Override
+    # with a fake provider that ignores those kwargs and returns the mock.
+    app.dependency_overrides[_get_pipeline_provider] = lambda: (
+        lambda **_kw: mock_pipeline
+    )
+    # T-058: the sandbox endpoint resolves the sandbox-first agentic pipeline.
+    # Override both so the same mock drives the stream regardless of which
+    # provider the endpoint depends on.
+    app.dependency_overrides[_get_agentic_pipeline_provider] = lambda: (
+        lambda **_kw: mock_pipeline
+    )
     app.dependency_overrides[_get_tracing] = lambda: mock_tracing
     # Plumb the unrelated chat deps to no-op mocks so the router instantiates.
     app.dependency_overrides[_get_db_session_factory] = lambda: _make_db_factory(db)

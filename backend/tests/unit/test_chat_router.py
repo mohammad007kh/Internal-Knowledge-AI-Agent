@@ -29,7 +29,7 @@ from src.api.v1.chat import (  # noqa: E402
     _get_chat_session_repo,
     _get_chat_session_service,
     _get_db_session_factory,
-    _get_pipeline,
+    _get_pipeline_provider,
     _get_title_generator,
     _get_tracing,
     router,
@@ -186,7 +186,11 @@ def client(
     app.dependency_overrides[_get_db_session_factory] = lambda: db_factory
     app.dependency_overrides[_get_chat_session_repo] = lambda: mock_session_repo
     app.dependency_overrides[_get_chat_message_repo] = lambda: mock_message_repo
-    app.dependency_overrides[_get_pipeline] = lambda: mock_pipeline
+    # The endpoint depends on a pipeline PROVIDER (#276) that `_scoped_pipeline`
+    # calls with scoped-session kwargs; inject a fake provider returning the mock.
+    app.dependency_overrides[_get_pipeline_provider] = lambda: (
+        lambda **_kw: mock_pipeline
+    )
     app.dependency_overrides[_get_tracing] = lambda: mock_tracing
     app.dependency_overrides[_get_chat_session_service] = lambda: mock_chat_session_service
     app.dependency_overrides[_get_title_generator] = lambda: mock_title_generator
@@ -694,7 +698,7 @@ class TestAutoTitling:
     """POST /chat/sessions/{id}/messages — first-turn auto-title behaviour."""
 
     @staticmethod
-    def _empty_pipeline_events() -> "Any":
+    def _empty_pipeline_events() -> object:
         async def _events(  # noqa: ARG001
             state: object, *, config: object, version: object
         ) -> AsyncGenerator[Never, None]:
@@ -854,7 +858,7 @@ class TestLazySessionCreation:
     """POST /chat/sessions/new/messages — lazy-create on first message."""
 
     @staticmethod
-    def _empty_pipeline_events() -> "Any":
+    def _empty_pipeline_events() -> object:
         async def _events(  # noqa: ARG001
             state: object, *, config: object, version: object
         ) -> AsyncGenerator[Never, None]:
