@@ -111,6 +111,12 @@ def _make_db_source() -> MagicMock:
     src.tables_partial = None
     src.last_error_phase = None
     src.last_error_message = None
+    # Categorised connection-failure fields (Slice 5a) — concrete None so
+    # SourceResponse.model_validate doesn't choke on auto-vivified child mocks.
+    src.failure_category = None
+    src.attempts_made = None
+    src.failure_headline = None
+    src.failure_next_action = None
     # U10 — detail-endpoint enrichment fields (must be concrete, not MagicMock,
     # or SourceResponse.model_validate fails strict typing on the response).
     src.owner_email = "admin@example.com"

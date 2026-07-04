@@ -302,6 +302,11 @@ def _make_source(**overrides) -> MagicMock:
     src.tables_partial = overrides.get("tables_partial", None)
     src.last_error_phase = overrides.get("last_error_phase", None)
     src.last_error_message = overrides.get("last_error_message", None)
+    # Categorised connection-failure fields (Slice 5a) — concrete None default.
+    src.failure_category = overrides.get("failure_category", None)
+    src.attempts_made = overrides.get("attempts_made", None)
+    src.failure_headline = overrides.get("failure_headline", None)
+    src.failure_next_action = overrides.get("failure_next_action", None)
     src.owner_email = overrides.get("owner_email", "admin@example.com")
     src.schema_summary = overrides.get("schema_summary", None)
     src.connection_status = overrides.get("connection_status", "unknown")
