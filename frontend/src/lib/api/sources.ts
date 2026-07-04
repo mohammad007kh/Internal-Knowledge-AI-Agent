@@ -102,13 +102,7 @@ export interface SyncJob {
    * cancellation — a task that observed the Stop-sync signal at a safe
    * checkpoint, committed whatever was stable, and exited.
    */
-  status:
-    | 'pending'
-    | 'running'
-    | 'completed'
-    | 'failed'
-    | 'success'
-    | 'cancelled'
+  status: 'pending' | 'running' | 'completed' | 'failed' | 'success' | 'cancelled'
   started_at: string | null
   finished_at: string | null
   completed_at: string | null
@@ -147,6 +141,13 @@ export interface SourceListItem {
   tables_partial?: number | null
   last_error_phase?: string | null
   last_error_message?: string | null
+  // Categorised DB connection-failure metadata + server-rendered admin copy
+  // (set only when the retry seam classified a connect failure; the
+  // headline/next_action are constant, credential-free sentences).
+  failure_category?: string | null
+  attempts_made?: number | null
+  failure_headline?: string | null
+  failure_next_action?: string | null
   // AI-naming bookkeeping (F9). Optional for backwards compatibility — older
   // backends may omit these entirely; the UI defaults to treating absent
   // values as `user_set`.
@@ -397,10 +398,7 @@ export async function triggerSyncApi(sourceId: string): Promise<SyncJob> {
  * running jobs the row may still read `running` until the task's next
  * checkpoint (the source-detail polling picks up the transition).
  */
-export async function cancelSyncJobApi(
-  sourceId: string,
-  jobId: string
-): Promise<SyncJob> {
+export async function cancelSyncJobApi(sourceId: string, jobId: string): Promise<SyncJob> {
   const { data } = await apiClient.post<SyncJob>(
     `/api/v1/sources/${sourceId}/sync-jobs/${jobId}/cancel`
   )
@@ -415,9 +413,7 @@ export async function refreshDescriptionApi(sourceId: string): Promise<RefreshDe
 }
 
 export async function autoNameApi(sourceId: string): Promise<AutoNameResponse> {
-  const { data } = await apiClient.post<AutoNameResponse>(
-    `/api/v1/sources/${sourceId}/auto-name`
-  )
+  const { data } = await apiClient.post<AutoNameResponse>(`/api/v1/sources/${sourceId}/auto-name`)
   return data
 }
 
@@ -448,9 +444,7 @@ export class IntentProposalConflictError extends Error {
 const INTENT_IN_FLIGHT_DETAIL_FRAGMENT = 'already in flight'
 
 export async function getIntentApi(sourceId: string): Promise<SourceIntent> {
-  const { data } = await apiClient.get<SourceIntent>(
-    `/api/v1/sources/${sourceId}/intent`
-  )
+  const { data } = await apiClient.get<SourceIntent>(`/api/v1/sources/${sourceId}/intent`)
   return data
 }
 
@@ -458,10 +452,7 @@ export async function putIntentApi(
   sourceId: string,
   body: SourceIntentUpdate
 ): Promise<SourceIntent> {
-  const { data } = await apiClient.put<SourceIntent>(
-    `/api/v1/sources/${sourceId}/intent`,
-    body
-  )
+  const { data } = await apiClient.put<SourceIntent>(`/api/v1/sources/${sourceId}/intent`, body)
   return data
 }
 
@@ -481,10 +472,7 @@ export async function proposeIntentApi(sourceId: string): Promise<void> {
     if (status === 409) {
       throw new IntentProposalConflictError()
     }
-    if (
-      error instanceof Error &&
-      error.message.includes(INTENT_IN_FLIGHT_DETAIL_FRAGMENT)
-    ) {
+    if (error instanceof Error && error.message.includes(INTENT_IN_FLIGHT_DETAIL_FRAGMENT)) {
       throw new IntentProposalConflictError()
     }
     throw error
@@ -602,13 +590,8 @@ export async function getSourceConnectionConfigApi(
  * Source row exists — caller passes the typed connection dict directly
  * rather than a stored source id.
  */
-export async function inspectSourceApi(
-  body: InspectSourceRequest
-): Promise<InspectSourceResponse> {
-  const { data } = await apiClient.post<InspectSourceResponse>(
-    '/api/v1/sources/inspect',
-    body
-  )
+export async function inspectSourceApi(body: InspectSourceRequest): Promise<InspectSourceResponse> {
+  const { data } = await apiClient.post<InspectSourceResponse>('/api/v1/sources/inspect', body)
   return data
 }
 
@@ -782,9 +765,7 @@ export class SchemaDocumentNotFoundError extends Error {
 /** Stable detail string the backend emits when no completed study exists. */
 const NO_COMPLETED_STUDY_DETAIL = 'No completed schema study for this source.'
 
-export async function getSchemaDocumentApi(
-  sourceId: string
-): Promise<SchemaDocumentResponse> {
+export async function getSchemaDocumentApi(sourceId: string): Promise<SchemaDocumentResponse> {
   try {
     const { data } = await apiClient.get<SchemaDocumentResponse>(
       `/api/v1/sources/${sourceId}/schema-document`
@@ -805,10 +786,7 @@ export async function getSchemaDocumentApi(
     if (status === 404) {
       throw new SchemaDocumentNotFoundError()
     }
-    if (
-      error instanceof Error &&
-      error.message === NO_COMPLETED_STUDY_DETAIL
-    ) {
+    if (error instanceof Error && error.message === NO_COMPLETED_STUDY_DETAIL) {
       throw new SchemaDocumentNotFoundError(error.message)
     }
     throw error
@@ -822,7 +800,5 @@ export async function getSchemaDocumentApi(
  * auditors only care about the moment of reveal.
  */
 export async function emitSamplesRevealedApi(sourceId: string): Promise<void> {
-  await apiClient.post<void>(
-    `/api/v1/sources/${sourceId}/schema-document/reveal-samples`
-  )
+  await apiClient.post<void>(`/api/v1/sources/${sourceId}/schema-document/reveal-samples`)
 }
