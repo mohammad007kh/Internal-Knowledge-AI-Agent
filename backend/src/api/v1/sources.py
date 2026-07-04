@@ -14,8 +14,8 @@ from __future__ import annotations
 
 import logging
 import uuid
-from datetime import datetime, timezone
-from typing import TYPE_CHECKING, Any, Literal
+from datetime import UTC, datetime
+from typing import TYPE_CHECKING, Any, Literal, Protocol
 from uuid import UUID, uuid4
 
 if TYPE_CHECKING:
@@ -36,7 +36,6 @@ from src.schemas.source import (
     DocumentListResponse,
     DocumentResponse,
     PaginatedSources,
-    SourceCreate,
     SourceCreateRequest,
     SourceListItem,
     SourcePublicResponse,
@@ -178,6 +177,56 @@ def _assert_ownership_or_admin(owner_id: uuid.UUID, user: User) -> None:
         )
 
 
+class _FailureProjectable(Protocol):
+    """The subset of fields both SourceListItem and SourceResponse expose for
+    connection-failure projection (structural typing — no runtime cost)."""
+
+    failure_category: str | None
+    attempts_made: int | None
+    failure_headline: str | None
+    failure_next_action: str | None
+
+
+def _project_connection_failure(
+    target: _FailureProjectable, latest_study: object
+) -> None:
+    """Project categorised connection-failure fields + server-rendered admin
+    copy from *latest_study* onto *target* (SourceListItem or SourceResponse).
+
+    ``failure_category`` / ``attempts_made`` are set only for study rows whose
+    failure the retry seam classified (NULL otherwise). When the category is a
+    known :class:`DBConnFailureCategory` we also attach the constant,
+    credential-free ``failure_headline`` / ``failure_next_action`` rendered
+    server-side, so every admin surface shows identical wording and no DSN /
+    driver text can ever cross the API boundary.
+    """
+    category = getattr(latest_study, "failure_category", None)
+    if not category:
+        return
+    from src.services.db_safety.connect_retry import (  # noqa: PLC0415
+        DBConnFailureCategory,
+        render_admin_message,
+    )
+
+    # Coerce through the closed enum AT THE BOUNDARY (007 M1): an out-of-enum
+    # stored value is dropped, never echoed — the DTO self-enforces the closed
+    # set regardless of writer discipline, so no free-form string can ride this
+    # field across the API even if a future writer misuses the column.
+    try:
+        cat = DBConnFailureCategory(category)
+    except ValueError:
+        return
+    attempts = getattr(latest_study, "attempts_made", None)
+    target.failure_category = cat.value
+    target.attempts_made = attempts
+    if attempts is None:
+        # Legacy row (category set, count absent): category only, no rendered copy.
+        return
+    msg = render_admin_message(cat, attempts_made=attempts)
+    target.failure_headline = msg.headline
+    target.failure_next_action = msg.next_action
+
+
 def _make_list_item(
     source: object,
     *,
@@ -225,6 +274,7 @@ def _make_list_item(
         item.study_state = getattr(latest_study, "state", None)
         item.last_error_phase = getattr(latest_study, "last_error_phase", None)
         item.last_error_message = getattr(latest_study, "last_error_message", None)
+        _project_connection_failure(item, latest_study)
         doc_json = getattr(latest_study, "schema_document_json", None)
         if isinstance(doc_json, dict):
             tables = doc_json.get("tables")
@@ -475,7 +525,7 @@ async def create_upload_url(
 
     storage = Container.storage_service()
 
-    now = datetime.now(tz=timezone.utc)
+    now = datetime.now(tz=UTC)
     safe_name = body.filename.replace("/", "_").replace("\\", "_")
     object_key = f"uploads/{now.strftime('%Y/%m')}/{uuid4()}-{safe_name}"
 
@@ -611,6 +661,7 @@ async def get_source(
             response.last_error_message = getattr(
                 latest_study, "last_error_message", None
             )
+            _project_connection_failure(response, latest_study)
             doc_json = getattr(latest_study, "schema_document_json", None)
             if isinstance(doc_json, dict):
                 tables = doc_json.get("tables")

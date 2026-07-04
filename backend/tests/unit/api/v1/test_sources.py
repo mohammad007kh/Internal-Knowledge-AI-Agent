@@ -9,10 +9,10 @@ from __future__ import annotations
 
 import os
 import uuid
+from datetime import UTC
 from unittest.mock import AsyncMock
 
 import pytest
-
 
 os.environ.setdefault("DATABASE_URL", "postgresql+asyncpg://test:test@localhost/test")
 os.environ.setdefault("JWT_SECRET_KEY", "test-jwt-secret-key-at-least-32-chars-long!!")
@@ -130,7 +130,7 @@ class TestGetStudySummaryBundle:
         return s
 
     def _repo_over(self, rows: list):
-        from unittest.mock import AsyncMock, MagicMock
+        from unittest.mock import AsyncMock
 
         from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -146,7 +146,7 @@ class TestGetStudySummaryBundle:
                     return rows
 
             class _Result:
-                def scalars(self) -> "_Scalars":
+                def scalars(self) -> _Scalars:
                     return _Scalars()
 
             return _Result()
@@ -228,7 +228,7 @@ class TestSourceListItemSchema:
 
     def test_default_connection_status_unknown(self) -> None:
         """Pre-existing rows (or fresh ones) default to ``unknown``."""
-        from datetime import datetime, timezone
+        from datetime import datetime
 
         from src.models.enums import SourceType
         from src.schemas.source import SourceListItem
@@ -238,7 +238,7 @@ class TestSourceListItemSchema:
             name="x",
             source_type=SourceType.WEB_URL,
             is_active=True,
-            created_at=datetime.now(tz=timezone.utc),
+            created_at=datetime.now(tz=UTC),
         )
         assert item.connection_status == "unknown"
         assert item.connection_last_checked_at is None
@@ -336,27 +336,27 @@ class TestDescriptionHistoryEndpoint:
     @pytest.fixture()
     def history_rows(self, owner_id: uuid.UUID) -> list[dict]:
         """Three fixture rows — newest first; the oldest one is AI-replaced."""
-        from datetime import datetime, timezone
+        from datetime import datetime
 
         return [
             {
                 "id": uuid.UUID("00000000-0000-0000-0000-000000000301"),
                 "description": "Old description v3",
-                "replaced_at": datetime(2026, 5, 1, 12, 0, tzinfo=timezone.utc),
+                "replaced_at": datetime(2026, 5, 1, 12, 0, tzinfo=UTC),
                 "replaced_by": owner_id,
                 "replaced_by_email": "owner@example.com",
             },
             {
                 "id": uuid.UUID("00000000-0000-0000-0000-000000000302"),
                 "description": "Old description v2",
-                "replaced_at": datetime(2026, 4, 1, 12, 0, tzinfo=timezone.utc),
+                "replaced_at": datetime(2026, 4, 1, 12, 0, tzinfo=UTC),
                 "replaced_by": uuid.UUID("00000000-0000-0000-0000-0000000000dd"),
                 "replaced_by_email": "alice@example.com",
             },
             {
                 "id": uuid.UUID("00000000-0000-0000-0000-000000000303"),
                 "description": "Old description v1 (AI-generated replacement)",
-                "replaced_at": datetime(2026, 3, 1, 12, 0, tzinfo=timezone.utc),
+                "replaced_at": datetime(2026, 3, 1, 12, 0, tzinfo=UTC),
                 "replaced_by": None,
                 "replaced_by_email": None,
             },
@@ -690,14 +690,14 @@ class TestSchemaDocumentEndpoint:
     def study_row(
         self, study_id: uuid.UUID, schema_document_dict: dict
     ):
-        from datetime import datetime, timezone
+        from datetime import datetime
         from unittest.mock import MagicMock
 
         s = MagicMock()
         s.id = study_id
         s.state = "READY"
-        s.started_at = datetime(2026, 5, 9, 12, 0, tzinfo=timezone.utc)
-        s.finished_at = datetime(2026, 5, 9, 12, 0, 14, tzinfo=timezone.utc)
+        s.started_at = datetime(2026, 5, 9, 12, 0, tzinfo=UTC)
+        s.finished_at = datetime(2026, 5, 9, 12, 0, 14, tzinfo=UTC)
         s.fingerprint = schema_document_dict["fingerprint"]
         s.schema_document_json = schema_document_dict
         return s
@@ -1017,10 +1017,11 @@ class TestRevealSamplesEndpoint:
         assert row["metadata"] == {}
 
     def test_non_admin_gets_403(self, app, client, regular_user, source_id):
-        from src.core.deps import require_admin
-
         # Recreate require_admin's actual behaviour for non-admins.
-        from fastapi import HTTPException, status as _status
+        from fastapi import HTTPException
+        from fastapi import status as _status
+
+        from src.core.deps import require_admin
 
         def _deny():
             raise HTTPException(
@@ -1094,7 +1095,7 @@ class TestCreateSourceEnqueuesStudySource:
         self, source_type_value: str, source_id: uuid.UUID, owner_id: uuid.UUID
     ):
         """Build a Source-shaped MagicMock for the route's response_model."""
-        from datetime import datetime, timezone
+        from datetime import datetime
         from unittest.mock import MagicMock
 
         from src.models.enums import SourceType
@@ -1109,7 +1110,7 @@ class TestCreateSourceEnqueuesStudySource:
             src.source_type = SourceType(source_type_value)
         src.is_active = True
         src.deleted_at = None
-        now = datetime.now(tz=timezone.utc)
+        now = datetime.now(tz=UTC)
         src.created_at = now
         src.updated_at = now
         src.description = None
@@ -1309,12 +1310,12 @@ class TestGetSourceDetailEnrichment:
         """A Source-shaped namespace — SimpleNamespace raises AttributeError
         for fields it doesn't define, so Pydantic's ``from_attributes`` falls
         back to the schema defaults for those (e.g. ``study_state``)."""
-        from datetime import datetime, timezone
+        from datetime import datetime
         from types import SimpleNamespace
 
         from src.models.enums import SourceType
 
-        now = datetime.now(tz=timezone.utc)
+        now = datetime.now(tz=UTC)
         return SimpleNamespace(
             id=source_id,
             owner_id=owner_id,
@@ -1483,3 +1484,53 @@ class TestGetSourceDetailEnrichment:
         assert body["last_error_phase"] == "DESCRIBE"
         assert body["last_error_message"] == "LLM timeout"
         assert body["tables_documented"] == 2
+
+    def test_connection_failure_projects_category_and_rendered_admin_copy(
+        self, app, client, source_id
+    ):
+        # A CONNECT-failed study projects failure_category + attempts_made AND
+        # the server-rendered, credential-free headline/next_action.
+        from unittest.mock import MagicMock
+
+        latest = MagicMock()
+        latest.state = "CONNECT_FAILED"
+        latest.last_error_phase = "CONNECT"
+        latest.last_error_message = (
+            "Could not connect to the source database (see server logs)."
+        )
+        latest.failure_category = "AUTH_FAILED"
+        latest.attempts_made = 1
+        latest.schema_document_json = None
+        app.state.bundle["latest_study"] = latest
+
+        resp = client.get(f"/sources/{source_id}")
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert body["failure_category"] == "AUTH_FAILED"
+        assert body["attempts_made"] == 1
+        assert body["failure_headline"] == "The database rejected the credentials."
+        assert "username and password" in body["failure_next_action"]
+        # Never any DSN / driver text.
+        assert "://" not in (body["failure_next_action"] or "")
+
+    def test_non_connect_failure_leaves_category_null(
+        self, app, client, source_id
+    ):
+        # A non-connection failure (e.g. SAMPLING) has no category/attempts.
+        from unittest.mock import MagicMock
+
+        latest = MagicMock()
+        latest.state = "SAMPLING_FAILED"
+        latest.last_error_phase = "SAMPLING"
+        latest.last_error_message = "Sampling timed out."
+        latest.failure_category = None
+        latest.attempts_made = None
+        latest.schema_document_json = None
+        app.state.bundle["latest_study"] = latest
+
+        resp = client.get(f"/sources/{source_id}")
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert body["failure_category"] is None
+        assert body["attempts_made"] is None
+        assert body["failure_headline"] is None
