@@ -1,12 +1,45 @@
 """Unit tests for GuardrailService — T-090."""
 
 import uuid
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from src.core.exceptions import ValidationError
 from src.services.guardrail_service import GuardrailDecision, GuardrailService
+
+# ---------------------------------------------------------------------------
+# Session-factory test doubles (#285)
+# ---------------------------------------------------------------------------
+
+class _FakeSession:
+    """Minimal async-context-manager session stub that records its close."""
+
+    def __init__(self) -> None:
+        self.closed = False
+
+    async def __aenter__(self) -> "_FakeSession":
+        return self
+
+    async def __aexit__(self, *exc: object) -> bool:
+        self.closed = True
+        return False
+
+    async def close(self) -> None:
+        self.closed = True
+
+
+def _make_session_factory() -> Any:
+    """Return a session_factory (zero-arg callable) that records each session."""
+    sessions: list[_FakeSession] = []
+
+    def factory() -> _FakeSession:
+        session = _FakeSession()
+        sessions.append(session)
+        return session
+
+    factory.sessions = sessions  # type: ignore[attr-defined]
+    return factory
 
 
 # ---------------------------------------------------------------------------
@@ -15,9 +48,13 @@ from src.services.guardrail_service import GuardrailDecision, GuardrailService
 
 @pytest.fixture
 def guardrail_service(mock_policy_repo, mock_guardrail_event_repo):
+    # Inject repo CLASSES (as MagicMocks returning the shared mocks) so the
+    # service builds them internally per call while the test bodies keep
+    # asserting on the same mock_policy_repo / mock_guardrail_event_repo (#285).
     return GuardrailService(
-        policy_repo=mock_policy_repo,
-        guardrail_event_repo=mock_guardrail_event_repo,
+        session_factory=_make_session_factory(),
+        policy_repo_cls=MagicMock(return_value=mock_policy_repo),
+        event_repo_cls=MagicMock(return_value=mock_guardrail_event_repo),
     )
 
 
@@ -146,4 +183,101 @@ class TestLogEvent:
             decision=decision,
         )
 
+        mock_guardrail_event_repo.create.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# TestSessionScoping (#285 — sessions scoped per DB touch, none held across LLM)
+# ---------------------------------------------------------------------------
+
+class TestSessionScoping:
+    def _service(self, factory, mock_policy_repo, mock_guardrail_event_repo):
+        return GuardrailService(
+            session_factory=factory,
+            policy_repo_cls=MagicMock(return_value=mock_policy_repo),
+            event_repo_cls=MagicMock(return_value=mock_guardrail_event_repo),
+        )
+
+    async def test_read_session_closed_after_evaluate_input(
+        self, mock_policy_repo, mock_guardrail_event_repo
+    ):
+        """The policy-read session (the #276 leaker) is returned to the pool."""
+        factory = _make_session_factory()
+        service = self._service(factory, mock_policy_repo, mock_guardrail_event_repo)
+        mock_policy_repo.list_active = AsyncMock(return_value=[])
+
+        await service.evaluate_input("hello")
+
+        assert factory.sessions, "no session was opened for the policy read"
+        assert factory.sessions[0].closed is True
+
+    async def test_read_session_closed_when_list_active_raises(
+        self, mock_policy_repo, mock_guardrail_event_repo
+    ):
+        """Close-on-error: a failing policy read still returns its session to the
+        pool AND fails closed (propagates) — the leak-on-error path #276/#285
+        guards against. Pins the ``async with`` teardown, not an explicit close.
+        """
+        factory = _make_session_factory()
+        service = self._service(factory, mock_policy_repo, mock_guardrail_event_repo)
+        mock_policy_repo.list_active = AsyncMock(side_effect=RuntimeError("db down"))
+
+        with pytest.raises(RuntimeError):
+            await service.evaluate_input("hi")
+
+        assert factory.sessions[0].closed is True
+
+    async def test_read_session_closed_after_evaluate_output(
+        self, mock_policy_repo, mock_guardrail_event_repo
+    ):
+        """Output path scopes its read session symmetrically with the input path."""
+        factory = _make_session_factory()
+        service = self._service(factory, mock_policy_repo, mock_guardrail_event_repo)
+        mock_policy_repo.list_active = AsyncMock(return_value=[])
+
+        await service.evaluate_output("here is an answer")
+
+        assert factory.sessions[0].closed is True
+
+    async def test_read_session_not_held_across_llm_eval(
+        self, mock_policy_repo, mock_guardrail_event_repo
+    ):
+        """The read session must be closed BEFORE the per-policy LLM calls run.
+
+        Holding a pooled connection across the guardrail LLM round-trip would be
+        pool starvation under stream concurrency — the failure mode #285 exists
+        to prevent.
+        """
+        factory = _make_session_factory()
+        service = self._service(factory, mock_policy_repo, mock_guardrail_event_repo)
+        mock_policy_repo.list_active = AsyncMock(return_value=[_make_policy()])
+        closed_at_llm_time: list[bool] = []
+
+        async def _spy(self, text, rule_text, **_kwargs):
+            closed_at_llm_time.append(factory.sessions[0].closed)
+            return False
+
+        with patch.object(GuardrailService, "_llm_evaluate", new=_spy):
+            await service.evaluate_input("hi")
+
+        assert closed_at_llm_time == [True]
+
+    async def test_log_event_opens_its_own_session(
+        self, mock_policy_repo, mock_guardrail_event_repo
+    ):
+        """The audit write builds its repo from a fresh session (create() owns
+        that session's commit/close in its own finally)."""
+        factory = _make_session_factory()
+        event_repo_cls = MagicMock(return_value=mock_guardrail_event_repo)
+        service = GuardrailService(
+            session_factory=factory,
+            policy_repo_cls=MagicMock(return_value=mock_policy_repo),
+            event_repo_cls=event_repo_cls,
+        )
+
+        await service.log_event("input", "text", GuardrailDecision(blocked=False))
+
+        # A session was created and handed to the event repo class.
+        assert factory.sessions, "log_event did not open a session"
+        event_repo_cls.assert_called_once_with(factory.sessions[-1])
         mock_guardrail_event_repo.create.assert_called_once()

@@ -2,11 +2,32 @@
 from __future__ import annotations
 
 import uuid
-
-import pytest
 from unittest.mock import AsyncMock, MagicMock
 
-from src.services.guardrail_service import GuardrailDecision, GuardrailService
+import pytest
+
+from src.services.guardrail_service import GuardrailService
+
+
+class _FakeSession:
+    """Async-context-manager session stub (no real DB in these tests)."""
+
+    async def __aenter__(self) -> _FakeSession:
+        return self
+
+    async def __aexit__(self, *exc: object) -> bool:
+        return False
+
+    async def close(self) -> None:
+        return None
+
+
+def _build_service(policy_repo: AsyncMock, event_repo: AsyncMock) -> GuardrailService:
+    return GuardrailService(
+        session_factory=lambda: _FakeSession(),
+        policy_repo_cls=MagicMock(return_value=policy_repo),
+        event_repo_cls=MagicMock(return_value=event_repo),
+    )
 
 
 @pytest.fixture
@@ -26,10 +47,7 @@ def guardrail_service(
     mock_policy_repo: AsyncMock,
     mock_event_repo: AsyncMock,
 ) -> GuardrailService:
-    return GuardrailService(
-        policy_repo=mock_policy_repo,
-        guardrail_event_repo=mock_event_repo,
-    )
+    return _build_service(mock_policy_repo, mock_event_repo)
 
 
 async def test_clean_message_passes_through(
@@ -50,10 +68,7 @@ async def test_jailbreak_sets_blocked_flag(
     policy.rule_text = "no jailbreak"
     mock_policy_repo.list_active.return_value = [policy]
 
-    svc = GuardrailService(
-        policy_repo=mock_policy_repo,
-        guardrail_event_repo=mock_event_repo,
-    )
+    svc = _build_service(mock_policy_repo, mock_event_repo)
     svc._llm_evaluate = AsyncMock(return_value=True)
 
     decision = await svc.evaluate_input(

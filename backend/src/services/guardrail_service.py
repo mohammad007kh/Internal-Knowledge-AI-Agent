@@ -10,6 +10,8 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from src.core.config import settings
+from src.repositories.company_policy_repository import CompanyPolicyRepository
+from src.repositories.guardrail_event_repository import GuardrailEventRepository
 
 logger = logging.getLogger(__name__)
 
@@ -32,23 +34,37 @@ class GuardrailDecision:
 class GuardrailService:
     """Evaluates messages against active company policies.
 
-    Dependencies are injected to keep the class unit-testable.
+    Owns its DB access via a ``session_factory`` and opens a fresh, short-lived
+    :class:`AsyncSession` for each DB touch (mirroring
+    :class:`~src.services.ai_model_resolver.AIModelResolver`). This keeps the
+    scoping in the DI graph instead of enumerating session-bound repos at the
+    API edge, and — crucially — never holds a pooled connection open across the
+    LLM evaluation (the read session is returned to the pool *before* the
+    per-policy LLM calls run), avoiding pool starvation under stream concurrency
+    (#285, follow-up from the #276 leak fix).
 
     Args:
-        policy_repo: Repository that provides :class:`~src.models.company_policy.CompanyPolicy`
-            records.
-        guardrail_event_repo: Repository for persisting guardrail audit events.
+        session_factory: Zero-arg callable returning an ``AsyncSession`` (the
+            ``AsyncSessionLocal`` sessionmaker). Called once per DB operation.
+        policy_repo_cls / event_repo_cls: Repository classes, taking a session.
+            Injectable so unit tests can substitute fakes without a real DB
+            (preserves the original "dependencies injected for testability"
+            seam); default to the real repositories.
+        openai_client / ai_model_resolver: LLM access; both Container Singletons.
     """
 
     def __init__(
         self,
-        policy_repo: Any,
-        guardrail_event_repo: Any,
+        session_factory: Any,
+        *,
+        policy_repo_cls: Any = CompanyPolicyRepository,
+        event_repo_cls: Any = GuardrailEventRepository,
         openai_client: Any = None,
         ai_model_resolver: Any = None,
     ) -> None:
-        self._policy_repo = policy_repo
-        self._event_repo = guardrail_event_repo
+        self._session_factory = session_factory
+        self._policy_repo_cls = policy_repo_cls
+        self._event_repo_cls = event_repo_cls
         # When a resolver is provided we resolve at call time (preferred,
         # honours admin updates).  ``openai_client`` is the legacy fallback.
         self._openai_client = openai_client
@@ -78,7 +94,7 @@ class GuardrailService:
         Returns:
             :class:`GuardrailDecision` indicating whether the message is safe.
         """
-        policies = await self._policy_repo.list_active()
+        policies = await self._list_active_policies()
         decision = await self._evaluate(text, policies, client=client, slot="input_guard")
         await self._log_event("input", text, decision, session_id)
         return decision
@@ -100,7 +116,7 @@ class GuardrailService:
         Returns:
             :class:`GuardrailDecision` indicating whether the response is safe.
         """
-        policies = await self._policy_repo.list_active()
+        policies = await self._list_active_policies()
         decision = await self._evaluate(text, policies, client=client, slot="output_guard")
         await self._log_event("output", text, decision, session_id)
         return decision
@@ -120,7 +136,10 @@ class GuardrailService:
             decision: The :class:`GuardrailDecision` result.
             session_id: Optional session identifier.
         """
-        await self._event_repo.create(
+        # A fresh session per audit write; the repo's ``create`` commits and
+        # closes it (returns the connection to the pool) in its own ``finally``.
+        event_repo = self._event_repo_cls(self._session_factory())
+        await event_repo.create(
             {
                 "direction": direction,
                 "text": text,
@@ -134,6 +153,16 @@ class GuardrailService:
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
+
+    async def _list_active_policies(self) -> list[Any]:
+        """Fetch active policies in a short-lived, self-closing session.
+
+        The session is opened and closed HERE (via ``async with``) so the pooled
+        connection is returned BEFORE the per-policy LLM calls in
+        :meth:`_evaluate` run — never held across network I/O (#285).
+        """
+        async with self._session_factory() as session:
+            return await self._policy_repo_cls(session).list_active()
 
     async def _evaluate(
         self,

@@ -259,8 +259,12 @@ class Container(containers.DeclarativeContainer):
     )
     guardrail_service: providers.Factory[GuardrailService] = providers.Factory(
         GuardrailService,
-        policy_repo=company_policy_repo,
-        guardrail_event_repo=guardrail_event_repo,
+        # Pass the sessionmaker (Object, not Factory) so the service opens a
+        # fresh session per DB touch and returns it to the pool immediately —
+        # scoping lives here in the DI graph, not enumerated at the chat API
+        # edge (#285). The service builds company_policy / guardrail_event repos
+        # internally per call.
+        session_factory=session_factory_provider,
         openai_client=openai_client,
         ai_model_resolver=ai_model_resolver,
     )

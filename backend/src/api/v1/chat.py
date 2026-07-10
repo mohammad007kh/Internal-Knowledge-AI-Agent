@@ -21,8 +21,6 @@ from src.models.user import User
 from src.repositories.admin_audit_log_repository import AdminAuditLogRepository
 from src.repositories.chat_repository import ChatMessageRepository, ChatSessionRepository
 from src.repositories.chunk_repository import ChunkRepository
-from src.repositories.company_policy_repository import CompanyPolicyRepository
-from src.repositories.guardrail_event_repository import GuardrailEventRepository
 from src.repositories.source_repository import SourceRepository
 from src.schemas.chat import (
     ChatMessageResponse,
@@ -39,7 +37,6 @@ from src.services.chat_stream_service import (
     history_to_lc_messages,
     run_pipeline_stream,
 )
-from src.services.guardrail_service import GuardrailService
 from src.services.langfuse_tracing_service import LangfuseTracingService
 
 logger = logging.getLogger(__name__)
@@ -107,8 +104,6 @@ async def _scoped_pipeline(
     ``Container.agentic_pipeline`` (sandbox); ``session_factory`` is the raw
     ``AsyncSessionLocal`` sessionmaker.
     """
-    from src.core.container import Container  # noqa: PLC0415
-
     async with AsyncExitStack() as stack:
 
         async def _session() -> AsyncSession:
@@ -122,22 +117,10 @@ async def _scoped_pipeline(
                 session=await _session()
             ),
             source_repository=SourceRepository(session=await _session()),
-            # guardrail_service is NOT a bare provider default here: left
-            # unscoped it resolves from the Container with its OWN two
-            # session-bound repos (company_policy + guardrail_event), and
-            # GuardrailService.evaluate_input runs policy_repo.list_active() on
-            # EVERY stream — so those sessions would leak on the exact disconnect
-            # path this fixes. Scope them too. (openai_client / ai_model_resolver
-            # are Singletons — safe to resolve directly.) The durable fix is to
-            # move these repos to the session_factory pattern — tracked follow-up.
-            guardrail_service=GuardrailService(
-                policy_repo=CompanyPolicyRepository(session=await _session()),
-                guardrail_event_repo=GuardrailEventRepository(
-                    session=await _session()
-                ),
-                openai_client=Container.openai_client(),
-                ai_model_resolver=Container.ai_model_resolver(),
-            ),
+            # guardrail_service is intentionally NOT overridden here: it now owns
+            # its own session_factory and opens a short-lived session per DB
+            # touch (closed before the LLM eval), so the Container default no
+            # longer leaks on the disconnect path (#285, follow-up from #276).
         )
         yield pipeline
 

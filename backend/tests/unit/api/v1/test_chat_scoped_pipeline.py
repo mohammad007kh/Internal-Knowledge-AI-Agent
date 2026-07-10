@@ -49,29 +49,19 @@ def _session_factory(log: list):
 
 
 # Session-holder kwargs the helper must supply so none falls back to a
-# Container-minted, unscoped session. Includes guardrail_service, whose two
-# session-bound repos leaked before the fix.
+# Container-minted, unscoped session. guardrail_service is NO LONGER here: as of
+# #285 it owns a session_factory and self-scopes per DB touch, so the helper no
+# longer overrides it (and no longer touches the Container).
 _HOLDER_KWARGS = {
     "db_session",
     "chunk_repository",
     "chat_session_repository",
     "chat_message_repository",
     "source_repository",
-    "guardrail_service",
 }
-# Total scoped sessions the helper opens: db_session + 4 repos + guardrail's 2
-# repos (company_policy + guardrail_event).
-_EXPECTED_SESSIONS = 7
-
-
-@pytest.fixture(autouse=True)
-def _stub_container_singletons(monkeypatch):
-    """The guardrail override resolves the openai/ai-model Singletons directly;
-    stub them so the unit test needs no real config/clients."""
-    from src.core.container import Container
-
-    monkeypatch.setattr(Container, "openai_client", lambda: object())
-    monkeypatch.setattr(Container, "ai_model_resolver", lambda: object())
+# Total scoped sessions the helper opens: db_session + 4 repos (guardrail moved
+# into the DI graph in #285).
+_EXPECTED_SESSIONS = 5
 
 
 async def test_scoped_pipeline_wires_all_holders_and_closes_on_normal_exit() -> None:
