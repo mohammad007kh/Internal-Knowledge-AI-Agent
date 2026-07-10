@@ -3,8 +3,8 @@
 Supported file types
 --------------------
 * ``pdf``      — structure-aware extraction via ``unstructured`` (pdfminer.six
-                 backend, ``strategy='fast'``).  Falls back to PyPDF2 page-text
-                 dump on parser failure.
+                 backend, ``strategy='fast'``).  Falls back to ``pypdf``
+                 page-text dump on parser failure.
 * ``docx``     — structure-aware extraction via ``unstructured`` — preserves
                  tables (as HTML), headings, headers, footers and list
                  bullets.  Falls back to python-docx paragraph-only dump on
@@ -61,6 +61,14 @@ if TYPE_CHECKING:
     pass
 
 logger = logging.getLogger(__name__)
+
+# PDF parse strategy. MUST stay "fast" (unstructured's pdfminer.six text path).
+# "hi_res"/"auto" load unstructured-inference's ML layout models (torch/timm) —
+# the backend image ships CPU-only torch and has no GPU, so hi_res would be slow;
+# and if torch is ever dropped entirely (see backend/Dockerfile + the #264
+# follow-up) hi_res would raise ImportError at runtime. Keep this a documented
+# constant so nobody flips it to an ML strategy without weighing that.
+_PDF_PARSE_STRATEGY = "fast"
 
 # ---------------------------------------------------------------------------
 # Supported file-type constants
@@ -399,8 +407,8 @@ class FileUploadConnector(BaseConnector):
         as individual elements.  No OCR is performed; scanned / image-only
         PDFs are still effectively unparseable here.
 
-        Falls back to the legacy PyPDF2 page-text dump on any failure so a
-        single bad file cannot break the ingestion pipeline.
+        Falls back to the maintained ``pypdf`` page-text dump on any failure so
+        a single bad file cannot break the ingestion pipeline.
         """
         import io  # noqa: PLC0415
 
@@ -408,20 +416,20 @@ class FileUploadConnector(BaseConnector):
             from unstructured.partition.pdf import partition_pdf  # noqa: PLC0415
             from unstructured.staging.base import elements_to_md  # noqa: PLC0415
 
-            elements = partition_pdf(file=io.BytesIO(data), strategy="fast")
+            elements = partition_pdf(file=io.BytesIO(data), strategy=_PDF_PARSE_STRATEGY)
             rendered = elements_to_md(elements)
             if rendered.strip():
                 return rendered
         except Exception:  # noqa: BLE001
             logger.warning(
                 "FileUploadConnector: unstructured PDF parser failed; "
-                "falling back to PyPDF2 page-text dump.",
+                "falling back to pypdf page-text dump.",
                 exc_info=True,
             )
 
-        import PyPDF2  # type: ignore[import-untyped]  # noqa: PLC0415
+        import pypdf  # noqa: PLC0415
 
-        reader = PyPDF2.PdfReader(io.BytesIO(data))
+        reader = pypdf.PdfReader(io.BytesIO(data))
         parts: list[str] = []
         for page in reader.pages:
             page_text: str = page.extract_text() or ""

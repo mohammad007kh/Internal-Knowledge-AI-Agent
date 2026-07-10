@@ -737,5 +737,22 @@ class TestRouterRegistration:
     def test_users_router_registered_in_v1(self):
         from src.api.v1.router import api_v1_router
 
-        paths = [route.path for route in api_v1_router.routes]
-        assert any("/users" in p for p in paths)
+        def _iter_paths(router):
+            # Old FastAPI flattened included routes (each exposes `.path`);
+            # newer FastAPI wraps them as `_IncludedRouter`, which has no
+            # `.path`. There the mount prefix (e.g. "/users") lives on
+            # `include_context.prefix` and the wrapped APIRouter is exposed
+            # via `original_router`.
+            for route in getattr(router, "routes", []):
+                path = getattr(route, "path", None)
+                if path is not None:
+                    yield path
+                ctx = getattr(route, "include_context", None)
+                prefix = getattr(ctx, "prefix", None)
+                if prefix:
+                    yield prefix
+                nested = getattr(route, "original_router", None)
+                if nested is not None:
+                    yield from _iter_paths(nested)
+
+        assert any("/users" in p for p in _iter_paths(api_v1_router))
