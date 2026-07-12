@@ -817,7 +817,7 @@ async def submit_message_feedback(
     belongs to. Admins can update feedback on any message.
     """
     if body.rating not in (-1, 1):
-        return problem(
+        raise problem(
             status=status.HTTP_422_UNPROCESSABLE_ENTITY,
             title="Invalid rating",
             detail="rating must be either +1 (thumbs up) or -1 (thumbs down).",
@@ -834,7 +834,7 @@ async def submit_message_feedback(
         )
     )
     if msg is None:
-        return problem(
+        raise problem(
             status=status.HTTP_404_NOT_FOUND,
             title="Message not found",
             detail="No message found for that session_id / message_id pair.",
@@ -846,7 +846,7 @@ async def submit_message_feedback(
         select(ChatSession).where(ChatSession.id == session_id)
     )
     if session is None:
-        return problem(
+        raise problem(
             status=status.HTTP_404_NOT_FOUND,
             title="Session not found",
             detail="No session found for that session_id.",
@@ -857,7 +857,7 @@ async def submit_message_feedback(
         current_user.role != UserRole.admin
         and str(session.user_id) != str(current_user.id)
     ):
-        return problem(
+        raise problem(
             status=status.HTTP_403_FORBIDDEN,
             title="Forbidden",
             detail="You may only submit feedback on messages from your own sessions.",
