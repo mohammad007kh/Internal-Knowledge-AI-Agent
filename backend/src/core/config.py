@@ -113,6 +113,25 @@ class Settings(BaseSettings):
     # The node code is kept; admins can re-enable per-environment without
     # redeploying.
     PIPELINE_CLARIFY_ENABLED: bool = False
+    # Agentic pipeline (004) — plan-and-execute evolution behind an
+    # operator-controlled switch. Default OFF; sandbox honors it first and it
+    # is widened only after eval gates pass (FR-026). These are the single
+    # source of truth for the hard caps that bound every turn's cost
+    # (FR-019): every loop edge in the agent graph reads from here.
+    PIPELINE_AGENTIC_ENABLED: bool = False
+    # Hard caps (R2) — bound the plan-and-execute loop.
+    AGENT_MAX_PLAN_STEPS: int = 5
+    AGENT_MAX_PLAN_REVISIONS: int = 1
+    AGENT_MAX_STEP_RETRIES: int = 1
+    # Processing-cost (token) ceiling — seed values replaced by p95 from eval
+    # runs (R9).
+    AGENT_TOKEN_CEILING_INPUT: int = 30000
+    AGENT_TOKEN_CEILING_OUTPUT: int = 4000
+    # Wall-clock guard. None = disabled; a concrete value is set at rollout
+    # (HUMAN-GATE in Slice F). NOTE: to disable, OMIT the env var entirely —
+    # setting AGENT_TURN_DEADLINE_SECS= (empty string) is a ValidationError
+    # at boot (pydantic does not coerce '' to None for int|None).
+    AGENT_TURN_DEADLINE_SECS: int | None = None
     # App config (loaded from YAML)
     upload_max_size_bytes: int = 52428800
     upload_supported_formats: list[str] = ["pdf", "docx", "xlsx", "csv", "txt", "md"]

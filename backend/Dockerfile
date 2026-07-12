@@ -29,6 +29,19 @@ RUN groupadd -r appuser && useradd -r -g appuser -u 1000 appuser \
 # `pip install -e` creates `*.egg-info` directories under /app owned by
 # root; chown them back to appuser so importlib.metadata cache rebuilds
 # at runtime don't hit PermissionError under any pkg_resources path.
+# Install the CPU-only torch build FIRST, from PyTorch's official CPU index, so
+# the editable install below sees torch already satisfied and never resolves the
+# ~1.5-2 GB CUDA wheels from PyPI (transitive via unstructured[pdf] → timm, used
+# only by the hi_res path we never invoke — see _PDF_PARSE_STRATEGY). Runtime has
+# no GPU. `--index-url` (a REPLACEMENT index, not `--extra-index-url`) is required:
+# an extra-index leaves pip free to pick the CUDA wheel from PyPI for the same
+# version. Pinned to the version the full resolve selects (torch==2.13.0).
+# This layer is above `COPY pyproject.toml` on purpose: it depends on nothing in
+# the project, so it stays cached across pyproject edits and the ~200 MB CPU
+# wheel isn't re-downloaded every time a dependency is tweaked.
+RUN pip install --no-cache-dir \
+      --index-url https://download.pytorch.org/whl/cpu \
+      "torch==2.13.0+cpu"
 COPY --chown=appuser:appuser pyproject.toml .
 RUN pip install --no-cache-dir -e ".[dev]" \
  && chown -R appuser:appuser /app

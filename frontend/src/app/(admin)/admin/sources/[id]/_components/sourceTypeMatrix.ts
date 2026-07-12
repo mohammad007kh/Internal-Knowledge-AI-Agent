@@ -54,6 +54,15 @@ export function sourceKindOf(sourceType: SourceType): SourceKind {
 }
 
 /**
+ * Single source of truth for "is this a database source?" — collapses the
+ * inline `source_type === 'database'` / `sourceKindOf(t) === 'database'`
+ * variants and matches DB dialect strings (postgresql/mysql/…) too (FX41).
+ */
+export function isDatabaseSource(sourceType: SourceType | string): boolean {
+  return sourceKindOf(sourceType as SourceType) === 'database'
+}
+
+/**
  * Per-type label for the second tab on the source detail page.
  *
  * We picked "Schema" over "Tables" for DB sources so the tab label maps

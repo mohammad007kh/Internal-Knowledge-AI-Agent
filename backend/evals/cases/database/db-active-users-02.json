@@ -1,0 +1,11 @@
+{
+  "id": "db-active-users-02",
+  "source_type": "database",
+  "question": "How many active users are in the seed dataset?",
+  "expected_kind": "answer",
+  "golden_answer": "There are 7 active users in the dataset.",
+  "must_include": ["7"],
+  "must_not_fabricate": true,
+  "fixtures": {"seed": "evals/fixtures/cctp-mini.sql"},
+  "data_source": "synthetic"
+}

@@ -8,6 +8,23 @@ This file tracks ALL changes to `registry.yaml`. Every update requires Human-In-
 
 ## Change Log
 
+### 2026-06-04 | api.rate_limiting
+- **Changed**: `none` → `sliding_window`
+- **Why**: Drift correction — per-IP rate limiting on auth endpoints plus
+  per-email account lockout shipped after the registry was seeded; the
+  registry still said "none (MVP)". Found during 004-agentic-pipeline
+  conventions/drift review (HITL #4).
+- **Source**: specs/004-agentic-pipeline/plan.md
+- **Approved by**: Human (accept — "Update both")
+
+### 2026-06-04 | ui_specs.animations
+- **Changed**: `none` → `minimal`
+- **Why**: The 004 transparency UX (§3D.1 design pass) adopts subtle
+  CSS-only transitions (200ms ease expansion, fade+slide-in for live
+  activity blocks). No animation library introduced.
+- **Source**: specs/004-agentic-pipeline/plan.md
+- **Approved by**: Human (accept — "Update both")
+
 ### 2026-04-21 | backend.sse_pattern
 - **Changed**: `null` → `fastapi_streaming_response`
 - **Why**: Phase 2 chat interface requires real-time token streaming. FastAPI `StreamingResponse` with `text/event-stream` + browser `fetch()` + `ReadableStream` chosen over EventSource (allows POST, custom headers).
@@ -164,4 +181,17 @@ Template for deviation entries:
 
 -->
 
-*No deviations recorded yet.*
+### 2026-06-07 | Deviation in 004-agentic-pipeline (T-055 heavy SQL verification)
+- **Key**: R3 heavy-DB-verification gate (data-model §2b) — NOT a registry key; a data-model spec deviation logged here for visibility per supervisor ruling.
+- **Spec defines**: deterministic gate fails on any of 4 checks, including (#3) "every referenced table/column exists in the schema sketch" and (#4) "filter/JOIN present when the sub_query implies one".
+- **Spec uses**:
+  1. **`missing_filter` (#4) demoted to warning-only** — computed and recorded in `verification.checks` but NO LONGER a gate-failure trigger. Gate-fail set = `zero_rows_when_expected OR schema_mismatch`. The filter heuristic false-positives on `GROUP BY`/`ORDER BY`/"data for X"; a false positive forces a wasted retry. Ambiguous-filter cases now route to the LLM judge instead of being pre-rejected.
+  2. **`schema_mismatch` (#3) approximated** as "SELECT-list columns ⊆ columns recovered from rendered result rows" (skipped → route-to-judge for `SELECT *`/aggregates/undeterminable projections). The verify node has no schema sketch in `StepResult` and no structured column metadata is carried, so the rendered `col: value` text is the only available signal.
+- **Reason**: Adjudicated by an architect-supervisor review after code-reviewer + dual security review surfaced false-gate-failure bugs (aggregates/UNION/CTE) and prompt-injection risks. Preserves the R3 intent (catch plausible-but-wrong DB results cheaply) while eliminating false rejections.
+- **Approved by**: Human (lead, acting on supervisor ruling)
+
+### 2026-06-15 | Amendment in 004-agentic-pipeline (T-092 constitution Article IV)
+- **Key**: `memory/constitution.md` Article IV (Agent Pipeline Safety) — governance amendment, not a registry key.
+- **Reason**: The descriptive node count ("LangGraph 8-node pipeline") became stale when the agentic planner-based plan-and-execute graph shipped (T-058). A fixed count in a constitution invites either silent violation or churn on every graph change.
+- **Impact analysis**: Wording-only generalization + one strengthened principle. All four original guarantees preserved (single permitted path; no shortcut responses; input/output guardrails on every request, non-bypassable; reflection defaults OFF). Node-specific names generalized to roles ("Input and output guardrails", "Reflection (self-critique)") so the principles survive future graph refactors. Added a bounded-loops invariant — steps/retries/revisions/token-budget/deadline each have a hard cap; on reaching any cap the pipeline halts and returns an honest partial-or-abstain response — codifying the 004 loop-safety rule (backed by the implemented budget guard, so enforceable, not aspirational). No registry key affected.
+- **Approved by**: Human (lead) — via expert panel (architect-review: approve-with-edits) + supervisor synthesis, per the owner's "consult experts and continue with their recommendation" directive.

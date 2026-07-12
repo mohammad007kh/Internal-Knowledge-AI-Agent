@@ -23,9 +23,10 @@ second worker observes ``is_running == True`` and short-circuits.
 from __future__ import annotations
 
 import uuid
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
-from typing import Any, AsyncIterator
+from datetime import UTC, datetime
+from typing import Any
 
 from sqlalchemy import select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -168,7 +169,7 @@ class SchemaStudyRepository:
                 schema_document_json=schema_document_json,
                 fingerprint=fingerprint,
                 partial=partial,
-                finished_at=datetime.now(tz=timezone.utc),
+                finished_at=datetime.now(tz=UTC),
             )
         )
         await self._session.execute(stmt)
@@ -179,11 +180,18 @@ class SchemaStudyRepository:
         *,
         phase: str,
         message: str,
+        failure_category: str | None = None,
+        attempts_made: int | None = None,
     ) -> None:
         """Stamp a study row as ``<phase>_FAILED`` with a sanitised message.
 
         ``message`` MUST already be sanitised — connection strings or
         credentials should never reach this method.
+
+        ``failure_category`` / ``attempts_made`` are set only for DB *connection*
+        failures (surfaced by ``connect_with_retry``); they are paired — both
+        provided or both ``None`` (non-connection failures and cancellations
+        leave them NULL).
         """
         terminal_state = f"{phase}_FAILED"
         stmt = (
@@ -193,7 +201,9 @@ class SchemaStudyRepository:
                 state=terminal_state,
                 last_error_phase=phase,
                 last_error_message=message,
-                finished_at=datetime.now(tz=timezone.utc),
+                failure_category=failure_category,
+                attempts_made=attempts_made,
+                finished_at=datetime.now(tz=UTC),
             )
         )
         await self._session.execute(stmt)

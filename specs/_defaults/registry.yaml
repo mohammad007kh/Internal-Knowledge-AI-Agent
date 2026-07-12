@@ -11,7 +11,7 @@
 
 version: 2
 created: 2026-02-25
-last_updated: 2026-02-25
+last_updated: 2026-06-04
 last_updated_by: human
 
 # ============================================================================
@@ -105,7 +105,7 @@ api:
   error_format: rfc7807
 
   # Rate limiting approach: token_bucket | sliding_window | fixed_window | none
-  rate_limiting: none  # MVP — add post-launch
+  rate_limiting: sliding_window  # per-IP on auth endpoints + per-email account lockout (shipped post-MVP)
 
   # Idempotency requirement: required | optional | none
   idempotency: optional
@@ -347,7 +347,7 @@ ui_specs:
   accessibility: wcag-aa
 
   # Animation library: framer-motion | react-spring | css | gsap | none
-  animations: none
+  animations: minimal  # CSS-only subtle transitions (200ms ease expand, fade+slide-in) per 004 §3D.1; no animation library
 
   # Design token source: figma | css-variables | tokens-json | style-dictionary | none
   design_tokens: none  # Use shadcn defaults; customise via CSS variables
@@ -396,3 +396,6 @@ applied_to:
   - feature: bug-fixes
     spec_path: specs/002-bug-fixes/spec.md
     applied_at: 2026-02-25
+  - feature: agentic-pipeline
+    spec_path: specs/004-agentic-pipeline/spec.md
+    applied_at: 2026-06-04

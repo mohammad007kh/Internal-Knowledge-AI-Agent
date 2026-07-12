@@ -19,6 +19,21 @@ from src.connectors.base import Document
 from src.connectors.database_connector import (
     SqlDatabaseConnector as DatabaseConnector,
 )
+from src.connectors.database_connector import (
+    _sanitise,
+)
+from src.services.db_safety.connect_retry import (
+    DBConnectionFailed,
+    DBConnFailureCategory,
+    RetryPolicy,
+)
+
+# A no-sleep, single-attempt policy so connect() failure tests don't incur real
+# retry backoff. Patched onto the connector's module-level policy where needed.
+_FAST_FAIL_POLICY = RetryPolicy(
+    name="test-fast", transient_attempts=1, base_delay=0.0, max_delay=0.0,
+    deadline=5.0,
+)
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -138,10 +153,70 @@ async def test_connect_calls_create_async_engine() -> None:
     assert conn._engine is not None  # noqa: SLF001
 
 
+async def test_connect_asyncpg_passes_server_settings_connect_args() -> None:
+    # Default _CONN_STR is a postgresql+asyncpg URL → hardening flows via
+    # connect_args server_settings (the URL itself is unchanged).
+    conn = _make_connector(extra={"db_type": "postgresql"})
+    engine = _mock_engine([])
+    fake_conn = AsyncMock()
+    fake_conn.execute = AsyncMock(return_value=MagicMock())
+    conn_ctx = MagicMock()
+    conn_ctx.__aenter__ = AsyncMock(return_value=fake_conn)
+    conn_ctx.__aexit__ = AsyncMock(return_value=False)
+    engine.connect = MagicMock(return_value=conn_ctx)
+
+    with patch(
+        "src.connectors.database_connector.create_async_engine",
+        return_value=engine,
+    ) as mock_create:
+        await conn.connect()
+
+    connect_args = mock_create.call_args.kwargs["connect_args"]
+    assert "server_settings" in connect_args
+    assert (
+        connect_args["server_settings"]["default_transaction_read_only"] == "on"
+    )
+
+
+async def test_connect_libpq_passes_empty_connect_args() -> None:
+    # A libpq (non-asyncpg) postgres URL hardens via the URL options=, so
+    # connect_args must stay empty.
+    conn = _make_connector(
+        extra={
+            "db_type": "postgresql",
+            "connection_string": "postgresql://user:secret@localhost:5432/testdb",
+        }
+    )
+    engine = _mock_engine([])
+    fake_conn = AsyncMock()
+    fake_conn.execute = AsyncMock(return_value=MagicMock())
+    conn_ctx = MagicMock()
+    conn_ctx.__aenter__ = AsyncMock(return_value=fake_conn)
+    conn_ctx.__aexit__ = AsyncMock(return_value=False)
+    engine.connect = MagicMock(return_value=conn_ctx)
+
+    with patch(
+        "src.connectors.database_connector.create_async_engine",
+        return_value=engine,
+    ) as mock_create:
+        await conn.connect()
+
+    assert mock_create.call_args.kwargs["connect_args"] == {}
+    # Hardening rides in the URL instead (passed positionally as conn_str;
+    # the options= value is URL-encoded, so decode before the substring check).
+    from urllib.parse import unquote
+
+    assert (
+        "default_transaction_read_only=on"
+        in unquote(mock_create.call_args.args[0])
+    )
+
+
 async def test_connect_raises_connection_error_on_failure() -> None:
     conn = _make_connector()
 
     failing_engine = MagicMock()
+    failing_engine.dispose = AsyncMock()
     conn_ctx = MagicMock()
     fake_conn = AsyncMock()
     fake_conn.execute = AsyncMock(side_effect=Exception("authentication failed password=secret"))
@@ -150,6 +225,7 @@ async def test_connect_raises_connection_error_on_failure() -> None:
     failing_engine.connect = MagicMock(return_value=conn_ctx)
 
     with patch("src.connectors.database_connector.create_async_engine", return_value=failing_engine):
+        # DBConnectionFailed IS a ConnectionError, so existing handlers hold.
         with pytest.raises(ConnectionError):
             await conn.connect()
 
@@ -159,6 +235,7 @@ async def test_connect_error_message_does_not_contain_connection_string() -> Non
     conn = _make_connector()
 
     failing_engine = MagicMock()
+    failing_engine.dispose = AsyncMock()
     conn_ctx = MagicMock()
     fake_conn = AsyncMock()
     fake_conn.execute = AsyncMock(side_effect=Exception("db error"))
@@ -166,7 +243,10 @@ async def test_connect_error_message_does_not_contain_connection_string() -> Non
     conn_ctx.__aexit__ = AsyncMock(return_value=False)
     failing_engine.connect = MagicMock(return_value=conn_ctx)
 
-    with patch("src.connectors.database_connector.create_async_engine", return_value=failing_engine):
+    with (
+        patch("src.connectors.database_connector.create_async_engine", return_value=failing_engine),
+        patch("src.connectors.database_connector._INGEST_CONNECT_POLICY", _FAST_FAIL_POLICY),
+    ):
         try:
             await conn.connect()
         except ConnectionError as exc:
@@ -175,6 +255,67 @@ async def test_connect_error_message_does_not_contain_connection_string() -> Non
             )
         else:
             pytest.fail("Expected ConnectionError was not raised")
+
+
+async def test_connect_raises_db_connection_failed_with_category_and_disposes() -> None:
+    """Connect failure surfaces a categorised DBConnectionFailed and never leaks
+    the engine built for the failed attempt."""
+    conn = _make_connector()
+
+    failing_engine = MagicMock()
+    failing_engine.dispose = AsyncMock()
+    conn_ctx = MagicMock()
+    fake_conn = AsyncMock()
+    fake_conn.execute = AsyncMock(
+        side_effect=Exception("password authentication failed for user x")
+    )
+    conn_ctx.__aenter__ = AsyncMock(return_value=fake_conn)
+    conn_ctx.__aexit__ = AsyncMock(return_value=False)
+    failing_engine.connect = MagicMock(return_value=conn_ctx)
+
+    with patch(
+        "src.connectors.database_connector.create_async_engine",
+        return_value=failing_engine,
+    ):
+        with pytest.raises(DBConnectionFailed) as ei:
+            await conn.connect()
+
+    # Auth = permanent → fail fast at 1 attempt, no leaked engine.
+    assert ei.value.category is DBConnFailureCategory.AUTH_FAILED
+    assert ei.value.attempts_made == 1
+    assert isinstance(ei.value, ConnectionError)
+    failing_engine.dispose.assert_awaited_once()
+    assert conn._engine is None  # noqa: SLF001
+
+
+async def test_connect_retries_transient_then_succeeds() -> None:
+    """A transient blip on the first attempt is retried; the second succeeds."""
+    conn = _make_connector()
+
+    engine = MagicMock()
+    engine.dispose = AsyncMock()
+    fake_conn = AsyncMock()
+    # First handshake fails (transient), second returns a result.
+    fake_conn.execute = AsyncMock(
+        side_effect=[Exception("connection refused"), MagicMock()]
+    )
+    conn_ctx = MagicMock()
+    conn_ctx.__aenter__ = AsyncMock(return_value=fake_conn)
+    conn_ctx.__aexit__ = AsyncMock(return_value=False)
+    engine.connect = MagicMock(return_value=conn_ctx)
+
+    fast_retry = RetryPolicy(
+        name="t", transient_attempts=3, base_delay=0.0, max_delay=0.0, deadline=5.0
+    )
+    with (
+        patch("src.connectors.database_connector.create_async_engine", return_value=engine),
+        patch("src.connectors.database_connector._INGEST_CONNECT_POLICY", fast_retry),
+    ):
+        await conn.connect()
+
+    assert conn._engine is engine  # noqa: SLF001
+    # The first (failed) attempt disposed its engine; the surviving one is kept.
+    engine.dispose.assert_awaited_once()
 
 
 # ---------------------------------------------------------------------------
@@ -376,6 +517,7 @@ async def test_test_connection_returns_true_on_success() -> None:
 async def test_test_connection_returns_false_on_failure() -> None:
     conn = _make_connector()
     engine = MagicMock()
+    engine.dispose = AsyncMock()
     fake_conn = AsyncMock()
     fake_conn.execute = AsyncMock(side_effect=Exception("connection refused"))
     conn_ctx = MagicMock()
@@ -387,11 +529,14 @@ async def test_test_connection_returns_false_on_failure() -> None:
         result = await conn.test_connection()
 
     assert result is False
+    # Leak fix: the engine is disposed even on the failure path.
+    engine.dispose.assert_awaited_once()
 
 
 async def test_test_connection_never_raises() -> None:
     conn = _make_connector()
     engine = MagicMock()
+    engine.dispose = AsyncMock()
     fake_conn = AsyncMock()
     fake_conn.execute = AsyncMock(side_effect=RuntimeError("unexpected"))
     conn_ctx = MagicMock()
@@ -412,6 +557,7 @@ async def test_test_connection_connection_string_not_in_error_context() -> None:
 
     conn = _make_connector()
     engine = MagicMock()
+    engine.dispose = AsyncMock()
     fake_conn = AsyncMock()
     error_with_creds = Exception(f"auth failed for {_CONN_STR}")
     fake_conn.execute = AsyncMock(side_effect=error_with_creds)
@@ -455,3 +601,46 @@ async def test_async_context_manager_calls_connect_disconnect() -> None:
         async with conn:
             mock_connect.assert_called_once()
         mock_disconnect.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# _sanitise — credential / DSN redaction (FR-020) regression tests
+# ---------------------------------------------------------------------------
+
+
+class TestSanitise:
+    """Lock in the credential-redaction fix so it can never silently regress."""
+
+    def test_redacts_password_containing_at_sign(self) -> None:
+        # Regression: a password with '@' must be FULLY stripped, not just up to
+        # the first '@' (the old `://[^@\\s/]+@` regex leaked the tail).
+        out = _sanitise(
+            "auth failed for postgresql+asyncpg://user:p@ss@host:5432/db"
+        )
+        assert "p@ss" not in out
+        assert "pass" not in out
+        assert "://***@" in out
+
+    def test_redacts_simple_url_credentials(self) -> None:
+        out = _sanitise("could not connect to postgresql://admin:secret@db/app")
+        assert "secret" not in out
+        assert "://***@" in out
+
+    def test_redacts_dsn_keyword_fragments(self) -> None:
+        out = _sanitise(
+            "connection failed: host=db port=5432 user=admin "
+            "password=hunter2 dbname=app"
+        )
+        assert "hunter2" not in out
+        assert "password=<redacted>" in out
+        assert "admin" not in out  # user=<redacted>
+
+    def test_masks_bare_host_port(self) -> None:
+        out = _sanitise("timeout connecting to internal-db.example.com:5432")
+        assert "internal-db.example.com:5432" not in out
+        assert "<host>:<port>" in out
+
+    def test_leaves_credential_free_text_untouched(self) -> None:
+        # No over-redaction of an innocuous message (no URL, no kv, no host:port).
+        msg = "relation \"documents\" does not exist"
+        assert _sanitise(msg) == msg

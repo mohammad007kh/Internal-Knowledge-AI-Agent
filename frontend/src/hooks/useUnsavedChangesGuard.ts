@@ -29,6 +29,16 @@ import { useEffect } from 'react'
  * and `download` anchors are intentionally NOT intercepted — they don't
  * unload the current view.
  *
+ * ## Known limitation — programmatic navigation is NOT guarded
+ *
+ * This hook only intercepts (1) browser unload and (2) real DOM <a>/<Link>
+ * clicks. Imperative App-Router navigation — `router.push()`,
+ * `router.replace()`, `router.back()`, or `redirect()` — bypasses both
+ * layers entirely and will navigate away WITHOUT a confirm prompt. Next.js
+ * App Router exposes no official route-change blocker, so callers that
+ * navigate programmatically while a form is dirty must run their own
+ * `window.confirm` before the call (FX41).
+ *
  * @example
  *   const isDirty = form.formState.isDirty
  *   useUnsavedChangesGuard(isDirty)

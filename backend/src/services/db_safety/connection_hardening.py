@@ -65,10 +65,12 @@ only, ``pg_hba.conf`` restrictions) is the admin's responsibility.
 """
 from __future__ import annotations
 
+import copy
 import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from typing import TYPE_CHECKING, Literal
+from dataclasses import dataclass, field
+from typing import TYPE_CHECKING, Any, Literal
 from urllib.parse import (
     parse_qsl,
     quote,
@@ -157,6 +159,9 @@ def postgres_asyncpg_connect_args(
 ) -> dict[str, dict[str, str]]:
     """Return SQLAlchemy ``connect_args`` that harden an asyncpg connection.
 
+    Prefer :func:`harden_postgres_engine_kwargs` for engine construction; it
+    pairs the two outputs atomically.
+
     The libpq ``?options=-c key=value`` URL trick does NOT work with asyncpg
     — asyncpg's ``connect()`` rejects the ``options=`` kwarg outright. The
     correct asyncpg analogue is ``server_settings={...}``, which asyncpg
@@ -207,6 +212,9 @@ async def harden_postgres_connection(
 ) -> str:
     """Augment a Postgres URL with libpq client options that force read-only
     transactions and a server-side ``statement_timeout``.
+
+    Prefer :func:`harden_postgres_engine_kwargs` for engine construction; it
+    pairs the two outputs atomically.
 
     The function is **idempotent** — calling it on an already-hardened URL
     returns the same string (only the timeout is updated if it differs).
@@ -307,6 +315,74 @@ async def harden_postgres_connection(
 
 
 # ---------------------------------------------------------------------------
+# Public API — combined Postgres engine hardening (atomic pairing)
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True, slots=True)
+class PostgresEngineHardening:
+    """Paired args to build a hardened Postgres async engine — produced atomically
+    so a caller cannot obtain the URL without the matching connect_args.
+
+    Security: ``url`` carries DB credentials, so it is excluded from the
+    auto-generated ``repr`` (``field(repr=False)``) — the object must never leak
+    the password into logs, exception frames, or Langfuse traces.
+    """
+    url: str = field(repr=False)
+    connect_args: dict[str, Any] = field(default_factory=dict)
+    statement_timeout_ms: int = DEFAULT_STATEMENT_TIMEOUT_MS
+
+    def as_create_async_engine_kwargs(self) -> dict[str, Any]:
+        # deepcopy so a caller mutating the returned (nested) connect_args can
+        # never reach into this frozen instance's shared server_settings dict.
+        return {"url": self.url, "connect_args": copy.deepcopy(self.connect_args)}
+
+
+async def harden_postgres_engine_kwargs(
+    connection_string: str,
+    *,
+    statement_timeout_ms: int = DEFAULT_STATEMENT_TIMEOUT_MS,
+) -> PostgresEngineHardening:
+    """Return the complete, paired hardening for a Postgres async engine.
+
+    Postgres-only (rejects non-Postgres URLs, like harden_postgres_connection).
+    For asyncpg: url unchanged + server_settings connect_args. For libpq drivers:
+    options=-injected url + empty connect_args. Composes the two existing
+    functions — does NOT reimplement the merge logic.
+
+    Raises
+    ------
+    ValueError
+        If *connection_string* is not a Postgres URL or
+        *statement_timeout_ms* is non-positive.
+    """
+    if statement_timeout_ms <= 0:
+        raise ValueError(
+            f"statement_timeout_ms must be positive; got {statement_timeout_ms!r}"
+        )
+    if not _is_postgres_url(connection_string):
+        raise ValueError(
+            "harden_postgres_engine_kwargs only supports PostgreSQL URLs "
+            f"(scheme must be one of {sorted(_POSTGRES_SCHEMES)}); got "
+            f"scheme={urlsplit(connection_string).scheme!r}"
+        )
+
+    url = await harden_postgres_connection(
+        connection_string, statement_timeout_ms=statement_timeout_ms
+    )
+    connect_args: dict[str, Any] = (
+        postgres_asyncpg_connect_args(statement_timeout_ms)
+        if _is_asyncpg_url(connection_string)
+        else {}
+    )
+    return PostgresEngineHardening(
+        url=url,
+        connect_args=connect_args,
+        statement_timeout_ms=statement_timeout_ms,
+    )
+
+
+# ---------------------------------------------------------------------------
 # Public API — engine-level hardening (MySQL / MSSQL) + dispatcher
 # ---------------------------------------------------------------------------
 
@@ -336,7 +412,7 @@ def _exec_set(connection: object, statement: str) -> None:
 
 
 def harden_mysql_connection(
-    engine: "AsyncEngine",
+    engine: AsyncEngine,
     *,
     statement_timeout_ms: int = DEFAULT_STATEMENT_TIMEOUT_MS,
 ) -> None:
@@ -384,7 +460,7 @@ def harden_mysql_connection(
 
 
 def harden_mssql_connection(
-    engine: "AsyncEngine",
+    engine: AsyncEngine,
     *,
     statement_timeout_ms: int = DEFAULT_STATEMENT_TIMEOUT_MS,
 ) -> None:
@@ -442,7 +518,7 @@ def mssql_connect_args(statement_timeout_ms: int = DEFAULT_STATEMENT_TIMEOUT_MS)
 
 
 def harden_connection(
-    engine: "AsyncEngine",
+    engine: AsyncEngine,
     *,
     dialect: HardenableDialect,
     statement_timeout_ms: int = DEFAULT_STATEMENT_TIMEOUT_MS,
@@ -481,9 +557,9 @@ def harden_connection(
 
 @asynccontextmanager
 async def read_only_session(
-    engine: "AsyncEngine",
+    engine: AsyncEngine,
     statement_timeout_ms: int = DEFAULT_STATEMENT_TIMEOUT_MS,
-) -> AsyncIterator["AsyncSession"]:
+) -> AsyncIterator[AsyncSession]:
     """Yield a SQLAlchemy ``AsyncSession`` bound to a read-only transaction.
 
     On entry the transaction issues:

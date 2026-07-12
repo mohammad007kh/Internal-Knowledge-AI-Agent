@@ -1,0 +1,11 @@
+{
+  "id": "db-decline-unknown-user-05",
+  "source_type": "database",
+  "question": "How many workspaces does Zephyr have?",
+  "expected_kind": "decline",
+  "golden_answer": "There is no user named Zephyr in the dataset, so I can't report any workspace count for them.",
+  "must_include": [],
+  "must_not_fabricate": true,
+  "fixtures": {"seed": "evals/fixtures/cctp-mini.sql"},
+  "data_source": "synthetic"
+}

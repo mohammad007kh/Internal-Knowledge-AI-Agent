@@ -24,11 +24,11 @@ from __future__ import annotations
 import os
 import uuid
 from contextlib import asynccontextmanager
+from datetime import UTC
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-
 
 os.environ.setdefault("DATABASE_URL", "postgresql+asyncpg://test:test@localhost/test")
 os.environ.setdefault("JWT_SECRET_KEY", "test-jwt-secret-key-at-least-32-chars-long!!")
@@ -100,14 +100,14 @@ def _make_schema_document() -> Any:
     Empty ``tables`` is allowed; the fingerprint is recomputed by the task
     so we don't need to pre-populate it correctly.
     """
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     from src.services.db_introspection.schema_doc import SchemaDocument
 
     return SchemaDocument(
         dialect="postgresql",
         fingerprint="0" * 64,
-        generated_at=datetime.now(tz=timezone.utc),
+        generated_at=datetime.now(tz=UTC),
         agent_version="test@1",
         study_duration_ms=0,
         partial=False,
@@ -500,6 +500,83 @@ async def test_failure_path_uses_phase_from_schema_study_phase_error():
     statuses = [c.args[1] for c in set_schema_status.await_args_list]
     assert "studying" in statuses
     assert "failed" in statuses
+
+
+async def test_failure_path_forwards_connection_failure_metadata():
+    """A CONNECTING SchemaStudyPhaseError carrying failure_category/attempts_made
+    is forwarded verbatim to mark_failed so the study row records WHY the
+    connection failed and how many attempts the retry seam made."""
+    from src.services.db_introspection import SchemaStudyPhaseError
+
+    source = _make_db_source()
+
+    session = MagicMock()
+    session.commit = AsyncMock()
+    session.execute = AsyncMock()
+    session.flush = AsyncMock()
+    session.add = MagicMock()
+
+    study_row = MagicMock()
+    study_row.id = uuid.uuid4()
+
+    get_by_id = AsyncMock(return_value=source)
+    is_running = AsyncMock(return_value=False)
+    create_study = AsyncMock(return_value=study_row)
+    set_schema_status = AsyncMock()
+    mark_completed = AsyncMock()
+    mark_failed = AsyncMock()
+
+    connector_stub = MagicMock()
+    connector_stub.study_schema = AsyncMock(
+        side_effect=SchemaStudyPhaseError(
+            phase="CONNECTING",
+            error_key="AUTH_FAILED",
+            message="Could not connect to the source database (see server logs).",
+            failure_category="AUTH_FAILED",
+            attempts_made=1,
+        )
+    )
+    factory_build = MagicMock(return_value=connector_stub)
+
+    factory = _patch_session_factory(session)
+
+    from src.repositories.schema_study_repository import SchemaStudyRepository
+    from src.repositories.source_repository import SourceRepository
+
+    with (
+        patch("src.tasks.study_source.AsyncSessionLocal", factory),
+        patch.object(SourceRepository, "get_by_id", get_by_id, create=False),
+        patch.object(
+            SourceRepository, "set_schema_status", set_schema_status, create=False
+        ),
+        patch.object(
+            SchemaStudyRepository, "is_running", is_running, create=False
+        ),
+        patch.object(
+            SchemaStudyRepository, "create_study", create_study, create=False
+        ),
+        patch.object(
+            SchemaStudyRepository, "mark_completed", mark_completed, create=False
+        ),
+        patch.object(
+            SchemaStudyRepository, "mark_failed", mark_failed, create=False
+        ),
+        patch(
+            "src.tasks.study_source.ConnectorFactory",
+            return_value=MagicMock(build=factory_build),
+        ),
+    ):
+        from src.tasks.study_source import _run
+
+        result = await _run(source.id)
+
+    assert result["status"] == "failed"
+    assert result["phase"] == "CONNECT"
+    mark_failed.assert_awaited_once()
+    kwargs = mark_failed.await_args.kwargs
+    assert kwargs["phase"] == "CONNECT"
+    assert kwargs["failure_category"] == "AUTH_FAILED"
+    assert kwargs["attempts_made"] == 1
 
 
 # ---------------------------------------------------------------------------

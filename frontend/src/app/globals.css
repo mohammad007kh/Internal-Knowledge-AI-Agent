@@ -172,6 +172,27 @@
 }
 
 /* ----------------------------------------------------------------------------
+ * 004 agentic transparency — `agent-block-in`
+ *   A calm fade + 8px slide-up for activity-accordion role blocks as they
+ *   appear (Layer 2, T-073b). Single 200ms ease-out per the design budget;
+ *   fully disabled under prefers-reduced-motion (block appears instantly).
+ * -------------------------------------------------------------------------- */
+@keyframes agent-block-in {
+  0%   { opacity: 0; transform: translateY(8px); }
+  100% { opacity: 1; transform: translateY(0); }
+}
+
+.agent-block-in {
+  animation: agent-block-in 200ms ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .agent-block-in {
+    animation: none;
+  }
+}
+
+/* ----------------------------------------------------------------------------
  * FX31 — Smooth light ↔ dark theme cross-fade.
  *   next-themes' `disableTransitionOnChange` is intentionally NOT set in
  *   providers.tsx, so the class swap on <html> propagates here. We fade only

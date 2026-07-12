@@ -20,9 +20,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import re
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from langfuse import Langfuse
@@ -40,6 +39,7 @@ from src.repositories.document_repository import DocumentRepository
 from src.repositories.source_repository import SourceRepository
 from src.repositories.sync_job_repository import SyncJobRepository
 from src.schemas.raw_document import RawDocument
+from src.services.db_safety import redact_dsn
 from src.services.embedding_service_factory import EmbeddingServiceFactory
 from src.services.source_service import SourceService
 from src.services.sync_cancellation import (
@@ -95,8 +95,14 @@ async def _bail_if_cancelled(
 
 
 def _sanitise(message: str) -> str:
-    """Strip credentials from connection-string-like strings in error messages."""
-    return re.sub(r"://[^@\s]+@", "://***@", message)
+    """Strip credentials / host / db-name fragments from an error message.
+
+    Thin alias over the single canonical hardened redactor
+    (:func:`src.services.db_safety.redact_dsn`) — the previous local regex
+    stopped at the FIRST ``@`` and leaked the tail of ``@``-containing
+    passwords.
+    """
+    return redact_dsn(message)
 
 
 # ---------------------------------------------------------------------------
@@ -578,7 +584,7 @@ async def _run_sync_pipeline(  # noqa: C901
     try:
         async with session_factory() as flip_session:
             await SourceRepository(flip_session).mark_ready_after_sync(
-                uuid.UUID(source_id), datetime.now(timezone.utc)
+                uuid.UUID(source_id), datetime.now(UTC)
             )
             await flip_session.commit()
     except Exception:  # noqa: BLE001 — best-effort flip; must not undo the success commit

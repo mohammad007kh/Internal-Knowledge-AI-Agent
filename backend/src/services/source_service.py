@@ -25,7 +25,7 @@ from pydantic import ValidationError
 from src.connectors.factory import ConnectorFactory
 from src.core.config import Settings
 from src.core.exceptions import ConflictError, NotFoundError
-from src.models.enums import SourceType
+from src.models.enums import ConnectionStatus, SourceStatus, SourceType
 from src.models.source import Source
 from src.repositories.source_repository import SourceRepository
 from src.schemas.source import (
@@ -204,7 +204,7 @@ class SourceService:
             config_encrypted=config_encrypted,
             file_storage_path=first_object_key,
             owner_id=owner_id,
-            status="pending",
+            status=SourceStatus.PENDING,
             name_status=name_status,
             description_status=description_status,
             auto_name_and_description=payload.auto_name_and_description,
@@ -446,7 +446,8 @@ class SourceService:
                 row is NOT mutated, so the caller (route handler) maps this
                 straight to a 422 with the modal-stays-open contract.
         """
-        from datetime import UTC, datetime as _datetime  # noqa: PLC0415
+        from datetime import UTC  # noqa: PLC0415
+        from datetime import datetime as _datetime
 
         from src.core.exceptions import ConnectorTestFailedError  # noqa: PLC0415
 
@@ -548,7 +549,7 @@ class SourceService:
         updated = await self._repo.update(
             source_id,
             config_encrypted=new_encrypted,
-            connection_status="unknown",
+            connection_status=ConnectionStatus.UNKNOWN,
             connection_last_checked_at=_datetime.now(UTC),
             connection_last_error=None,
         )
@@ -675,7 +676,15 @@ class SourceService:
                 last_error = "connector reported failure"
         except Exception as exc:  # noqa: BLE001
             ok = False
-            last_error = str(exc)
+            # This message is BOTH persisted (``connection_last_error``) and
+            # surfaced to the admin UI. A connector build / config-decrypt
+            # failure could embed a DSN fragment in ``str(exc)``; scrub it
+            # before it reaches the column / the client (FR-020).
+            from src.connectors.database_connector import (  # noqa: PLC0415
+                _sanitise as _sanitise_dsn,
+            )
+
+            last_error = _sanitise_dsn(exc)
 
         await self._persist_connection_probe(
             source_id, success=ok, error=last_error
@@ -708,7 +717,7 @@ class SourceService:
         try:
             await self._repo.update_connection_health(
                 source_id,
-                status="healthy" if success else "failed",
+                status=ConnectionStatus.HEALTHY if success else ConnectionStatus.FAILED,
                 error=None if success else truncated,
                 checked_at=datetime.now(UTC),
             )

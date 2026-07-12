@@ -1,0 +1,147 @@
+name: Evals Nightly
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Runs every night at 02:00 UTC and can be triggered manually.
+# Executes the frozen synthetic eval case set against both pipelines, compares
+# the results against the SC-002 (honesty) and SC-005 (regression) gates, and
+# uploads the run artifacts for triage.
+#
+# Security Rule 4 (Eval Data Hygiene): the workflow asserts that every case
+# carries `data_source == "synthetic"` before any pipeline is invoked. The
+# schema loader already enforces this via a Pydantic Literal — a non-synthetic
+# case raises EvalCaseError and the step fails loudly.
+#
+# Exit-code conventions used here:
+#   0  — all executed cases terminated within limits (evals.run)
+#   1  — one or more cases did not terminate / gates failed (evals.run / evals.compare)
+#   2  — agentic pipeline not yet available (evals.run --pipeline agentic)
+#        → this step uses continue-on-error: true because the agentic pipeline
+#          is not wired until Slice C (T-058); CI must not block on its absence.
+# ─────────────────────────────────────────────────────────────────────────────
+
+on:
+  schedule:
+    - cron: "0 2 * * *"
+  workflow_dispatch:
+
+env:
+  PYTHON_VERSION: "3.12"
+  # NOTE: all values below are throwaway, non-sensitive CI-only fixtures against
+  # an ephemeral service-container database — NOT real secrets. They are
+  # intentionally inline (not GitHub Actions secrets) so the workflow can run on
+  # forks and scheduled triggers without secret access. Do NOT put production
+  # credentials here.
+  DATABASE_URL: postgresql+asyncpg://eval_user:eval_password@localhost:5432/eval_db
+  REDIS_URL: redis://localhost:6379/0
+  SECRET_KEY: ci-eval-secret-key-32-bytes-xxxx
+  JWT_SECRET: ci-eval-jwt-secret-key-at-least-32b
+  FERNET_KEY: Y3VycmVudGtleW11c3RiZTMyYnl0ZXNsb25n
+  ENVIRONMENT: test
+  OPENAI_API_KEY: sk-eval-placeholder-not-a-real-key
+
+jobs:
+  # ──────────────────────────────────────────────────────────────────────────
+  # Nightly eval run
+  # ──────────────────────────────────────────────────────────────────────────
+  evals-nightly:
+    name: Nightly Eval Gates (SC-002, SC-005)
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: eval_user
+          POSTGRES_PASSWORD: eval_password
+          POSTGRES_DB: eval_db
+        options: >-
+          --health-cmd "pg_isready -U eval_user"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
+    defaults:
+      run:
+        working-directory: backend
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: "pip"
+
+      - name: Install dependencies
+        run: pip install -e ".[dev]"
+
+      # ── Security Rule 4: assert every case carries data_source=="synthetic" #
+      # The schema loader (evals.schema.load_all_cases) enforces this via a
+      # Pydantic Literal. Running the loader standalone catches any violation
+      # before a single pipeline call is made.
+      - name: Assert all eval cases are synthetic (Security Rule 4)
+        run: |
+          python - <<'EOF'
+          from evals.schema import load_all_cases
+          cases = load_all_cases("evals/cases")
+          for c in cases:
+              assert c.data_source == "synthetic", (
+                  f"SECURITY VIOLATION: case {c.id!r} has data_source={c.data_source!r} "
+                  "— only 'synthetic' is permitted in the public repo"
+              )
+          print(f"OK: {len(cases)} case(s) verified as synthetic")
+          EOF
+
+      # ── Run Alembic migrations so ephemeral fixtures can load ────────────── #
+      - name: Run Alembic migrations
+        run: alembic upgrade head
+
+      # ── Baseline run (current pipeline, single-source + honesty subset) ──── #
+      - name: Run baseline eval (--pipeline current)
+        id: baseline
+        run: python -m evals.run --pipeline current --out-dir evals/runs
+
+      # ── Agentic run (all cases; pipeline may not exist until Slice C) ──────  #
+      # Exit code 2 means "agentic pipeline not available" — this is expected
+      # until T-058 lands. continue-on-error allows the compare step to still
+      # produce a partial comparison using whatever cases did execute.
+      - name: Run agentic eval (--pipeline agentic)
+        id: agentic
+        continue-on-error: true
+        run: python -m evals.run --pipeline agentic --out-dir evals/runs
+
+      # ── Gate comparison ───────────────────────────────────────────────────── #
+      # Find the most recent JSON sidecars for each pipeline and compare them.
+      # The compare script exits 1 if either gate fails, causing the job to
+      # fail (which is the desired CI signal). If the agentic run produced no
+      # output (exit 2 / file absent), the compare step is skipped gracefully.
+      - name: Compare runs (SC-002 honesty + SC-005 regression gates)
+        run: |
+          BASELINE=$(ls -t evals/runs/*-current.json 2>/dev/null | head -1)
+          AGENTIC=$(ls -t evals/runs/*-agentic.json 2>/dev/null | head -1)
+
+          if [ -z "$BASELINE" ]; then
+            echo "error: no baseline run sidecar found — baseline step must have failed" >&2
+            exit 1
+          fi
+
+          if [ -z "$AGENTIC" ]; then
+            echo "INFO: no agentic run sidecar found (pipeline not yet available — Slice C)" >&2
+            echo "Skipping gate comparison until agentic pipeline is wired."
+            exit 0
+          fi
+
+          echo "Baseline sidecar: $BASELINE"
+          echo "Agentic sidecar:  $AGENTIC"
+          python -m evals.compare "$BASELINE" "$AGENTIC"
+
+      # ── Upload all run artifacts for triage ──────────────────────────────── #
+      - name: Upload eval run artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: eval-runs-${{ github.run_id }}
+          path: backend/evals/runs/
+          retention-days: 30

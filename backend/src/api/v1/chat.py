@@ -4,13 +4,15 @@ from __future__ import annotations
 
 import logging
 import uuid
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, AsyncIterator
+from contextlib import AsyncExitStack, asynccontextmanager
 from typing import Any
 
 from fastapi import APIRouter, Depends, Request, Response, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.agent.pipeline import build_agent_budget_snapshot
 from src.core.database import get_db
 from src.core.deps import get_current_user, require_admin
 from src.core.problem_details import problem
@@ -18,6 +20,8 @@ from src.models.chat import MessageRole
 from src.models.user import User
 from src.repositories.admin_audit_log_repository import AdminAuditLogRepository
 from src.repositories.chat_repository import ChatMessageRepository, ChatSessionRepository
+from src.repositories.chunk_repository import ChunkRepository
+from src.repositories.source_repository import SourceRepository
 from src.schemas.chat import (
     ChatMessageResponse,
     ChatRequest,
@@ -67,10 +71,72 @@ def _get_chat_message_repo() -> ChatMessageRepository:
     return ChatMessageRepository()
 
 
-def _get_pipeline() -> Any:
+def _get_pipeline_provider() -> Any:
+    """Return the pipeline PROVIDER (a dependency-injector Factory), NOT a built
+    pipeline. The stream scopes the provider's DB sessions via
+    :func:`_scoped_pipeline`; tests override this to inject a fake provider.
+    """
     from src.core.container import Container  # noqa: PLC0415
 
-    return Container.pipeline()
+    return Container.pipeline
+
+
+@asynccontextmanager
+async def _scoped_pipeline(
+    provider: Any, session_factory: Any
+) -> AsyncIterator[Any]:
+    """Build a pipeline whose every DB session is scoped to this context (#276).
+
+    ``Container.pipeline()`` / ``agentic_pipeline()`` construct ~5 *stateful*
+    sessions — the top-level ``db_session`` plus the chunk / chat-session /
+    chat-message / source repositories, each holding its own ``AsyncSession``.
+    Resolved as a request ``Depends`` they are never scoped to the SSE stream,
+    so on normal completion — and especially on client disconnect
+    (``GeneratorExit`` / ``CancelledError``) — those sessions are orphaned and
+    their pooled connections are only reclaimed at GC ("non-checked-in
+    connection" warnings).
+
+    Here each session-holder gets its OWN session (preserving the pipeline's
+    existing per-repo isolation — no cross-node session sharing / concurrency
+    assumption) via a single :class:`contextlib.AsyncExitStack`, so ALL of them
+    are closed (connections returned to the pool) when the stream ends by ANY
+    path. ``provider`` is ``Container.pipeline`` (chat) or
+    ``Container.agentic_pipeline`` (sandbox); ``session_factory`` is the raw
+    ``AsyncSessionLocal`` sessionmaker.
+    """
+    async with AsyncExitStack() as stack:
+
+        async def _session() -> AsyncSession:
+            return await stack.enter_async_context(session_factory())
+
+        pipeline = provider(
+            db_session=await _session(),
+            chunk_repository=ChunkRepository(session=await _session()),
+            chat_session_repository=ChatSessionRepository(session=await _session()),
+            chat_message_repository=ChatMessageRepository(
+                session=await _session()
+            ),
+            source_repository=SourceRepository(session=await _session()),
+            # guardrail_service is intentionally NOT overridden here: it now owns
+            # its own session_factory and opens a short-lived session per DB
+            # touch (closed before the LLM eval), so the Container default no
+            # longer leaks on the disconnect path (#285, follow-up from #276).
+        )
+        yield pipeline
+
+
+def _get_agentic_pipeline_provider() -> Any:
+    """Return the sandbox-first agentic pipeline PROVIDER (T-058 / FR-026).
+
+    Like :func:`_get_pipeline_provider` but for ``Container.agentic_pipeline``:
+    the plan-and-execute graph when ``PIPELINE_AGENTIC_ENABLED`` is on, else the
+    same v2 graph (the flag is the rollback). Returns the provider (not a built
+    pipeline) so :func:`_scoped_pipeline` scopes its DB sessions; overridable in
+    tests. Only the admin sandbox endpoint uses this.
+    """
+    from src.core.container import Container  # noqa: PLC0415
+
+    return Container.agentic_pipeline
 
 
 def _get_tracing() -> LangfuseTracingService:
@@ -232,7 +298,7 @@ async def send_message(
     db_session_factory: Any = Depends(_get_db_session_factory),
     chat_session_repo: ChatSessionRepository = Depends(_get_chat_session_repo),
     chat_message_repo: ChatMessageRepository = Depends(_get_chat_message_repo),
-    pipeline: Any = Depends(_get_pipeline),
+    pipeline_provider: Any = Depends(_get_pipeline_provider),
     langfuse_tracing: LangfuseTracingService = Depends(_get_tracing),
     chat_session_service: Any = Depends(_get_chat_session_service),
     title_generator_service: Any = Depends(_get_title_generator),
@@ -401,12 +467,17 @@ async def send_message(
         # tee the deltas here so the partial-persist branch can recover.
         partial_answer = ""
 
-        async def _persist_assistant(final_answer: str) -> str:
+        async def _persist_assistant(
+            final_answer: str,
+            *,
+            activity_summary: dict[str, Any] | None = None,
+        ) -> str:
             """Persist the completed assistant turn and return its id.
 
             Runs inside the shared helper's success path. Errors propagate
             up — :func:`run_pipeline_stream` converts them into a
-            ``persist_error`` SSE frame.
+            ``persist_error`` SSE frame. ``activity_summary`` (None on a
+            non-agentic turn) lands on ``chat_messages.activity_summary`` (T-058).
             """
             async with db_session_factory() as fresh_db:
                 assistant_msg = await chat_message_repo.create(
@@ -415,10 +486,17 @@ async def send_message(
                     role=MessageRole.ASSISTANT,
                     content=final_answer,
                     is_partial=False,
+                    activity_summary=activity_summary,
                 )
                 await fresh_db.commit()
                 return str(assistant_msg.id)
 
+        # Build the pipeline scoped to THIS stream (#276): its ~5 DB sessions
+        # close on every exit path via the finally below. Enter/exit explicitly
+        # (equivalent to `async with _scoped_pipeline(...)`) to avoid re-indenting
+        # the large try/except body.
+        pipeline_scope = _scoped_pipeline(pipeline_provider, db_session_factory)
+        pipeline = await pipeline_scope.__aenter__()
         try:
             async for frame in run_pipeline_stream(
                 pipeline=pipeline,
@@ -485,6 +563,11 @@ async def send_message(
             except Exception:  # noqa: BLE001
                 logger.debug("end_trace failed after disconnect", exc_info=True)
             return
+        finally:
+            # Close all pipeline-scoped DB sessions (return connections to the
+            # pool) on EVERY exit path — normal completion, GeneratorExit, or
+            # CancelledError (#276). Never yields, so safe during teardown.
+            await pipeline_scope.__aexit__(None, None, None)
 
     return StreamingResponse(
         event_generator(),
@@ -557,7 +640,8 @@ async def sandbox_stream(
     request: Request,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-    pipeline: Any = Depends(_get_pipeline),
+    db_session_factory: Any = Depends(_get_db_session_factory),
+    pipeline_provider: Any = Depends(_get_agentic_pipeline_provider),
     langfuse_tracing: LangfuseTracingService = Depends(_get_tracing),
 ) -> StreamingResponse:
     """Run the agent pipeline against ONE source and stream SSE.
@@ -650,20 +734,35 @@ async def sandbox_stream(
         "sources": [],
         "total_input_tokens": 0,
         "total_output_tokens": 0,
+        # --- agentic plan-state seeds (T-058) ------------------------------
+        # When the agentic graph is selected (PIPELINE_AGENTIC_ENABLED on) the
+        # planner reads raw_user_intent and the loop edges read budget. These
+        # are inert on the v2 graph (it never reads them), so seeding them
+        # unconditionally keeps the flag a clean rollback.
+        "raw_user_intent": body.query,
+        "plan": [],
+        "past_steps": [],
+        "current_step": None,
+        "plan_revision": 0,
+        "budget": build_agent_budget_snapshot(),
     }
 
     async def _sandbox_event_generator() -> AsyncGenerator[str, None]:
-        async for frame in run_pipeline_stream(
-            pipeline=pipeline,
-            initial_state=initial_state,
-            config=config,
-            trace_id=trace_id,
-            session_id=SANDBOX_SESSION_ID,
-            langfuse_tracing=langfuse_tracing,
-            persist_assistant=False,  # sandbox never writes to chat_messages
-            on_done=None,
-        ):
-            yield frame
+        # Scope the agentic pipeline's DB sessions to this stream (#276).
+        async with _scoped_pipeline(
+            pipeline_provider, db_session_factory
+        ) as pipeline:
+            async for frame in run_pipeline_stream(
+                pipeline=pipeline,
+                initial_state=initial_state,
+                config=config,
+                trace_id=trace_id,
+                session_id=SANDBOX_SESSION_ID,
+                langfuse_tracing=langfuse_tracing,
+                persist_assistant=False,  # sandbox never writes to chat_messages
+                on_done=None,
+            ):
+                yield frame
 
     return StreamingResponse(
         _sandbox_event_generator(),
@@ -718,7 +817,7 @@ async def submit_message_feedback(
     belongs to. Admins can update feedback on any message.
     """
     if body.rating not in (-1, 1):
-        return problem(
+        raise problem(
             status=status.HTTP_422_UNPROCESSABLE_ENTITY,
             title="Invalid rating",
             detail="rating must be either +1 (thumbs up) or -1 (thumbs down).",
@@ -735,7 +834,7 @@ async def submit_message_feedback(
         )
     )
     if msg is None:
-        return problem(
+        raise problem(
             status=status.HTTP_404_NOT_FOUND,
             title="Message not found",
             detail="No message found for that session_id / message_id pair.",
@@ -747,7 +846,7 @@ async def submit_message_feedback(
         select(ChatSession).where(ChatSession.id == session_id)
     )
     if session is None:
-        return problem(
+        raise problem(
             status=status.HTTP_404_NOT_FOUND,
             title="Session not found",
             detail="No session found for that session_id.",
@@ -758,7 +857,7 @@ async def submit_message_feedback(
         current_user.role != UserRole.admin
         and str(session.user_id) != str(current_user.id)
     ):
-        return problem(
+        raise problem(
             status=status.HTTP_403_FORBIDDEN,
             title="Forbidden",
             detail="You may only submit feedback on messages from your own sessions.",

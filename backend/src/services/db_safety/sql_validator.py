@@ -53,6 +53,11 @@ class SqlValidationResult:
     error_key: str | None = None
 
 
+# Canonical default row cap injected into otherwise-unbounded SELECTs.
+# Single source of truth: ``inject_limit``'s default AND the agent verifier's
+# truncation-detection threshold both reference this so they can never drift.
+DEFAULT_ROW_LIMIT: Final[int] = 100
+
 # Stable error keys — callers branch on these, never on ``reason``.
 ERROR_MULTIPLE_STATEMENTS: Final[str] = "multiple_statements"
 ERROR_NOT_SELECT: Final[str] = "not_select"
@@ -228,7 +233,7 @@ def validate_sql(sql: str, dialect: str = "postgres") -> SqlValidationResult:
 # ---------------------------------------------------------------------------
 
 
-def inject_limit(sql: str, n: int = 100, dialect: str = "postgres") -> str:
+def inject_limit(sql: str, n: int = DEFAULT_ROW_LIMIT, dialect: str = "postgres") -> str:
     """Append ``LIMIT n`` to *sql* — or replace a larger one — via the AST.
 
     Replaces the old ``SELECT * FROM (<sql>) AS _q LIMIT N`` subquery wrap,

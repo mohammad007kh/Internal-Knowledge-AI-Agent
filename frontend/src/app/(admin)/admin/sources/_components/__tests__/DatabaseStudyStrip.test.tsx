@@ -85,7 +85,7 @@ function flagged(
 describe('DatabaseStudyStrip — FX34 unified lifecycle vocabulary', () => {
   it('exposes exactly the four DB lifecycle pips (no Approved pip)', () => {
     const { container } = render(
-      <DatabaseStudyStrip source={makeDbSource({ schema_status: 'STUDYING' })} />
+      <DatabaseStudyStrip source={makeDbSource({ schema_status: 'studying' })} />
     )
     const pipIds = Array.from(
       container.querySelectorAll<HTMLElement>('[data-pip]')
@@ -98,7 +98,7 @@ describe('DatabaseStudyStrip — FX34 unified lifecycle vocabulary', () => {
 
   it('renders the new label vocabulary', () => {
     const { getByText } = render(
-      <DatabaseStudyStrip source={makeDbSource({ schema_status: 'STUDYING' })} />
+      <DatabaseStudyStrip source={makeDbSource({ schema_status: 'studying' })} />
     )
     expect(getByText('Queued')).toBeInTheDocument()
     expect(getByText('Naming with AI')).toBeInTheDocument()
@@ -113,7 +113,7 @@ describe('DatabaseStudyStrip — FX34 unified lifecycle vocabulary', () => {
 
   it('marks all pips up to and including `analyzing` active while STUDYING', () => {
     const { container } = render(
-      <DatabaseStudyStrip source={makeDbSource({ schema_status: 'STUDYING' })} />
+      <DatabaseStudyStrip source={makeDbSource({ schema_status: 'studying' })} />
     )
     const map = activeMap(container)
     expect(map.pending_upload).toBe(true)
@@ -124,7 +124,7 @@ describe('DatabaseStudyStrip — FX34 unified lifecycle vocabulary', () => {
 
   it('anchors the spinner on the `analyzing` pip while STUDYING', () => {
     const { container } = render(
-      <DatabaseStudyStrip source={makeDbSource({ schema_status: 'STUDYING' })} />
+      <DatabaseStudyStrip source={makeDbSource({ schema_status: 'studying' })} />
     )
     expect(flagged(container, 'data-studying')).toBe('analyzing')
   })
@@ -150,7 +150,7 @@ describe('DatabaseStudyStrip — FX34 unified lifecycle vocabulary', () => {
 
   it('paints the failure red on `analyzing` when last_error_phase is INVENTORY', () => {
     const source = makeDbSource({
-      schema_status: 'FAILED',
+      schema_status: 'failed',
       last_error_phase: 'INVENTORY',
       last_error_message: 'Could not list tables',
     })
@@ -160,7 +160,7 @@ describe('DatabaseStudyStrip — FX34 unified lifecycle vocabulary', () => {
 
   it('paints the failure red on `pending_upload` for a CONNECT failure', () => {
     const source = makeDbSource({
-      schema_status: 'FAILED',
+      schema_status: 'failed',
       last_error_phase: 'CONNECT',
       last_error_message: 'TCP timeout',
     })
@@ -169,7 +169,7 @@ describe('DatabaseStudyStrip — FX34 unified lifecycle vocabulary', () => {
   })
 
   it('falls back to `analyzing` for a FAILED source with no last_error_phase', () => {
-    const source = makeDbSource({ schema_status: 'FAILED' })
+    const source = makeDbSource({ schema_status: 'failed' })
     const { container } = render(<DatabaseStudyStrip source={source} />)
     expect(flagged(container, 'data-failed')).toBe('analyzing')
   })

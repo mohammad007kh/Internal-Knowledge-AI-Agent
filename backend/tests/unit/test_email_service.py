@@ -35,13 +35,11 @@ async def test_send_invitation_builds_correct_url_log_only(
     email_service: EmailService,
 ) -> None:
     """Invitation email must contain {FRONTEND_URL}/auth/setup?token={token}."""
-    with patch.object(
-        type(email_service)._send.__func__.__class__,
-        "__call__",
-        new_callable=AsyncMock,
-    ) if False else patch.object(
-        email_service, "_send", new_callable=AsyncMock
-    ) as mock_send:
+    with (
+        patch("src.services.email_service.settings") as mock_settings,
+        patch.object(email_service, "_send", new_callable=AsyncMock) as mock_send,
+    ):
+        mock_settings.FRONTEND_URL = "http://localhost:3000"
         await email_service.send_invitation("user@example.com", "tok-abc")
 
     mock_send.assert_awaited_once()
@@ -80,9 +78,11 @@ async def test_send_password_reset_builds_correct_url(
     email_service: EmailService,
 ) -> None:
     """Reset email must contain {FRONTEND_URL}/auth/password-reset/confirm?token={token}."""
-    with patch.object(
-        email_service, "_send", new_callable=AsyncMock
-    ) as mock_send:
+    with (
+        patch("src.services.email_service.settings") as mock_settings,
+        patch.object(email_service, "_send", new_callable=AsyncMock) as mock_send,
+    ):
+        mock_settings.FRONTEND_URL = "http://localhost:3000"
         await email_service.send_password_reset("user@example.com", "rst-xyz")
 
     mock_send.assert_awaited_once()

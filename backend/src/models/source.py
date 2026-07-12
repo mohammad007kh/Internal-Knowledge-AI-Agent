@@ -16,11 +16,11 @@ from datetime import datetime
 from typing import TYPE_CHECKING
 
 from sqlalchemy import Boolean, DateTime, Enum, ForeignKey, Integer, String, Text
-from sqlalchemy.dialects.postgresql import BYTEA, UUID
+from sqlalchemy.dialects.postgresql import BYTEA, JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from src.models.base import Base, SoftDeleteMixin, TimestampMixin, UUIDMixin
-from src.models.enums import SourceType
+from src.models.enums import ConnectionStatus, SourceStatus, SourceType
 
 if TYPE_CHECKING:
     from src.models.chunk import Chunk
@@ -93,7 +93,9 @@ class Source(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
     sync_mode: Mapped[str] = mapped_column(String, nullable=False, default="manual")
     sync_schedule: Mapped[str | None] = mapped_column(String, nullable=True)
     last_synced_at: Mapped[datetime | None] = mapped_column(nullable=True)
-    status: Mapped[str] = mapped_column(String, nullable=False, default="pending")
+    status: Mapped[str] = mapped_column(
+        String, nullable=False, default=SourceStatus.PENDING
+    )
     citations_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     # Internal MinIO object key — NEVER exposed in API responses
     file_storage_path: Mapped[str | None] = mapped_column(String, nullable=True)
@@ -147,6 +149,52 @@ class Source(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
         doc="Set when the admin checked 'Let AI name and describe this source for me'.",
     )
 
+    # -- Source intent fields (004-agentic-pipeline US1 / FR-001) -----------
+    # Each source carries its own retrieval intent under a tri-state capability
+    # ramp (``pending_ai -> ai_set -> user_set``). ``intent_status`` is a
+    # single status for the whole bundle (there is no per-field provenance):
+    # a re-study/propose runs ONLY while ``intent_status != 'user_set'`` and
+    # replaces the AI-writable fields together. This mirrors the auto-naming
+    # ``name_status`` / ``description_status`` precedent above — the AI never
+    # downgrades a human-set value. Columns migrated by 0036_source_intent.
+    #
+    # NB: the DB has NO CHECK constraint on ``intent_status``; the canonical
+    # vocabulary (user_set | pending_ai | ai_set) is enforced at the
+    # model/repository/schema boundary, not in Postgres.
+    purpose: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+        doc="Admin-authored business purpose (1-2 sentences). AI NEVER writes this.",
+    )
+    example_questions: Mapped[list | None] = mapped_column(
+        JSONB,
+        nullable=True,
+        doc="list[str] of ~3 sample questions; AI-proposed after study, admin-editable.",
+    )
+    out_of_scope: Mapped[list | None] = mapped_column(
+        JSONB,
+        nullable=True,
+        doc="list[str] of topics this source cannot answer; AI-proposed, admin-editable.",
+    )
+    cross_source_hints: Mapped[list | None] = mapped_column(
+        JSONB,
+        nullable=True,
+        doc="Optional list[{topic, source_id}] redirects. v1: admin-authored ONLY.",
+    )
+    intent_status: Mapped[str] = mapped_column(
+        String(16),
+        nullable=False,
+        default="pending_ai",
+        server_default="pending_ai",
+        index=True,
+        doc="One of user_set | pending_ai | ai_set (whole-bundle status).",
+    )
+    intent_updated_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        doc="UTC timestamp stamped on any intent write (AI or admin).",
+    )
+
     # -- DB-source studying-agent fields (Phase 1) --------------------------
     # ``schema_status`` mirrors the agent lifecycle for the *latest* study
     # and is the column the UI/list endpoints filter on.  Per-run history
@@ -156,7 +204,12 @@ class Source(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
         nullable=True,
         default=None,
         index=True,
-        doc="One of QUEUED, STUDYING, READY, STALE, FAILED — null pre-Phase-1 sources.",
+        doc=(
+            "Mirrors the latest study's lifecycle for the UI/list filters. "
+            "Emitted lowercase: studying | completed | failed — null for "
+            "pre-Phase-1 sources. (Distinct from SchemaStudy.state, which "
+            "uses the uppercase QUEUED/STUDYING/READY/STALE/FAILED vocabulary.)"
+        ),
     )
     drift_signal_count: Mapped[int] = mapped_column(
         Integer,
@@ -181,7 +234,7 @@ class Source(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
     connection_status: Mapped[str] = mapped_column(
         String(16),
         nullable=False,
-        default="unknown",
+        default=ConnectionStatus.UNKNOWN,
         server_default="unknown",
         index=True,
         doc=(

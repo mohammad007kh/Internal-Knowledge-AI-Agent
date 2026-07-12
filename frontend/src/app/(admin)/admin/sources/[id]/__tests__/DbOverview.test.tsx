@@ -100,7 +100,7 @@ function makeSource(overrides: Partial<SourceDetail> = {}): SourceDetail {
     owner_email: null,
     schema_summary: null,
     description_status: 'ai_set',
-    schema_status: 'READY',
+    schema_status: 'completed',
     tables_documented: 12,
     ...overrides,
   } satisfies SourceDetail
@@ -162,7 +162,7 @@ async function waitForOverview() {
 
 describe('DB Overview — hero card', () => {
   it('shows the AI description prose, the Documented schema stat and a working "View schema →" link', async () => {
-    getSourceMock.mockResolvedValue(makeSource({ schema_status: 'READY', tables_documented: 12 }))
+    getSourceMock.mockResolvedValue(makeSource({ schema_status: 'completed', tables_documented: 12 }))
     const user = userEvent.setup()
     renderPage()
     await waitForOverview()
@@ -273,7 +273,7 @@ describe('DB Overview — "what the agent sees" teaser', () => {
   it('schema_status FAILED → failure copy + Re-study button', async () => {
     getSourceMock.mockResolvedValue(
       makeSource({
-        schema_status: 'FAILED',
+        schema_status: 'failed',
         last_error_phase: 'CONNECTING',
         last_error_message: 'auth failed',
         tables_documented: null,

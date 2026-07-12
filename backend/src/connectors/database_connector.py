@@ -12,12 +12,33 @@ from sqlalchemy.ext.asyncio import create_async_engine
 from src.connectors.base import BaseConnector, Document
 from src.connectors.registry import register
 from src.models.enums import SourceType
-from src.services.db_safety import validate_sql
+from src.services.db_safety import redact_dsn, validate_sql
+from src.services.db_safety.connect_retry import (
+    BACKGROUND_POLICY,
+    TEST_CONNECTION_POLICY,
+    DBConnectionFailed,
+    connect_with_retry,
+)
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from src.services.db_introspection.schema_doc import SchemaDocument
 
 logger = logging.getLogger(__name__)
+
+# Retry policy for the ingestion connect handshake. Module-level so tests can
+# swap in a fast (1-attempt, no-sleep) policy without real backoff waits.
+# Production uses the background budget (≈3 attempts, full-jitter, ~20s deadline).
+_INGEST_CONNECT_POLICY = BACKGROUND_POLICY
+
+
+# ---------------------------------------------------------------------------
+# Credential / DSN redaction (FR-020)
+# ---------------------------------------------------------------------------
+# Delegates to the single canonical hardened redactor
+# (:func:`src.services.db_safety.redact_dsn`). The module-local name is kept as
+# a thin alias so existing callers / tests that import ``_sanitise`` keep
+# working while the implementation lives in exactly one place.
+_sanitise = redact_dsn
 
 
 @register(SourceType.DATABASE)
@@ -79,7 +100,7 @@ class DatabaseConnector(BaseConnector):
     async def test_connection(self) -> bool:
         return await self._delegate.test_connection()
 
-    async def study_schema(self) -> "SchemaDocument":
+    async def study_schema(self) -> SchemaDocument:
         """Produce a :class:`SchemaDocument` for this DB source.
 
         SQL dialects (postgresql / mysql / mssql) delegate to
@@ -172,9 +193,8 @@ class SqlDatabaseConnector(BaseConnector):
         """
         from src.services.db_safety import (  # noqa: PLC0415
             harden_connection,
-            harden_postgres_connection,
+            harden_postgres_engine_kwargs,
             mssql_connect_args,
-            postgres_asyncpg_connect_args,
         )
 
         conn_str: str = self._config["connection_string"]
@@ -184,22 +204,18 @@ class SqlDatabaseConnector(BaseConnector):
             db_type is None and conn_str.startswith(("postgresql", "postgres"))
         ):
             try:
-                conn_str = await harden_postgres_connection(conn_str)
+                hardened = await harden_postgres_engine_kwargs(conn_str)
+                conn_str = hardened.url
+                connect_args = hardened.connect_args
             except ValueError:
+                # On rejection, build with the raw conn_str + empty
+                # connect_args — the connect probe still protects us and we
+                # don't widen the blast radius.
                 logger.warning(
                     "DatabaseConnector: postgres hardening rejected URL "
                     "[conn_hash=%s] — falling back to raw conn_str",
                     self._conn_str_hash,
                 )
-            # For asyncpg URLs, harden_postgres_connection is a no-op (the
-            # libpq ?options= kwarg is rejected by asyncpg with TypeError).
-            # Pass server_settings via connect_args so we still get the same
-            # `default_transaction_read_only=on` + statement_timeout on every
-            # connection. Safe to pass unconditionally — asyncpg simply
-            # forwards them to Postgres at startup; libpq URLs that aren't
-            # asyncpg won't reach this code path with a different driver.
-            if conn_str.startswith("postgresql+asyncpg"):
-                connect_args = postgres_asyncpg_connect_args()
         elif db_type == "mssql":
             connect_args = mssql_connect_args()
 
@@ -225,26 +241,49 @@ class SqlDatabaseConnector(BaseConnector):
     async def connect(self) -> None:
         """
         Create an async SQLAlchemy engine and perform a connectivity check.
-        Raises ConnectionError (not the raw driver exception, which may contain
-        the connection string in its message) if the test SELECT 1 fails.
+
+        The handshake runs under :func:`connect_with_retry` (background budget):
+        transient failures retry with full-jitter backoff under a deadline,
+        permanent ones (auth / permission / db-not-found / TLS) fail fast. On
+        exhaustion it raises :class:`DBConnectionFailed` — a ``ConnectionError``
+        subclass whose message is credential-free (it never echoes the raw
+        driver exception, which may contain the connection string).
 
         The engine is read-only-hardened per dialect — see
         :meth:`_build_hardened_engine`.
         """
-        try:
+
+        async def _acquire() -> Any:
+            # Build a fresh engine per attempt; dispose it if THIS attempt's
+            # handshake fails so a retry doesn't leak the pool. Catch
+            # BaseException so a cancellation mid-handshake still disposes.
             engine = await self._build_hardened_engine(
                 pool_size=2, pool_pre_ping=True
             )
-            async with engine.connect() as conn:
-                await conn.execute(sa.text("SELECT 1"))
-        except Exception:
-            # Re-raise a sanitised error — original exc may contain credentials
-            raise ConnectionError(
-                f"Database connection failed for source "
-                f"[conn_hash={self._conn_str_hash}]: see server logs for details"
-            ) from None
+            try:
+                async with engine.connect() as conn:
+                    await conn.execute(sa.text("SELECT 1"))
+            except BaseException:
+                await engine.dispose()
+                raise  # raw exc → seam classifies, then severs it with `from None`
+            return engine
 
-        self._engine = engine
+        try:
+            self._engine = await connect_with_retry(
+                _acquire, policy=_INGEST_CONNECT_POLICY
+            )
+        except DBConnectionFailed as exc:
+            # Credential-free, categorised. Log the conn_hash + category for
+            # operator triage (never the DSN), then propagate (it IS a
+            # ConnectionError, so existing handlers are unaffected).
+            logger.warning(
+                "DatabaseConnector: connect failed [conn_hash=%s] "
+                "category=%s attempts=%d",
+                self._conn_str_hash,
+                exc.category.value,
+                exc.attempts_made,
+            )
+            raise
         logger.info(
             "DatabaseConnector: connected [conn_hash=%s]",
             self._conn_str_hash,
@@ -347,27 +386,31 @@ class SqlDatabaseConnector(BaseConnector):
         statement_timeout; MySQL: ``SET SESSION TRANSACTION READ ONLY`` +
         timeouts; MSSQL: lock-timeout + READ UNCOMMITTED — see that method).
         """
-        try:
+        async def _probe() -> None:
             engine = await self._build_hardened_engine(
                 pool_size=1, pool_pre_ping=False
             )
-            async with engine.connect() as conn:
-                await conn.execute(sa.text("SELECT 1"))
-            await engine.dispose()
+            try:
+                async with engine.connect() as conn:
+                    await conn.execute(sa.text("SELECT 1"))
+            finally:
+                # Dispose on BOTH paths — the probe never retains the engine.
+                # (The previous code disposed only on success, leaking the
+                # engine/pool on every failed probe.)
+                await engine.dispose()
+
+        # No retry: the admin is watching live and wants an honest verdict —
+        # a retry that masks a blip is a false green. TEST_CONNECTION_POLICY is
+        # a single attempt.
+        try:
+            await connect_with_retry(_probe, policy=TEST_CONNECTION_POLICY)
             return True
-        except Exception as exc:
-            # Log the exception class + message + traceback so operators can
-            # debug a failed admin "Test connection". The connection string
-            # is NEVER part of `str(exc)` for asyncpg/SQLAlchemy errors —
-            # those drivers report field-level details (host, user, dbname)
-            # but not the URI verbatim. The caller still gets a sanitised
-            # ConnectionError (see source_inspection_service.inspect_source).
+        except DBConnectionFailed as exc:
+            # Log the closed-enum category only (never the DSN / raw exc text).
             logger.warning(
-                "DatabaseConnector.test_connection failed [conn_hash=%s]: %s: %s",
+                "DatabaseConnector.test_connection failed [conn_hash=%s]: %s",
                 self._conn_str_hash,
-                type(exc).__name__,
-                exc,
-                exc_info=True,
+                exc.category.value,
             )
             return False
 
@@ -375,7 +418,7 @@ class SqlDatabaseConnector(BaseConnector):
     # Schema study (studying-agent)
     # ------------------------------------------------------------------ #
 
-    async def study_schema(self) -> "SchemaDocument":
+    async def study_schema(self) -> SchemaDocument:
         """Run the studying-agent's 6-phase introspection for this source.
 
         Delegates to :func:`src.services.db_introspection.sql_inspector.study_sql_schema`,

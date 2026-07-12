@@ -39,7 +39,7 @@ It is built for engineering teams who need a defensible internal-knowledge assis
 | One model, one prompt, hard-coded | **Eleven** LLM stages, each with its own model, temperature, max-tokens, and prompt |
 | Files only | Files, single-page web URLs, and SQL databases (NL→SQL, read-only) |
 | Opaque — no idea why it answered that | Per-node Langfuse spans, token streaming, configurable from the UI |
-| Hosted SaaS, your data leaves the building | Docker Compose, fully self-hosted, no external traffic required |
+| Hosted SaaS, your data leaves the building | Docker Compose, fully self-hosted (CPU-only, no GPU required), no external traffic required |
 | No guardrails | Input/output safety guards, SSRF guard on fetches, SQL safety hardening |
 
 ## Features

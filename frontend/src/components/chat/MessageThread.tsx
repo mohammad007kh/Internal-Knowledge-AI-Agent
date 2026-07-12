@@ -1,14 +1,24 @@
 'use client'
 
 import { apiClient } from '@/lib/api-client'
+import {
+  type ActivityState,
+  type StepActivityEntry,
+  emptyActivityState,
+  selectActiveStep,
+  selectLatestBudget,
+} from '@/lib/sse/agent-events'
 import { cn } from '@/lib/utils'
 import { useQuery } from '@tanstack/react-query'
 import { BotIcon, CopyIcon, InfoIcon, SparklesIcon, UserIcon } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { toast } from 'sonner'
-import { CitationPanel } from './CitationPanel'
+import { AgenticTurnFooter } from './AgenticTurnFooter'
+import { DetailPanel, type PanelContent } from './CitationPanel'
+import { KEEP_SEARCHING_PROMPT } from './ContinueSearchAffordance'
 import { FeedbackButtons } from './FeedbackButtons'
 import { MarkdownLite } from './MarkdownLite'
+import { StatusLine } from './StatusLine'
 import type { Citation, Message, SessionMessagesResponse } from './types'
 
 interface MessageThreadProps {
@@ -23,6 +33,20 @@ interface MessageThreadProps {
   isPending?: boolean
   extraMessages?: Message[]
   onSend?: (text: string) => void
+  /**
+   * Per-turn agentic activity log for the in-flight turn. When it carries
+   * plan/step content the in-flight indicator becomes the Layer-1 StatusLine;
+   * otherwise the existing PulsingDots render unchanged (transitive flag-off
+   * guard — an empty log means the agentic pipeline emitted nothing).
+   */
+  activityLog?: ActivityState
+  /**
+   * Assistant message id of the just-finished turn (from the stream's `done`
+   * frame), or null mid-flight. Used to snapshot `activityLog` under the EXACT
+   * turn — keying off the most-recent persisted message instead would
+   * mis-attribute during the post-turn refetch window.
+   */
+  finishedMessageId?: string | null
 }
 
 const SUGGESTED_PROMPTS: string[] = [
@@ -43,11 +67,23 @@ export function MessageThread({
   isPending = false,
   extraMessages = [],
   onSend,
+  activityLog = emptyActivityState,
+  finishedMessageId = null,
 }: MessageThreadProps) {
   const bottomRef = useRef<HTMLDivElement>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
   const [pinned, setPinned] = useState(true)
-  const [openCitation, setOpenCitation] = useState<Citation | null>(null)
+  // The right-side slide-over presents either a citation OR an agent step's
+  // payload (T-073b generalization) — one panel, discriminated content.
+  const [panel, setPanel] = useState<PanelContent | null>(null)
+  // T-072: per-turn activity snapshots keyed by the assistant message id, so a
+  // finished turn keeps its Layer-2 accordion after `activityLog` resets on the
+  // next send. State (not a ref) so capturing a snapshot re-renders the turn
+  // into showing its accordion. In-memory only → re-expand works for the LIVE
+  // session; a hard reload starts empty (the rich log is stream-only).
+  const [snapshots, setSnapshots] = useState<Map<string, ActivityState>>(() => new Map())
+  // Turn ids where the user chose "Leave it here" on the budget-continue prompt.
+  const [continueDismissed, setContinueDismissed] = useState<Set<string>>(() => new Set())
 
   const { data, error, isLoading } = useQuery({
     queryKey: ['chat-session-messages', sessionId],
@@ -67,6 +103,24 @@ export function MessageThread({
   const allMessages: Message[] = [...persisted, ...extraMessages]
   const notFoundError = (error as { response?: { status?: number } } | null)?.response?.status
   const isMissingSession = notFoundError === 404 || notFoundError === 403
+
+  // Only the most recent assistant turn may offer "Search again" — a follow-up
+  // turn appends to the live edge, so offering it on a scrolled-up turn would
+  // misrepresent what the click does.
+  const lastAssistantId = [...allMessages].reverse().find((m) => m.role === 'assistant')?.id ?? null
+
+  // T-072: when a turn finishes, snapshot the live activityLog under the
+  // stream-provided assistant message id (NOT the most-recent persisted id,
+  // which lags the post-turn refetch and would mis-attribute turn N's log to
+  // turn N-1). The snapshot survives the next send's `activityLog` reset, so
+  // the finished turn keeps its accordion for the rest of the session. The
+  // once-guard lives inside the functional updater (returns `prev` unchanged →
+  // React bails out, no re-render, no loop).
+  useEffect(() => {
+    if (isStreaming || !finishedMessageId || activityLog.entries.length === 0) return
+    const turnId = finishedMessageId
+    setSnapshots((prev) => (prev.has(turnId) ? prev : new Map(prev).set(turnId, activityLog)))
+  }, [isStreaming, activityLog, finishedMessageId])
 
   const handleScroll = () => {
     const el = scrollRef.current
@@ -174,7 +228,14 @@ export function MessageThread({
             key={msg.id}
             message={msg}
             sessionId={sessionId ?? ''}
-            onCitationClick={setOpenCitation}
+            onCitationClick={(citation) => setPanel({ kind: 'citation', citation })}
+            activitySnapshot={snapshots.get(msg.id)}
+            onInspectStep={(step) => setPanel({ kind: 'step', step })}
+            isLastAssistant={msg.id === lastAssistantId}
+            isStreaming={isStreaming}
+            continueDismissed={continueDismissed.has(msg.id)}
+            onSearchAgain={() => onSend?.(KEEP_SEARCHING_PROMPT)}
+            onLeaveBudget={() => setContinueDismissed((prev) => new Set(prev).add(msg.id))}
           />
         ))}
 
@@ -187,6 +248,11 @@ export function MessageThread({
           const showThinkingBubble = isPending && !isStreaming
           if (!isStreaming && !showThinkingBubble) return null
           const hasToken = isStreaming && streamingToken.length > 0
+          // Layer-1: once the agentic pipeline has narrated a plan/step, the
+          // in-flight indicator becomes the live StatusLine. With no agentic
+          // activity (flag off / classic pipeline) the log is empty and we keep
+          // the existing PulsingDots — byte-identical to pre-004 behaviour.
+          const hasAgenticActivity = activityLog.entries.length > 0
           return (
             <div className="flex items-start gap-3">
               <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-muted">
@@ -201,6 +267,12 @@ export function MessageThread({
                       aria-hidden="true"
                     />
                   </div>
+                ) : hasAgenticActivity ? (
+                  <StatusLine
+                    activeStep={selectActiveStep(activityLog)}
+                    budget={selectLatestBudget(activityLog)}
+                    isStreaming={false}
+                  />
                 ) : (
                   <PulsingDots />
                 )}
@@ -212,7 +284,7 @@ export function MessageThread({
         <div ref={bottomRef} aria-hidden="true" />
       </div>
 
-      <CitationPanel citation={openCitation} onClose={() => setOpenCitation(null)} />
+      <DetailPanel content={panel} onClose={() => setPanel(null)} />
     </>
   )
 }
@@ -221,6 +293,22 @@ interface MessageBubbleProps {
   message: Message
   sessionId: string
   onCitationClick: (c: Citation) => void
+  /** Per-turn activity snapshot for this assistant message (T-072) — drives the
+   *  Layer-2 accordion. Undefined for user turns and for turns with no agentic
+   *  activity (classic pipeline / flag off). */
+  activitySnapshot?: ActivityState
+  /** Open a step's payload in the slide-over (live snapshots only). */
+  onInspectStep?: (step: StepActivityEntry) => void
+  /** True if this is the most recent assistant turn (gates the budget-continue affordance). */
+  isLastAssistant?: boolean
+  /** True while a new turn is streaming (hides the affordance to prevent double-send). */
+  isStreaming?: boolean
+  /** True if the user already chose "Leave it here" on this turn. */
+  continueDismissed?: boolean
+  /** Start a fresh follow-up turn (budget "Search again"). */
+  onSearchAgain?: () => void
+  /** Locally dismiss the budget-continue affordance for this turn. */
+  onLeaveBudget?: () => void
 }
 
 /**
@@ -241,7 +329,18 @@ function isFallbackReply(content: string): boolean {
   return FALLBACK_PATTERNS.some((re) => re.test(content))
 }
 
-function MessageBubble({ message, sessionId, onCitationClick }: MessageBubbleProps) {
+function MessageBubble({
+  message,
+  sessionId,
+  onCitationClick,
+  activitySnapshot,
+  onInspectStep,
+  isLastAssistant = false,
+  isStreaming = false,
+  continueDismissed = false,
+  onSearchAgain,
+  onLeaveBudget,
+}: MessageBubbleProps) {
   const isUser = message.role === 'user'
   const isFallback = !isUser && isFallbackReply(message.content)
 
@@ -316,6 +415,20 @@ function MessageBubble({ message, sessionId, onCitationClick }: MessageBubblePro
           </div>
         )}
 
+        {/* Layer-2 finished-turn footer (accordion + budget + continue affordance).
+            Shared with the admin sandbox via AgenticTurnFooter (004 review: Fix C). */}
+        {!isUser && activitySnapshot && (
+          <AgenticTurnFooter
+            activity={activitySnapshot}
+            isLastAssistant={isLastAssistant}
+            isStreaming={isStreaming}
+            continueDismissed={continueDismissed}
+            onInspectStep={(step) => onInspectStep?.(step)}
+            onSearchAgain={() => onSearchAgain?.()}
+            onLeaveBudget={() => onLeaveBudget?.()}
+          />
+        )}
+
         {/* Bottom meta row: timestamp + (assistant only) feedback + copy.
             All on one line per UX spec — Option A from the inline-actions
             review.  Always visible on mobile (no hover dependency); icon-only
@@ -378,17 +491,17 @@ function PulsingDots() {
       data-testid="thinking-dots"
     >
       <span
-        className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-foreground/40"
+        className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-foreground/40 motion-reduce:animate-none"
         style={{ animationDelay: '0ms' }}
         aria-hidden="true"
       />
       <span
-        className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-foreground/40"
+        className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-foreground/40 motion-reduce:animate-none"
         style={{ animationDelay: '150ms' }}
         aria-hidden="true"
       />
       <span
-        className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-foreground/40"
+        className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-foreground/40 motion-reduce:animate-none"
         style={{ animationDelay: '300ms' }}
         aria-hidden="true"
       />

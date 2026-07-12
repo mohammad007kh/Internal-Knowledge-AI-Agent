@@ -26,6 +26,7 @@
 
 import {
   type SourceKind,
+  isDatabaseSource,
   sourceKindOf,
 } from '@/app/(admin)/admin/sources/[id]/_components/sourceTypeMatrix'
 import type { SourceDetail, SourceListItem } from '@/lib/api/sources'
@@ -334,14 +335,15 @@ export function derivePhase(source: SourceLike): Phase {
   // `cancelled` Phase: every gate decision would be identical, and a sixth
   // phase would just double the test surface.
   if (jobStatus === 'cancelled') return 'failed'
-  if (source.schema_status === 'FAILED') return 'failed'
+  if (source.schema_status === 'failed') return 'failed'
 
   // 2. DB-source studying agent is its own ingestion path. When the studying
   //    agent is active, we surface it as `analyzing` (schema study =
-  //    analyzing the database).
+  //    analyzing the database). The 'queued before any work' state lives on
+  //    `study_state` (uppercase), NOT on `schema_status` — see FX41.
   if (
-    source.schema_status === 'STUDYING' ||
-    source.schema_status === 'QUEUED'
+    source.schema_status === 'studying' ||
+    source.study_state === 'QUEUED'
   ) {
     return 'analyzing'
   }
@@ -365,13 +367,8 @@ export function derivePhase(source: SourceLike): Phase {
   //     the worker stamping 'studying'. Once schema_status flips, rule 2
   //     takes over and surfaces `analyzing`.
   if (
-    source.source_type === 'database' &&
-    // SchemaStatus is typed as the legacy uppercase tokens ('READY' | 'STALE')
-    // but the wire actually carries the lowercase strings the backend writes
-    // ('completed' | 'studying' | 'failed' | …). The type drift is broader
-    // than this rule — cast through `string` to keep the comparison readable
-    // and avoid an out-of-scope type-widening here. (FX32b)
-    (source.schema_status as string | null | undefined) === 'completed' &&
+    isDatabaseSource(source.source_type) &&
+    source.schema_status === 'completed' &&
     jobStatus !== 'pending' &&
     jobStatus !== 'running'
   ) {
@@ -436,6 +433,31 @@ export function derivePhase(source: SourceLike): Phase {
 
   // Defensive fallback — never lock out the UI forever.
   return 'ready'
+}
+
+// ---------------------------------------------------------------------------
+// Naming-stuck heuristic (FX41)
+// ---------------------------------------------------------------------------
+
+/** A `naming` phase older than this likely means auto-naming silently
+ * stalled (worker died, LLM call dropped). The UI may surface a
+ * non-blocking warning; this helper does NOT change the phase or any gate. */
+export const NAMING_STUCK_THRESHOLD_MS = 5 * 60 * 1000
+
+/**
+ * Pure: true when the source is in the `naming` phase and has sat there
+ * past the threshold. `nowMs` is injected so the function stays pure and
+ * unit-testable. Returns false for any non-`naming` phase or when no
+ * timestamp is available.
+ */
+export function isNamingStuck(source: SourceLike, nowMs: number): boolean {
+  if (derivePhase(source) !== 'naming') return false
+  // `created_at` is the right anchor here: the naming phase runs immediately
+  // after source creation. (SourceListItem doesn't expose `updated_at`.)
+  if (!source.created_at) return false
+  const t = Date.parse(source.created_at)
+  if (Number.isNaN(t)) return false
+  return nowMs - t > NAMING_STUCK_THRESHOLD_MS
 }
 
 // ---------------------------------------------------------------------------

@@ -28,6 +28,10 @@ import logging
 import uuid
 from typing import TYPE_CHECKING, Any
 
+from src.agent.nodes._intent_render import (
+    out_of_scope_has_authority,
+    render_router_intent,
+)
 from src.agent.state import AgentState
 from src.models.enums import SourceType
 from src.prompts import load_prompt
@@ -103,12 +107,31 @@ async def _load_catalog(
         rows = await source_repository.list_by_ids(uuids)
         catalog: list[dict[str, Any]] = []
         for row in rows:
+            # Intent block (purpose + examples + out_of_scope) capped to
+            # ~150 tokens/source. Rendered between delimiters with a
+            # treat-as-data directive (security rule 1) so the routing LLM
+            # never executes intent text as an instruction.
+            intent = render_router_intent(
+                purpose=getattr(row, "purpose", None),
+                example_questions=getattr(row, "example_questions", None),
+                out_of_scope=getattr(row, "out_of_scope", None),
+                intent_status=getattr(row, "intent_status", None),
+            )
+            # Capability ramp: only ``user_set`` grants out_of_scope the
+            # authority to EXCLUDE / hard-decline a source (FR-005). At
+            # ``ai_set`` it is advisory (down-rank tie-breaker only); the flag
+            # is the explicit contract the routing prompt keys on.
+            out_of_scope_authoritative = out_of_scope_has_authority(
+                getattr(row, "intent_status", None)
+            )
             catalog.append(
                 {
                     "id": str(row.id),
                     "name": row.name,
                     "type": str(row.source_type),
                     "description": row.description or "",
+                    "intent": intent,
+                    "out_of_scope_authoritative": out_of_scope_authoritative,
                 }
             )
         return catalog
@@ -117,7 +140,17 @@ async def _load_catalog(
             "source_router: failed to load source catalog — falling back to id-only",
             exc_info=True,
         )
-        return [{"id": sid, "name": sid, "type": "unknown", "description": ""} for sid in source_ids]
+        return [
+            {
+                "id": sid,
+                "name": sid,
+                "type": "unknown",
+                "description": "",
+                "intent": "",
+                "out_of_scope_authoritative": False,
+            }
+            for sid in source_ids
+        ]
 
 
 async def _call_llm(
@@ -125,7 +158,7 @@ async def _call_llm(
     catalog: list[dict[str, Any]],
     *,
     ai_model_resolver: AIModelResolver,
-) -> tuple[list[str], list[str]]:
+) -> tuple[list[str], list[str], int, int]:
     client = await ai_model_resolver.resolve(_STAGE)
     prompt = load_prompt(_STAGE, custom=client.custom_prompt)
     user_payload = json.dumps({"sources": catalog, "question": query})
@@ -143,7 +176,9 @@ async def _call_llm(
     payload = json.loads(raw)
     selected = _safe_uuids(payload.get("selected_source_ids") or [])
     text_to_query = _safe_uuids(payload.get("use_text_to_query_for") or [])
-    return selected, text_to_query
+    in_tok = int(response.usage.prompt_tokens) if response.usage else 0
+    out_tok = int(response.usage.completion_tokens) if response.usage else 0
+    return selected, text_to_query, in_tok, out_tok
 
 
 async def route_sources(
@@ -180,8 +215,9 @@ async def route_sources(
         # Build {id: source_type} for filtering text_to_query targets.
         type_by_id = {row["id"]: row["type"] for row in catalog}
 
+        in_tok = out_tok = 0
         try:
-            selected, text_to_query_ids = await _call_llm(
+            selected, text_to_query_ids, in_tok, out_tok = await _call_llm(
                 query, catalog, ai_model_resolver=ai_model_resolver
             )
         except Exception:  # noqa: BLE001 - degrade
@@ -226,6 +262,8 @@ async def route_sources(
         return {
             "selected_source_ids": selected,
             "text_to_query_source_ids": text_to_query_ids,
+            "total_input_tokens": in_tok,
+            "total_output_tokens": out_tok,
         }
     finally:
         span.end()

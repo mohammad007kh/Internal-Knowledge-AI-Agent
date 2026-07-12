@@ -142,8 +142,13 @@ class TestAuthAuditCoverage:
         assert kwargs["action"] == "login_failure"
         assert kwargs["resource_type"] == "user"
         assert kwargs["admin_user_id"] is None
-        # email goes in metadata, not in the resource_id
-        assert kwargs["metadata"]["email"] == "admin@example.com"
+        # The login_failure path masks + hashes the caller-supplied email
+        # (PII protection — see src/api/v1/auth.py): the raw address is never
+        # stored, only ``email_masked`` (prefix-masked) and ``email_hash``.
+        meta = kwargs["metadata"]
+        assert meta["email_masked"] == "ad***@example.com"
+        assert len(meta["email_hash"]) == 64
+        assert "admin@example.com" not in meta["email_masked"]
 
 
 # ---------------------------------------------------------------------------
@@ -257,22 +262,58 @@ def sources_client():
 
 
 def _make_source(**overrides) -> MagicMock:
-    """Stub Source ORM row matching ``SourcePublicResponse`` field shape."""
+    """Stub Source ORM row satisfying both ``SourcePublicResponse`` (create
+    response) and ``SourceResponse`` (update response).
+
+    Every field these schemas read must be a concrete value — an unset
+    attribute on a MagicMock is itself a truthy child mock that fails Pydantic
+    validation (e.g. ``name_status`` as a string, ``latest_job`` as None).
+    """
     src = MagicMock()
     src.id = overrides.get("id", uuid4())
     src.name = overrides.get("name", "Test Source")
     src.source_type = overrides.get("source_type", "web_url")
     src.source_mode = overrides.get("source_mode", "live")
-    src.retrieval_mode = overrides.get("retrieval_mode", "vector")
+    src.retrieval_mode = overrides.get("retrieval_mode", "vector_only")
     src.description = overrides.get("description", "")
     src.sync_mode = overrides.get("sync_mode", "manual")
     src.sync_schedule = overrides.get("sync_schedule", None)
     src.last_synced_at = overrides.get("last_synced_at", None)
+    src.next_sync_due_at = overrides.get("next_sync_due_at", None)
     src.status = overrides.get("status", "active")
     src.citations_enabled = overrides.get("citations_enabled", True)
     src.created_at = overrides.get("created_at", datetime.now(UTC))
     src.updated_at = overrides.get("updated_at", datetime.now(UTC))
     src.owner_id = overrides.get("owner_id", uuid4())
+    src.is_active = overrides.get("is_active", True)
+    src.deleted_at = overrides.get("deleted_at", None)
+    # AI auto-naming bookkeeping (required strings on SourcePublicResponse).
+    src.name_status = overrides.get("name_status", "user_set")
+    src.description_status = overrides.get("description_status", "user_set")
+    src.auto_name_and_description = overrides.get("auto_name_and_description", False)
+    # SourceResponse-only fields (update response uses model_validate, which
+    # pulls every attribute off the ORM row).
+    src.embedder_id = overrides.get("embedder_id", None)
+    src.schema_status = overrides.get("schema_status", None)
+    src.drift_signal_count = overrides.get("drift_signal_count", 0)
+    src.last_studied_at = overrides.get("last_studied_at", None)
+    src.study_state = overrides.get("study_state", None)
+    src.tables_documented = overrides.get("tables_documented", None)
+    src.tables_partial = overrides.get("tables_partial", None)
+    src.last_error_phase = overrides.get("last_error_phase", None)
+    src.last_error_message = overrides.get("last_error_message", None)
+    # Categorised connection-failure fields (Slice 5a) — concrete None default.
+    src.failure_category = overrides.get("failure_category", None)
+    src.attempts_made = overrides.get("attempts_made", None)
+    src.failure_headline = overrides.get("failure_headline", None)
+    src.failure_next_action = overrides.get("failure_next_action", None)
+    src.owner_email = overrides.get("owner_email", "admin@example.com")
+    src.schema_summary = overrides.get("schema_summary", None)
+    src.connection_status = overrides.get("connection_status", "unknown")
+    src.connection_last_checked_at = overrides.get("connection_last_checked_at", None)
+    src.connection_last_error = overrides.get("connection_last_error", None)
+    # FX35b nested response field — None so Pydantic doesn't validate a mock.
+    src.latest_job = overrides.get("latest_job", None)
     return src
 
 

@@ -22,17 +22,13 @@
  * `onStudy` / `onRetry` handlers to mutations.
  */
 
-import { sourceKindOf } from '@/app/(admin)/admin/sources/[id]/_components/sourceTypeMatrix'
+import { isDatabaseSource } from '@/app/(admin)/admin/sources/[id]/_components/sourceTypeMatrix'
 import { Button } from '@/components/ui/button'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
-import type { SourceListItem, SourceType } from '@/lib/api/sources'
+import type { SourceListItem } from '@/lib/api/sources'
 import { cn } from '@/lib/utils'
 import { CheckCircle2, Loader2 } from 'lucide-react'
 import { useState } from 'react'
-
-function isDatabaseSource(type: SourceType | string): boolean {
-  return sourceKindOf(type as SourceType) === 'database'
-}
 
 interface SourceActionCellProps {
   source: SourceListItem
@@ -282,8 +278,9 @@ function DatabaseSourceVerb(props: VerbProps) {
     )
   }
 
-  // Queued.
-  if (status === 'QUEUED') {
+  // Queued. The "queued before any work" state lives on study_state, NOT on
+  // schema_status (FX41 — schema_status only emits studying/completed/failed).
+  if (source.study_state === 'QUEUED') {
     return (
       <div
         className={cn(
@@ -299,7 +296,7 @@ function DatabaseSourceVerb(props: VerbProps) {
   }
 
   // Studying — phase label derived from study_state.
-  if (status === 'STUDYING') {
+  if (status === 'studying') {
     return (
       <div
         className={cn(
@@ -315,8 +312,8 @@ function DatabaseSourceVerb(props: VerbProps) {
     )
   }
 
-  // Ready, not yet approved — primary "Approve to enable".
-  if (status === 'READY' && !source.is_active) {
+  // Ready (completed study), not yet approved — primary "Approve to enable".
+  if (status === 'completed' && !source.is_active) {
     const tableLabel = documented === 1 ? '1 table' : `${documented.toLocaleString()} tables`
     return (
       <Button
@@ -356,25 +353,11 @@ function DatabaseSourceVerb(props: VerbProps) {
     )
   }
 
-  // Ready and approved — green check. (Comes AFTER the READY_PARTIAL guard
-  // above so partial coverage on an approved source still surfaces as amber.)
-  if (status === 'READY' && source.is_active) {
-    return (
-      <div
-        className={cn(
-          'inline-flex items-center gap-1.5 text-xs font-medium text-emerald-700 dark:text-emerald-300',
-          block && 'w-full justify-center py-2'
-        )}
-        aria-label={`${source.name} ready`}
-      >
-        <CheckCircle2 className="h-3.5 w-3.5" aria-hidden />
-        <span>Ready</span>
-      </div>
-    )
-  }
-
-  // Stale — drift detected, allow re-study.
-  if (status === 'STALE') {
+  // Stale — drift detected. Comes BEFORE the green "Ready" branch so a
+  // drift-positive approved source surfaces the re-study CTA instead of the
+  // misleading "all good" check. The drift signal lives on
+  // `drift_signal_count` (FX41 — schema_status never emits 'stale').
+  if ((source.drift_signal_count ?? 0) > 0) {
     return (
       <Button
         type="button"
@@ -393,8 +376,26 @@ function DatabaseSourceVerb(props: VerbProps) {
     )
   }
 
+  // Ready and approved — green check. (Comes AFTER the READY_PARTIAL and
+  // drift guards above so partial coverage / drift on an approved source
+  // still surface their CTAs instead of being masked by the green check.)
+  if (status === 'completed' && source.is_active) {
+    return (
+      <div
+        className={cn(
+          'inline-flex items-center gap-1.5 text-xs font-medium text-emerald-700 dark:text-emerald-300',
+          block && 'w-full justify-center py-2'
+        )}
+        aria-label={`${source.name} ready`}
+      >
+        <CheckCircle2 className="h-3.5 w-3.5" aria-hidden />
+        <span>Ready</span>
+      </div>
+    )
+  }
+
   // Failed — red link, error popover with phase + retry.
-  if (status === 'FAILED') {
+  if (status === 'failed') {
     // NEVER include connection-string text here. Wave 3 will populate
     // `last_error_message` with an admin-readable description; today we use
     // a generic placeholder so the shell is reviewable.

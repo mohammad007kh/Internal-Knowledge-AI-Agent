@@ -1,0 +1,11 @@
+{
+  "id": "web-pricing-tier-02",
+  "source_type": "web",
+  "question": "How many seats are included in the Cinderblock Team plan described on docs.example.test?",
+  "expected_kind": "answer",
+  "golden_answer": "The Cinderblock Team plan includes 5 seats according to the documentation at docs.example.test.",
+  "must_include": ["5"],
+  "must_not_fabricate": true,
+  "fixtures": null,
+  "data_source": "synthetic"
+}

@@ -1,0 +1,11 @@
+{
+  "id": "file-handbook-remote-02",
+  "source_type": "file",
+  "question": "What is the maximum number of consecutive remote-work days allowed under the Acme Synthetic Labs handbook?",
+  "expected_kind": "answer",
+  "golden_answer": "The handbook allows up to 10 consecutive remote-work days before an in-office check-in is required.",
+  "must_include": ["10"],
+  "must_not_fabricate": true,
+  "fixtures": null,
+  "data_source": "synthetic"
+}

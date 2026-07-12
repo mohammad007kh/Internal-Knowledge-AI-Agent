@@ -79,6 +79,93 @@ needed to retrieve the correct information.
 Clarification needed: {clarification_question}
 """
 
+# ---------------------------------------------------------------------------
+# Honest-failure / budget wrap-up synthesizer branch (T-057, FR-013/FR-020)
+# ---------------------------------------------------------------------------
+#
+# Rendered by :func:`render_failure_prompt` for BOTH the honest-failure path
+# (retries + one replan exhausted) and the budget-hit path (a hard cap tripped).
+# The ``{diagnostics}`` placeholder is filled by ``budget_guard.inject_diagnostics``
+# with a ``<RETRIEVAL_DIAGNOSTICS>`` block (generated narration; no raw rows).
+#
+# Framing rules (FR-013): LEAD with an honest statement, offer an expandable
+# "what I tried" grounded ONLY in the diagnostics, propose next actions, and
+# NEVER fabricate facts.
+_FAILURE_PROMPT_BASE = """\
+You are a helpful AI assistant for an internal knowledge base. This turn could
+NOT produce a trustworthy complete answer. Respond honestly — do NOT pretend the
+answer was found.
+
+How to respond
+--------------
+1. LEAD with a brief, honest statement that you could not fully answer (or, on a
+   budget stop, that you stopped before finishing). Be calm and specific, not
+   apologetic boilerplate.
+2. Give the best PARTIAL answer that IS supported by the retrieval diagnostics
+   and context below — nothing more.
+3. Offer an expandable "What I tried" summary, grounded ONLY in the
+   <RETRIEVAL_DIAGNOSTICS> block: which sources were queried, what was run, how
+   many rows came back, and why a step was judged inadequate.
+4. Propose 1-3 concrete next actions the user could take.
+
+FABRICATION IS PROHIBITED. Do NOT invent facts, rows, sources, or results. If a
+detail is not in the diagnostics or context, say it is unknown.
+{budget_tail}
+{diagnostics}
+
+<CONTEXT>
+{context}
+</CONTEXT>
+"""
+
+# Appended only on the budget-hit path: name what was not completed and that the
+# user may continue in a fresh turn ("Keep going").
+_BUDGET_TAIL = """\
+
+This turn hit a cost/time ceiling before finishing. The following were NOT
+completed: {not_completed}. Note calmly that the user can reply "Keep going" to
+continue in a fresh turn (this does NOT raise the per-turn limit mid-turn).
+"""
+
+
+def render_failure_prompt(
+    chunks: list[dict],  # type: ignore[type-arg]
+    *,
+    diagnostics: str,
+    budget_hit: bool = False,
+    not_completed: list[str] | None = None,
+) -> str:
+    """Render the honest-failure / budget-hit synthesizer system prompt (T-057).
+
+    ``diagnostics`` is the ``<RETRIEVAL_DIAGNOSTICS>`` block built by
+    ``budget_guard.inject_diagnostics``; it is injected verbatim. ``budget_hit``
+    selects the budget wrap-up tail and surfaces ``not_completed`` step labels.
+    Context chunks (if any partial retrieval succeeded) ground the partial answer.
+    """
+    if chunks:
+        seen: set[str] = set()
+        parts: list[str] = []
+        for i, chunk in enumerate(chunks, start=1):
+            text = (chunk.get("text") or "").strip()
+            if text and text not in seen:
+                seen.add(text)
+                parts.append(f"[{i}] {text}")
+        context_text = "\n\n".join(parts) if parts else "(No relevant context found)"
+    else:
+        context_text = "(No relevant context found)"
+
+    if budget_hit:
+        labels = ", ".join(not_completed) if not_completed else "(none recorded)"
+        budget_tail = _BUDGET_TAIL.format(not_completed=labels)
+    else:
+        budget_tail = ""
+
+    return _FAILURE_PROMPT_BASE.format(
+        budget_tail=budget_tail,
+        diagnostics=diagnostics,
+        context=context_text,
+    )
+
 NO_CONTEXT_MESSAGE = (
     "I don't have enough information in the knowledge base to answer that. "
     "Please ensure relevant sources have been synced and you have access to them."

@@ -1,3 +1,4 @@
+import logging
 from typing import Any
 
 from dependency_injector import containers, providers
@@ -15,13 +16,13 @@ from src.repositories.company_policy_repository import CompanyPolicyRepository
 from src.repositories.connector_repository import ConnectorRepository
 from src.repositories.document_repository import DocumentRepository
 from src.repositories.embedder_repository import EmbedderRepository
+from src.repositories.guardrail_event_repository import GuardrailEventRepository
 from src.repositories.invitation_repository import InvitationRepository
 from src.repositories.llm_config_repository import LLMConfigRepository
 from src.repositories.refresh_token_repository import RefreshTokenRepository
 from src.repositories.source_permission_repository import SourcePermissionRepository
 from src.repositories.source_repository import SourceRepository
 from src.repositories.sync_job_repository import SyncJobRepository
-from src.repositories.guardrail_event_repository import GuardrailEventRepository
 from src.repositories.user_repository import UserRepository
 from src.services.account_lockout import AccountLockout
 from src.services.ai_model_resolver import AIModelResolver
@@ -46,8 +47,6 @@ from src.services.storage_service import StorageService
 from src.services.sync_job_service import SyncJobService
 from src.services.title_generator import TitleGeneratorService
 from src.services.user_service import UserService
-
-import logging
 
 _logger = logging.getLogger(__name__)
 
@@ -260,8 +259,12 @@ class Container(containers.DeclarativeContainer):
     )
     guardrail_service: providers.Factory[GuardrailService] = providers.Factory(
         GuardrailService,
-        policy_repo=company_policy_repo,
-        guardrail_event_repo=guardrail_event_repo,
+        # Pass the sessionmaker (Object, not Factory) so the service opens a
+        # fresh session per DB touch and returns it to the pool immediately —
+        # scoping lives here in the DI graph, not enumerated at the chat API
+        # edge (#285). The service builds company_policy / guardrail_event repos
+        # internally per call.
+        session_factory=session_factory_provider,
         openai_client=openai_client,
         ai_model_resolver=ai_model_resolver,
     )
@@ -283,6 +286,25 @@ class Container(containers.DeclarativeContainer):
         # for the source_router and text_to_query nodes.  When omitted the
         # builder falls back to v1 (legacy single-shot) automatically.
         source_repository=source_repo,
+    )
+    # Sandbox-first agentic pipeline (T-058 / FR-026): identical wiring to
+    # ``pipeline`` but requests ``sandbox=True`` so the builder returns the
+    # plan-and-execute graph when ``PIPELINE_AGENTIC_ENABLED`` is on. With the
+    # flag OFF this returns the exact same v2 graph as ``pipeline`` — the flag
+    # is the rollback. Only the admin sandbox endpoint resolves this provider;
+    # general chat keeps the proven v2 topology until eval gates widen the flag.
+    agentic_pipeline = providers.Factory(
+        build_pipeline,
+        db_session=providers.Factory(AsyncSessionLocal),
+        chunk_repository=chunk_repo,
+        chat_session_repository=chat_session_repo,
+        chat_message_repository=chat_message_repo,
+        ai_model_resolver=ai_model_resolver,
+        embedding_service_factory=embedding_service_factory,
+        langfuse=langfuse,
+        guardrail_service=guardrail_service,
+        source_repository=source_repo,
+        sandbox=True,
     )
 
 

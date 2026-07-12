@@ -1,0 +1,11 @@
+{
+  "id": "file-expense-policy-03",
+  "source_type": "file",
+  "question": "What is the per-meal reimbursement cap for business travel in the Acme Synthetic Labs expense policy?",
+  "expected_kind": "answer",
+  "golden_answer": "The expense policy caps meal reimbursement at 40 fictional credits per meal during business travel.",
+  "must_include": ["40"],
+  "must_not_fabricate": true,
+  "fixtures": null,
+  "data_source": "synthetic"
+}

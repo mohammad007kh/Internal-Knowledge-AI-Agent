@@ -1,5 +1,11 @@
 'use client'
 
+import {
+  type ActivityState,
+  activityLogReducer,
+  emptyActivityState,
+  parseAgentEvent,
+} from '@/lib/sse/agent-events'
 import { getToken } from '@/lib/token-store'
 import { useCallback, useEffect, useRef, useState } from 'react'
 
@@ -28,6 +34,18 @@ export interface StreamCitation {
 export type ChatStreamMessageType = 'normal' | 'clarification' | 'guardrail_blocked' | 'error'
 
 /**
+ * A clarification quick-reply option (wire shape, see contracts/sse-events.md:
+ * `{id, label, hint?, recommended?}`). Drawn server-side from the user's
+ * permitted source set (Security Rule 2 / T-080) — rendered verbatim here.
+ */
+export interface StreamClarificationOption {
+  id: string
+  label: string
+  hint?: string | null
+  recommended?: boolean | null
+}
+
+/**
  * Sentinel passed as the `sessionId` path segment when the caller wants the
  * backend to lazy-create a chat session as part of the first message turn
  * (U15). The backend responds with an `event: session_created` SSE frame
@@ -44,17 +62,17 @@ export interface UseChatStreamReturn {
    * and emits `event: session_created` as the first frame; the resulting id
    * surfaces via `lastCreatedSessionId` so the consumer can swap the URL.
    */
-  sendMessage: (
-    sessionId: string,
-    query: string,
-    sourceIds?: string[],
-  ) => Promise<void>
+  sendMessage: (sessionId: string, query: string, sourceIds?: string[]) => Promise<void>
   abortStream: () => void
   isStreaming: boolean
   currentResponse: string
   citations: StreamCitation[]
   messageType: ChatStreamMessageType
   clarificationQuestion: string | null
+  /** Permitted-source quick-reply options on the last clarification, if any. */
+  clarificationOptions: StreamClarificationOption[] | null
+  /** Whether the clarification allows a free-text reply (default true). */
+  clarificationAllowFreeText: boolean
   guardrailMessage: string | null
   errorMessage: string | null
   lastMessageId: string | null
@@ -75,6 +93,13 @@ export interface UseChatStreamReturn {
    * existing session. Reset on every `sendMessage()` call.
    */
   lastCreatedSessionId: string | null
+  /**
+   * Per-turn agentic activity log folded from the INTERMEDIATE SSE events
+   * (`plan`/`step`/`replan`/`budget`). Additive only — these events never end
+   * the turn (no terminal flag, not in the `sawTerminalEvent` set). Reset on
+   * every `sendMessage()`. Consumed by the T-071+ thinking UI.
+   */
+  activityLog: ActivityState
   /**
    * Clears local stream state — useful after the caller has persisted the
    * final assistant message into the query cache and wants a fresh buffer.
@@ -139,11 +164,16 @@ export function useChatStream(): UseChatStreamReturn {
   const [citations, setCitations] = useState<StreamCitation[]>([])
   const [messageType, setMessageType] = useState<ChatStreamMessageType>('normal')
   const [clarificationQuestion, setClarificationQuestion] = useState<string | null>(null)
+  const [clarificationOptions, setClarificationOptions] = useState<
+    StreamClarificationOption[] | null
+  >(null)
+  const [clarificationAllowFreeText, setClarificationAllowFreeText] = useState(true)
   const [guardrailMessage, setGuardrailMessage] = useState<string | null>(null)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const [lastMessageId, setLastMessageId] = useState<string | null>(null)
   const [lastTitle, setLastTitle] = useState<string | null>(null)
   const [lastCreatedSessionId, setLastCreatedSessionId] = useState<string | null>(null)
+  const [activityLog, setActivityLog] = useState<ActivityState>(emptyActivityState)
 
   const controllerRef = useRef<AbortController | null>(null)
 
@@ -165,11 +195,14 @@ export function useChatStream(): UseChatStreamReturn {
     setCitations([])
     setMessageType('normal')
     setClarificationQuestion(null)
+    setClarificationOptions(null)
+    setClarificationAllowFreeText(true)
     setGuardrailMessage(null)
     setErrorMessage(null)
     setLastMessageId(null)
     setLastTitle(null)
     setLastCreatedSessionId(null)
+    setActivityLog(emptyActivityState)
   }, [])
 
   const sendMessage = useCallback(
@@ -186,11 +219,14 @@ export function useChatStream(): UseChatStreamReturn {
       setCitations([])
       setMessageType('normal')
       setClarificationQuestion(null)
+      setClarificationOptions(null)
+      setClarificationAllowFreeText(true)
       setGuardrailMessage(null)
       setErrorMessage(null)
       setLastMessageId(null)
       setLastTitle(null)
       setLastCreatedSessionId(null)
+      setActivityLog(emptyActivityState)
 
       const token = getToken()
       const url = `${API_BASE}/api/v1/chat/sessions/${sessionId}/messages`
@@ -292,9 +328,20 @@ export function useChatStream(): UseChatStreamReturn {
                 break
               }
               case 'clarification': {
-                const payload = safeJsonParse<{ question?: string }>(frame.data)
+                const payload = safeJsonParse<{
+                  question?: string
+                  options?: StreamClarificationOption[]
+                  allow_free_text?: boolean
+                }>(frame.data)
                 setMessageType('clarification')
                 setClarificationQuestion(payload?.question ?? '')
+                setClarificationOptions(
+                  Array.isArray(payload?.options) && payload.options.length > 0
+                    ? payload.options
+                    : null
+                )
+                // Default true when omitted, matching the backend wire default.
+                setClarificationAllowFreeText(payload?.allow_free_text ?? true)
                 sawTerminalEvent = true
                 break
               }
@@ -342,9 +389,19 @@ export function useChatStream(): UseChatStreamReturn {
                 sawTerminalEvent = true
                 break
               }
-              default:
-                // Unknown event types are ignored — forward compatibility.
+              default: {
+                // INTERMEDIATE agentic events (plan/step/replan/budget) are
+                // additive to the activity log and NEVER terminal: they do NOT
+                // set messageType, do NOT set lastMessageId, do NOT touch
+                // `sawTerminalEvent`, and are folded through the shared,
+                // immutable reducer. parseAgentEvent returns null for any other
+                // (unknown / future) event → silent drop (forward compat).
+                const agentEvent = parseAgentEvent(frame.event, safeJsonParse(frame.data))
+                if (agentEvent) {
+                  setActivityLog((prev) => activityLogReducer(prev, agentEvent))
+                }
                 break
+              }
             }
           }
         }
@@ -384,11 +441,14 @@ export function useChatStream(): UseChatStreamReturn {
     citations,
     messageType,
     clarificationQuestion,
+    clarificationOptions,
+    clarificationAllowFreeText,
     guardrailMessage,
     errorMessage,
     lastMessageId,
     lastTitle,
     lastCreatedSessionId,
+    activityLog,
     reset,
   }
 }

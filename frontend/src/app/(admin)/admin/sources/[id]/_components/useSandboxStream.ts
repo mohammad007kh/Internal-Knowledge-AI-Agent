@@ -14,7 +14,14 @@
  * State is `useState`-only by design — no React Query, no localStorage. A
  * hard refresh wipes everything. That property is part of the UX contract.
  */
+import type { StreamClarificationOption } from '@/hooks/use-chat-stream'
 import { openSandboxStream } from '@/lib/api/chat'
+import {
+  type ActivityState,
+  activityLogReducer,
+  emptyActivityState,
+  parseAgentEvent,
+} from '@/lib/sse/agent-events'
 import { useCallback, useEffect, useRef, useState } from 'react'
 
 export type SandboxMessageType = 'normal' | 'clarification' | 'guardrail_blocked' | 'error'
@@ -28,10 +35,21 @@ export interface SandboxStreamResult {
   messageType: SandboxMessageType
   /** Populated when messageType==='clarification'. */
   clarificationQuestion: string | null
+  /** Permitted-source options on the last clarification (parity with main chat). */
+  clarificationOptions: StreamClarificationOption[] | null
+  /** Whether the clarification allows a free-text reply (default true). */
+  clarificationAllowFreeText: boolean
   /** Populated when messageType==='guardrail_blocked'. */
   guardrailMessage: string | null
   /** Populated when messageType==='error' (or fetch failed). */
   errorMessage: string | null
+  /**
+   * Per-turn agentic activity log folded from the INTERMEDIATE SSE events
+   * (`plan`/`step`/`replan`/`budget`). Additive only — these events never end
+   * the turn (no terminal flag, not in the `sawTerminal` set). Reset on every
+   * `sendMessage()`. Consumed by the T-071+ thinking UI.
+   */
+  activityLog: ActivityState
   /** True for the brief gap between `sendMessage()` and the first event. */
   isPending: boolean
   /** Open the SSE stream, accumulate tokens. Returns once terminated. */
@@ -79,8 +97,13 @@ export function useSandboxStream(): SandboxStreamResult {
   const [currentResponse, setCurrentResponse] = useState('')
   const [messageType, setMessageType] = useState<SandboxMessageType>('normal')
   const [clarificationQuestion, setClarificationQuestion] = useState<string | null>(null)
+  const [clarificationOptions, setClarificationOptions] = useState<
+    StreamClarificationOption[] | null
+  >(null)
+  const [clarificationAllowFreeText, setClarificationAllowFreeText] = useState(true)
   const [guardrailMessage, setGuardrailMessage] = useState<string | null>(null)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
+  const [activityLog, setActivityLog] = useState<ActivityState>(emptyActivityState)
 
   const controllerRef = useRef<AbortController | null>(null)
 
@@ -102,8 +125,11 @@ export function useSandboxStream(): SandboxStreamResult {
     setCurrentResponse('')
     setMessageType('normal')
     setClarificationQuestion(null)
+    setClarificationOptions(null)
+    setClarificationAllowFreeText(true)
     setGuardrailMessage(null)
     setErrorMessage(null)
+    setActivityLog(emptyActivityState)
   }, [])
 
   const sendMessage = useCallback(
@@ -123,8 +149,11 @@ export function useSandboxStream(): SandboxStreamResult {
       setCurrentResponse('')
       setMessageType('normal')
       setClarificationQuestion(null)
+      setClarificationOptions(null)
+      setClarificationAllowFreeText(true)
       setGuardrailMessage(null)
       setErrorMessage(null)
+      setActivityLog(emptyActivityState)
 
       try {
         const response = await openSandboxStream(
@@ -175,9 +204,19 @@ export function useSandboxStream(): SandboxStreamResult {
                 break
               }
               case 'clarification': {
-                const payload = safeJsonParse<{ question?: string }>(frame.data)
+                const payload = safeJsonParse<{
+                  question?: string
+                  options?: StreamClarificationOption[]
+                  allow_free_text?: boolean
+                }>(frame.data)
                 setMessageType('clarification')
                 setClarificationQuestion(payload?.question ?? '')
+                setClarificationOptions(
+                  Array.isArray(payload?.options) && payload.options.length > 0
+                    ? payload.options
+                    : null
+                )
+                setClarificationAllowFreeText(payload?.allow_free_text ?? true)
                 sawTerminal = true
                 break
               }
@@ -199,9 +238,18 @@ export function useSandboxStream(): SandboxStreamResult {
                 sawTerminal = true
                 break
               }
-              default:
-                // Ignore unknown frames — forward compatibility.
+              default: {
+                // INTERMEDIATE agentic events (plan/step/replan/budget) are
+                // additive to the activity log and NEVER terminal: they do NOT
+                // set messageType, do NOT touch `sawTerminal`, and are folded
+                // through the shared, immutable reducer. parseAgentEvent returns
+                // null for any other (unknown / future) event → silent drop.
+                const agentEvent = parseAgentEvent(frame.event, safeJsonParse(frame.data))
+                if (agentEvent) {
+                  setActivityLog((prev) => activityLogReducer(prev, agentEvent))
+                }
                 break
+              }
             }
           }
         }
@@ -234,8 +282,11 @@ export function useSandboxStream(): SandboxStreamResult {
     currentResponse,
     messageType,
     clarificationQuestion,
+    clarificationOptions,
+    clarificationAllowFreeText,
     guardrailMessage,
     errorMessage,
+    activityLog,
     sendMessage,
     abort,
     reset,

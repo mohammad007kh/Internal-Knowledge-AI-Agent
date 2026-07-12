@@ -12,10 +12,21 @@
  * persistent chat, so behavior on `delta` / `error` / `clarification` /
  * `done` matches what users see in production.
  */
+import { AgenticTurnFooter } from '@/components/chat/AgenticTurnFooter'
+import { DetailPanel, type PanelContent } from '@/components/chat/CitationPanel'
+import { ClarificationCard, type ClarificationOption } from '@/components/chat/ClarificationCard'
+import { KEEP_SEARCHING_PROMPT } from '@/components/chat/ContinueSearchAffordance'
+import { StatusLine } from '@/components/chat/StatusLine'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { useAuth } from '@/features/auth/context/AuthContext'
 import type { SourceDetail } from '@/lib/api/sources'
+import {
+  type ActivityState,
+  type StepActivityEntry,
+  selectActiveStep,
+  selectLatestBudget,
+} from '@/lib/sse/agent-events'
 import { cn } from '@/lib/utils'
 import {
   AlertTriangleIcon,
@@ -41,6 +52,14 @@ interface SandboxMessage {
   id: string
   role: 'user' | 'assistant'
   content: string
+  /** Agentic activity snapshot for an assistant turn (drives the accordion). */
+  activity?: ActivityState
+  /** Structured clarification, if this turn asked one (drives ClarificationCard). */
+  clarification?: {
+    question: string
+    options?: ClarificationOption[]
+    allowFreeText: boolean
+  }
 }
 
 const HISTORY_TURN_CAP = 20
@@ -105,11 +124,18 @@ function TestTabBody({ source }: TestTabBodyProps) {
   const stream = useSandboxStream()
   const [messages, setMessages] = useState<SandboxMessage[]>([])
   const [input, setInput] = useState('')
+  // Step slide-over (agentic transparency) — sandbox is the validation surface.
+  const [panel, setPanel] = useState<PanelContent | null>(null)
+  // Turn ids where the user chose "Leave it here" on the budget-continue prompt.
+  const [continueDismissed, setContinueDismissed] = useState<Set<string>>(() => new Set())
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
 
+  // Only the most recent assistant turn may offer "Search again" (live edge).
+  const lastAssistantId = [...messages].reverse().find((m) => m.role === 'assistant')?.id ?? null
+
   const schemaFailed =
-    sourceKindOf(source.source_type) === 'database' && source.schema_status === 'FAILED'
+    sourceKindOf(source.source_type) === 'database' && source.schema_status === 'failed'
   const inputDisabled = stream.isStreaming || schemaFailed
 
   // When the assistant turn finishes, fold the streamed text into the
@@ -119,13 +145,16 @@ function TestTabBody({ source }: TestTabBodyProps) {
     if (stream.isStreaming) return
     if (stream.isPending) return
     if (stream.messageType === 'normal' && stream.currentResponse.length > 0) {
-      // Append the assistant turn and reset stream state.
+      // Append the assistant turn (with its agentic activity snapshot, if any)
+      // and reset stream state. Capture activity BEFORE reset clears it.
+      const activity = stream.activityLog.entries.length > 0 ? stream.activityLog : undefined
       setMessages((prev) => [
         ...prev,
         {
           id: `a-${Date.now()}`,
           role: 'assistant',
           content: stream.currentResponse,
+          activity,
         },
       ])
       stream.reset()
@@ -156,12 +185,19 @@ function TestTabBody({ source }: TestTabBodyProps) {
       return
     }
     if (stream.messageType === 'clarification' && stream.clarificationQuestion) {
+      // Capture the STRUCTURED clarification (options + allow_free_text) BEFORE
+      // reset() clears it, so SandboxBubble can render the real ClarificationCard
+      // (parity with the main chat — incl. permitted-source options, Rule 2).
+      const question = stream.clarificationQuestion
+      const options = stream.clarificationOptions
+      const allowFreeText = stream.clarificationAllowFreeText
       setMessages((prev) => [
         ...prev,
         {
           id: `c-${Date.now()}`,
           role: 'assistant',
-          content: `_Clarification needed:_ ${stream.clarificationQuestion}`,
+          content: '',
+          clarification: { question, options: options ?? undefined, allowFreeText },
         },
       ])
       stream.reset()
@@ -176,6 +212,8 @@ function TestTabBody({ source }: TestTabBodyProps) {
     stream.errorMessage,
     stream.guardrailMessage,
     stream.clarificationQuestion,
+    stream.clarificationOptions,
+    stream.clarificationAllowFreeText,
   ])
 
   // Auto-scroll to bottom on new turns / streaming tokens.
@@ -247,7 +285,17 @@ function TestTabBody({ source }: TestTabBodyProps) {
           ) : null}
 
           {messages.map((m) => (
-            <SandboxBubble key={m.id} message={m} />
+            <SandboxBubble
+              key={m.id}
+              message={m}
+              onInspectStep={(step) => setPanel({ kind: 'step', step })}
+              isLastAssistant={m.id === lastAssistantId}
+              isStreaming={stream.isStreaming}
+              continueDismissed={continueDismissed.has(m.id)}
+              onSearchAgain={() => send(KEEP_SEARCHING_PROMPT)}
+              onLeaveBudget={() => setContinueDismissed((prev) => new Set(prev).add(m.id))}
+              onClarifyReply={(answer) => send(answer)}
+            />
           ))}
 
           {(stream.isStreaming || stream.isPending) && (
@@ -264,6 +312,13 @@ function TestTabBody({ source }: TestTabBodyProps) {
                       aria-hidden="true"
                     />
                   </div>
+                ) : stream.activityLog.entries.length > 0 ? (
+                  // Layer-1 live status once the agent narrates (same as main chat).
+                  <StatusLine
+                    activeStep={selectActiveStep(stream.activityLog)}
+                    budget={selectLatestBudget(stream.activityLog)}
+                    isStreaming={false}
+                  />
                 ) : (
                   <div
                     className="flex items-center gap-1 py-0.5"
@@ -272,16 +327,16 @@ function TestTabBody({ source }: TestTabBodyProps) {
                     data-testid="sandbox-thinking"
                   >
                     <span
-                      className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-foreground/40"
+                      className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-foreground/40 motion-reduce:animate-none"
                       aria-hidden
                     />
                     <span
-                      className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-foreground/40"
+                      className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-foreground/40 motion-reduce:animate-none"
                       style={{ animationDelay: '150ms' }}
                       aria-hidden
                     />
                     <span
-                      className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-foreground/40"
+                      className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-foreground/40 motion-reduce:animate-none"
                       style={{ animationDelay: '300ms' }}
                       aria-hidden
                     />
@@ -365,6 +420,8 @@ function TestTabBody({ source }: TestTabBodyProps) {
           </Button>
         </div>
       )}
+
+      <DetailPanel content={panel} onClose={() => setPanel(null)} />
     </div>
   )
 }
@@ -377,10 +434,7 @@ interface SandboxEmptyStateProps {
 
 function SandboxEmptyState({ starters, onStarterClick, disabled }: SandboxEmptyStateProps) {
   return (
-    <div
-      className="mx-auto mt-6 max-w-md space-y-4 text-center"
-      data-testid="sandbox-empty-state"
-    >
+    <div className="mx-auto mt-6 max-w-md space-y-4 text-center" data-testid="sandbox-empty-state">
       <SparklesIcon className="mx-auto h-10 w-10 text-primary/40" aria-hidden />
       <h3 className="text-base font-semibold">Try a question against this source</h3>
       <div className="grid gap-2 pt-2">
@@ -401,8 +455,46 @@ function SandboxEmptyState({ starters, onStarterClick, disabled }: SandboxEmptyS
   )
 }
 
-function SandboxBubble({ message }: { message: SandboxMessage }) {
+interface SandboxBubbleProps {
+  message: SandboxMessage
+  onInspectStep?: (step: StepActivityEntry) => void
+  isLastAssistant?: boolean
+  isStreaming?: boolean
+  continueDismissed?: boolean
+  onSearchAgain?: () => void
+  onLeaveBudget?: () => void
+  onClarifyReply?: (answer: string) => void
+}
+
+function SandboxBubble({
+  message,
+  onInspectStep,
+  isLastAssistant = false,
+  isStreaming = false,
+  continueDismissed = false,
+  onSearchAgain,
+  onLeaveBudget,
+  onClarifyReply,
+}: SandboxBubbleProps) {
   const isUser = message.role === 'user'
+
+  // A clarification turn renders the real ClarificationCard (parity with the main
+  // chat) as a full-width list item — not inside a bubble. Interactive only on the
+  // live edge (latest turn, not streaming); historical ones render disabled.
+  if (message.clarification) {
+    return (
+      <ClarificationCard
+        question={message.clarification.question}
+        options={message.clarification.options}
+        allowFreeText={message.clarification.allowFreeText}
+        onReply={(answer) => onClarifyReply?.(answer)}
+        onDismiss={() => {}}
+        disabled={!(isLastAssistant && !isStreaming)}
+        resetKey={message.id}
+      />
+    )
+  }
+
   return (
     <div className={cn('flex items-start gap-3', isUser && 'flex-row-reverse')}>
       <div
@@ -421,12 +513,22 @@ function SandboxBubble({ message }: { message: SandboxMessage }) {
       <div
         className={cn(
           'max-w-[75%] rounded-2xl px-4 py-2.5',
-          isUser
-            ? 'rounded-tr-sm bg-primary text-primary-foreground'
-            : 'rounded-tl-sm bg-muted'
+          isUser ? 'rounded-tr-sm bg-primary text-primary-foreground' : 'rounded-tl-sm bg-muted'
         )}
       >
         <p className="whitespace-pre-wrap break-words text-sm">{message.content}</p>
+        {/* Layer-2 finished-turn footer — shared with the main chat (Fix C). */}
+        {!isUser && message.activity && (
+          <AgenticTurnFooter
+            activity={message.activity}
+            isLastAssistant={isLastAssistant}
+            isStreaming={isStreaming}
+            continueDismissed={continueDismissed}
+            onInspectStep={(step) => onInspectStep?.(step)}
+            onSearchAgain={() => onSearchAgain?.()}
+            onLeaveBudget={() => onLeaveBudget?.()}
+          />
+        )}
       </div>
     </div>
   )
@@ -451,10 +553,7 @@ function SourceStateWarnings({ source }: SourceStateWarningsProps) {
     })
   }
 
-  if (
-    sourceKindOf(source.source_type) === 'database' &&
-    source.schema_status === 'FAILED'
-  ) {
+  if (sourceKindOf(source.source_type) === 'database' && source.schema_status === 'failed') {
     warnings.push({
       tone: 'red',
       text: "Schema study failed — text-to-query won't work. Fix in Sync tab first.",

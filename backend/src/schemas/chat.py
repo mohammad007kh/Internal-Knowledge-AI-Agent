@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from enum import StrEnum
-from typing import Any
+from typing import Any, ClassVar
 from uuid import UUID
 
 from pydantic import BaseModel, Field, field_validator, model_validator
@@ -136,6 +136,56 @@ class ChatResponse(BaseModel):
 # ---------------------------------------------------------------------------
 
 
+class ClarificationOption(BaseModel):
+    """A single permission-clipped clarification choice (T-080).
+
+    Defined at module scope (not nested in :class:`ChatStreamEvent`) so Pydantic
+    can resolve :class:`ClarificationData.options` without a circular nested
+    forward reference. Exposed as ``ChatStreamEvent.ClarificationOption`` for
+    ergonomic access.
+
+    ``id`` is the value the frontend echoes back as the next user message (the
+    source id in the agentic path); ``label`` is the user-facing display name
+    (already HTML-escaped by the emitter — see ``chat_stream_service``).
+    ``hint`` is an optional one-line description; ``recommended`` flags the
+    planner's suggested default.
+    """
+
+    id: str
+    label: str
+    hint: str | None = None
+    recommended: bool | None = None
+
+
+class ClarificationData(BaseModel):
+    """Clarification event payload (T-080, additive over the legacy shape).
+
+    Legacy callers pass ``question`` only (``options`` absent / None) — a
+    free-text clarification, still valid. When ``options`` IS present it MUST
+    carry 2-4 entries (wire contract); 1 or 5+ raises a ``ValidationError``.
+    ``allow_free_text`` defaults True so the user can always type a reply.
+    """
+
+    question: str
+    options: list[ClarificationOption] | None = None
+    allow_free_text: bool = True
+
+    @field_validator("options")
+    @classmethod
+    def _validate_option_count(
+        cls,
+        v: list[ClarificationOption] | None,
+    ) -> list[ClarificationOption] | None:
+        # None / absent = legacy free-text clarification (still valid). When
+        # options ARE present, the wire contract requires 2-4 entries.
+        if v is not None and not (2 <= len(v) <= 4):
+            raise ValueError(
+                "clarification options must contain between 2 and 4 entries "
+                f"when present (got {len(v)})"
+            )
+        return v
+
+
 class StreamEventType(StrEnum):
     DELTA = "delta"
     DONE = "done"
@@ -147,6 +197,11 @@ class StreamEventType(StrEnum):
     # ``/chat`` → ``/chat/<id>`` and patch the sidebar cache before any
     # tokens flow.  Never emitted when the path already targets a real id.
     SESSION_CREATED = "session_created"
+    # Agentic-pipeline events (T-052 owns these enum entries; T-053/T-056/T-057 emit them).
+    PLAN = "plan"      # planner emits the step-by-step plan before execution
+    STEP = "step"      # executor emits per-step progress events
+    REPLAN = "replan"  # replan node emits a revised plan
+    BUDGET = "budget"  # budget guard emits a cost-ceiling diagnostic
 
 
 class ChatStreamEvent(BaseModel):
@@ -163,9 +218,19 @@ class ChatStreamEvent(BaseModel):
         message_id: str
         trace_id: str | None = None
         sources: list[dict[str, Any]] = Field(default_factory=list)
+        # Compact agentic activity summary (T-058 / FR-018, FR-021). None for
+        # non-agentic (v2 / legacy) turns — the activity UI hides what is
+        # absent. Built by ``src.agent.activity_summary.build_activity_summary``
+        # and persisted to ``chat_messages.activity_summary``.
+        activity_summary: dict[str, Any] | None = None
 
-    class ClarificationData(BaseModel):
-        question: str
+    # Nested aliases (ergonomic access as ``ChatStreamEvent.X``); the canonical
+    # definitions live at module scope so Pydantic can resolve the
+    # ``ClarificationData.options`` forward reference without a circular
+    # nested-class lookup. Annotated ``ClassVar`` so Pydantic does NOT mistake
+    # these class-attribute aliases for model fields.
+    ClarificationOption: ClassVar[type[ClarificationOption]] = ClarificationOption
+    ClarificationData: ClassVar[type[ClarificationData]] = ClarificationData
 
     class ErrorData(BaseModel):
         message: str
@@ -207,6 +272,7 @@ class ChatStreamEvent(BaseModel):
         message_id: str,
         trace_id: str | None = None,
         sources: list[dict[str, Any]] | None = None,
+        activity_summary: dict[str, Any] | None = None,
     ) -> ChatStreamEvent:
         return cls(
             event=StreamEventType.DONE,
@@ -215,14 +281,45 @@ class ChatStreamEvent(BaseModel):
                 "message_id": message_id,
                 "trace_id": trace_id,
                 "sources": sources or [],
+                # Only included when the turn was agentic; None on v2/legacy so
+                # the wire frame degrades gracefully (frontend hides what is absent).
+                "activity_summary": activity_summary,
             },
         )
 
     @classmethod
-    def clarification(cls, question: str) -> ChatStreamEvent:
+    def clarification(
+        cls,
+        question: str,
+        *,
+        options: list[dict[str, Any]] | None = None,
+        allow_free_text: bool = True,
+    ) -> ChatStreamEvent:
+        """Emit a clarification request (T-080; additive over the legacy shape).
+
+        Wire shape (contracts/sse-events.md §"Extended event: clarification")::
+
+            {question, options?:[{id,label,hint?,recommended?}], allow_free_text}
+
+        ``options`` is OPTIONAL: when omitted (or None) this is a legacy
+        free-text clarification — still valid. When present it MUST carry 2-4
+        entries; :class:`ClarificationData` raises ``ValidationError`` on 1 or
+        5+. The payload is built through ``ClarificationData`` so the wire JSON
+        is the validated/serialized shape (``exclude_none`` drops absent
+        ``hint`` / ``recommended`` per the contract's optional fields).
+        """
+        payload = ClarificationData(
+            question=question,
+            options=(
+                [ClarificationOption(**opt) for opt in options]
+                if options is not None
+                else None
+            ),
+            allow_free_text=allow_free_text,
+        )
         return cls(
             event=StreamEventType.CLARIFICATION,
-            data={"question": question},
+            data=payload.model_dump(exclude_none=True),
         )
 
     @classmethod
@@ -255,5 +352,86 @@ class ChatStreamEvent(BaseModel):
             data={
                 "session_id": session_id,
                 "source_ids": source_ids or [],
+            },
+        )
+
+    @classmethod
+    def plan(
+        cls,
+        *,
+        revision: int,
+        reason: str | None,
+        steps: list[dict[str, Any]],
+    ) -> ChatStreamEvent:
+        """Emit the planner's step-by-step plan before execution begins."""
+        return cls(
+            event=StreamEventType.PLAN,
+            data={"revision": revision, "reason": reason, "steps": steps},
+        )
+
+    @classmethod
+    def step(
+        cls,
+        *,
+        step_id: str,
+        role: str,
+        state: str,
+        label: str,
+        summary: str | None = None,
+        progress: dict[str, int] | None = None,
+    ) -> ChatStreamEvent:
+        """Emit progress for a single step (contracts/sse-events.md `step`).
+
+        Shape matches what ``executor._step_event`` writes and the emitter sends
+        verbatim: ``{step_id, role, state, label, summary, progress}``.
+        """
+        return cls(
+            event=StreamEventType.STEP,
+            data={
+                "step_id": step_id,
+                "role": role,
+                "state": state,
+                "label": label,
+                "summary": summary,
+                "progress": progress or {"current": 0, "total": 0},
+            },
+        )
+
+    @classmethod
+    def replan(
+        cls,
+        *,
+        reason: str,
+        superseded_revision: int,
+    ) -> ChatStreamEvent:
+        """Emit a replan notice (contracts/sse-events.md `replan`).
+
+        Always followed by a fresh ``plan`` event with ``revision: 1``; the
+        revised steps ride on that ``plan`` event, not here.
+        """
+        return cls(
+            event=StreamEventType.REPLAN,
+            data={"reason": reason, "superseded_revision": superseded_revision},
+        )
+
+    @classmethod
+    def budget(
+        cls,
+        *,
+        ceiling_hit: bool,
+        not_completed: list[str],
+        offer_continue: bool,
+    ) -> ChatStreamEvent:
+        """Emit a budget-ceiling notice (contracts/sse-events.md `budget`).
+
+        Shape matches ``budget_guard``'s ``budget_event_data`` sent verbatim:
+        ``{ceiling_hit, not_completed, offer_continue}``.
+        """
+        return cls(
+            event=StreamEventType.BUDGET,
+            data={
+                "ceiling_hit": ceiling_hit,
+                "not_completed": not_completed,
+                "offer_continue": offer_continue,
             },
         )

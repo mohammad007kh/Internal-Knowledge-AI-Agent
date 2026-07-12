@@ -15,6 +15,7 @@ from sqlalchemy import select, update
 from sqlalchemy.exc import DBAPIError
 
 from src.core.database import task_session
+from src.models.enums import SourceStatus
 from src.models.source import Source
 from src.tasks import celery_app
 
@@ -88,7 +89,7 @@ async def _check_scheduled_syncs_async() -> int:
             await db.execute(
                 update(Source)
                 .where(Source.id == source.id)
-                .values(status="syncing", next_sync_due_at=next_run)
+                .values(status=SourceStatus.SYNCING, next_sync_due_at=next_run)
             )
             dispatched += 1
 

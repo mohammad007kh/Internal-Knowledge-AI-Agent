@@ -444,6 +444,14 @@ class SourceResponse(BaseModel):
     tables_partial: int | None = None
     last_error_phase: str | None = None
     last_error_message: str | None = None
+    # Categorised DB connection-failure metadata + server-rendered admin copy
+    # (populated only when the retry seam classified a connect failure). The
+    # headline/next_action are constant, credential-free sentences rendered
+    # server-side so every surface shows identical wording (DTO-separation).
+    failure_category: str | None = None
+    attempts_made: int | None = None
+    failure_headline: str | None = None
+    failure_next_action: str | None = None
     # Owner email (U10) — joined on ``Source.owner_id`` by the detail
     # endpoint so the Overview footer can render "Created … by alice@" with
     # no second fetch. ``None`` when the owner row is missing (shouldn't
@@ -534,6 +542,13 @@ class SourceListItem(BaseModel):
     tables_partial: int | None = None
     last_error_phase: str | None = None
     last_error_message: str | None = None
+    # Categorised DB connection-failure metadata + server-rendered admin copy
+    # (see :class:`SourceResponse`). Populated only for classified connect
+    # failures; constant credential-free sentences rendered server-side.
+    failure_category: str | None = None
+    attempts_made: int | None = None
+    failure_headline: str | None = None
+    failure_next_action: str | None = None
     # Connection health (Slice A) — see :class:`SourceResponse` for context.
     connection_status: str = "unknown"
     connection_last_checked_at: datetime | None = None

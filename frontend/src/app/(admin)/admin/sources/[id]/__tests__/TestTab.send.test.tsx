@@ -95,7 +95,7 @@ function makeSource(overrides: Partial<SourceDetail> = {}): SourceDetail {
     status: 'ready',
     citations_enabled: true,
     updated_at: '2026-01-01T00:00:00Z',
-    schema_status: 'READY',
+    schema_status: 'completed',
     owner_email: null,
     schema_summary: null,
     ...overrides,
@@ -181,6 +181,74 @@ describe('TestTab — send → stream → render (regression)', () => {
     )
   })
 
+  it('attaches the agentic activity accordion to a finished sandbox turn (T-077)', async () => {
+    fetchMock.mockResolvedValueOnce(
+      makeStreamResponse([
+        sseFrame('plan', {
+          revision: 0,
+          steps: [
+            { id: 's1', label: 'Inspect schema', source_id: 'src-1', source_name: 'Postgres' },
+            { id: 's2', label: 'Run the query', source_id: 'src-1', source_name: 'Postgres' },
+          ],
+        }),
+        sseFrame('step', {
+          step_id: 's1',
+          role: 'executor',
+          state: 'finished',
+          label: 'Inspected schema',
+        }),
+        sseFrame('step', {
+          step_id: 's2',
+          role: 'verifier',
+          state: 'finished',
+          label: 'Verified rows',
+        }),
+        sseFrame('delta', { token: '14 tables.' }),
+        sseFrame('done', { session_id: '__sandbox__', message_id: '', sources: [] }),
+      ])
+    )
+
+    const user = userEvent.setup()
+    renderTestTab()
+    await user.type(screen.getByTestId('sandbox-input'), 'How many tables?')
+    await user.click(screen.getByTestId('sandbox-send'))
+
+    // Once the turn folds into a message, its activity accordion is attached.
+    await waitFor(() => expect(screen.getByText('14 tables.')).toBeInTheDocument())
+    expect(screen.getByRole('button', { name: /agent activity/i })).toBeInTheDocument()
+  })
+
+  it('renders the real ClarificationCard with permitted-source options (004 review: Fix B)', async () => {
+    fetchMock.mockResolvedValueOnce(
+      makeStreamResponse([
+        sseFrame('clarification', {
+          question: 'Which source did you mean?',
+          options: [
+            { id: 'src-q4', label: 'Q4 Financials', recommended: true },
+            { id: 'src-board', label: 'Board Notes' },
+          ],
+          allow_free_text: true,
+        }),
+      ])
+    )
+
+    const user = userEvent.setup()
+    renderTestTab()
+    await user.type(screen.getByTestId('sandbox-input'), 'summarize it')
+    await user.click(screen.getByTestId('sandbox-send'))
+
+    // The real card + permitted-source option buttons appear — NOT the old
+    // flattened "_Clarification needed:_" string.
+    expect(await screen.findByText('Which source did you mean?')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /q4 financials/i })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /board notes/i })).toBeInTheDocument()
+    expect(screen.queryByText(/clarification needed:/i)).not.toBeInTheDocument()
+
+    // Choosing an option re-enters as a normal turn (a second POST).
+    await user.click(screen.getByRole('button', { name: /q4 financials/i }))
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2))
+  })
+
   it('renders a stream-error message when the backend yields error frame', async () => {
     fetchMock.mockResolvedValueOnce(
       makeStreamResponse([
@@ -249,13 +317,9 @@ describe('TestTab — send → stream → render (regression)', () => {
     await user.click(screen.getByTestId('sandbox-send'))
 
     // Wait for the user bubble (proves the click reached the form).
-    await waitFor(() =>
-      expect(screen.getByText('no-stream')).toBeInTheDocument()
-    )
+    await waitFor(() => expect(screen.getByText('no-stream')).toBeInTheDocument())
     // Eventually the streaming spinner disappears (isStreaming false).
-    await waitFor(() =>
-      expect(screen.queryByTestId('sandbox-thinking')).toBeNull()
-    )
+    await waitFor(() => expect(screen.queryByTestId('sandbox-thinking')).toBeNull())
     // No assistant bubble was rendered — only the user message bubble.
     // (This is the user-visible "got nothing back" symptom.)
     const userBubbleParent = screen.getByText('no-stream').closest('[role="log"]')

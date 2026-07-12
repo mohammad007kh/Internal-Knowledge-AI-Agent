@@ -85,12 +85,52 @@ export function OverviewCallouts({ source, isDbSource, onRetrySync }: OverviewCa
   const latestJob = source.latest_job
   const jobFailed = latestJob?.status === 'failed'
   const studyPartial = source.study_state === 'READY_PARTIAL'
-  const schemaStale = isDbSource && source.schema_status === 'STALE'
-  if (!jobFailed && !studyPartial && !schemaStale) return null
+  // FX41 — drift lives on `drift_signal_count`, not schema_status.
+  const schemaStale = isDbSource && (source.drift_signal_count ?? 0) > 0
+  // A terminally failed study (e.g. CONNECT_FAILED) is the root cause for a DB
+  // source. Surface it FIRST and suppress the duplicate sync-failed box — both
+  // report the same event, and onRetrySync re-runs the study for DB sources.
+  const studyFailed = isDbSource && (source.study_state?.endsWith('_FAILED') ?? false)
+  const isConnFailure = studyFailed && !!source.failure_headline
+  const showJobFailed = jobFailed && !studyFailed
+  if (!showJobFailed && !studyFailed && !studyPartial && !schemaStale) return null
+
+  // Attempt count is meaningful only when the seam actually retried (>1). At
+  // N==1 the failure was fail-fast (permanent) and next_action already explains
+  // it — appending "1 attempt" would be redundant/contradictory.
+  const attempts = source.attempts_made ?? 0
+  const connBody = [
+    source.failure_next_action ?? '',
+    attempts > 1 ? `Failed after ${attempts} connection attempts.` : '',
+  ]
+    .filter(Boolean)
+    .join(' ')
 
   return (
     <div className="space-y-2">
-      {jobFailed && (
+      {studyFailed &&
+        (isConnFailure ? (
+          <Callout
+            tone="destructive"
+            icon={<CircleAlertIcon className="h-4 w-4" />}
+            title={source.failure_headline ?? 'Could not connect to the database.'}
+            body={connBody}
+            action={{ label: 'Re-test connection', onClick: onRetrySync }}
+            dataFailureCategory={source.failure_category ?? undefined}
+          />
+        ) : (
+          <Callout
+            tone="destructive"
+            icon={<CircleAlertIcon className="h-4 w-4" />}
+            title="Schema study failed"
+            body={
+              source.last_error_message ??
+              "The studying agent couldn't finish documenting this schema. Re-study to try again."
+            }
+            action={{ label: 'Re-study', onClick: onRetrySync }}
+          />
+        ))}
+      {showJobFailed && (
         <Callout
           tone="destructive"
           icon={<CircleAlertIcon className="h-4 w-4" />}
@@ -129,15 +169,22 @@ interface CalloutProps {
   title: string
   body: string
   action?: { label: string; onClick: () => void }
+  // Optional operator-traceability hook: the closed failure-category token is
+  // NOT shown to the admin (the headline is its human rendering) but is emitted
+  // as a data-attribute so it's greppable in DOM/support screenshots.
+  dataFailureCategory?: string
 }
 
-function Callout({ tone, icon, title, body, action }: CalloutProps) {
+function Callout({ tone, icon, title, body, action, dataFailureCategory }: CalloutProps) {
   const palette =
     tone === 'destructive'
       ? 'border-destructive/40 bg-destructive/5 text-destructive'
       : 'border-amber-500/40 bg-amber-500/5 text-amber-900 dark:text-amber-200'
   return (
-    <div className={cn('flex items-start gap-3 rounded-md border p-3 text-sm', palette)}>
+    <div
+      data-failure-category={dataFailureCategory}
+      className={cn('flex items-start gap-3 rounded-md border p-3 text-sm', palette)}
+    >
       <span className="mt-0.5 shrink-0">{icon}</span>
       <div className="min-w-0 flex-1">
         <p className="font-medium">{title}</p>
@@ -265,7 +312,7 @@ interface FreshnessCardProps {
 export function FreshnessCard({ source, isDbSource }: FreshnessCardProps) {
   const isLive = source.source_mode === 'live'
   const lastEvent = isDbSource
-    ? source.last_studied_at ?? source.last_synced_at
+    ? (source.last_studied_at ?? source.last_synced_at)
     : source.last_synced_at
   const eventLabel = isDbSource ? 'Last studied' : 'Last synced'
   return (
@@ -347,11 +394,9 @@ export interface DatabaseOverviewProps {
 }
 
 const SCHEMA_STATUS_LABELS: Record<SchemaStatus, string> = {
-  READY: 'Documented',
-  STUDYING: 'Studying…',
-  STALE: 'May be stale',
-  FAILED: 'Study failed',
-  QUEUED: 'Queued',
+  studying: 'Studying…',
+  completed: 'Documented',
+  failed: 'Study failed',
 }
 
 function schemaStatusLabel(status: SchemaStatus | null | undefined): string {
@@ -524,19 +569,24 @@ function SchemaStatCard({
 }) {
   const status = source.schema_status
   const label = schemaStatusLabel(status)
-  const studying = status === 'STUDYING'
+  const studying = status === 'studying'
   const tablesLine =
     source.tables_documented !== null && source.tables_documented !== undefined
       ? `${source.tables_documented} table${source.tables_documented === 1 ? '' : 's'}${
           source.tables_partial ? ` · ${source.tables_partial} partial` : ''
         }`
       : null
-  const studiedAgo = source.last_studied_at ? `studied ${formatRelative(source.last_studied_at)}` : null
+  const studiedAgo = source.last_studied_at
+    ? `studied ${formatRelative(source.last_studied_at)}`
+    : null
   return (
     <StatShell title="Schema" testId="overview-schema-stat">
       <div className="flex items-center gap-2">
         {studying ? (
-          <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-blue-500" aria-hidden />
+          <span
+            className="inline-block h-2 w-2 animate-pulse rounded-full bg-blue-500"
+            aria-hidden
+          />
         ) : null}
         <p className="font-medium">{label}</p>
       </div>
@@ -581,7 +631,9 @@ function AccessStatCard({
       ) : isError ? (
         <p className="text-xs text-muted-foreground">Couldn&apos;t load access</p>
       ) : count === 0 ? (
-        <p className="text-sm font-medium text-destructive">No users granted — queryable by no one</p>
+        <p className="text-sm font-medium text-destructive">
+          No users granted — queryable by no one
+        </p>
       ) : (
         <p className="text-sm font-medium">
           {count} user{count === 1 ? '' : 's'} granted
@@ -635,7 +687,10 @@ function AgentTeaserCard({
       </CardHeader>
       <CardContent className="space-y-3 text-sm">
         <div className="flex items-start gap-2 rounded-md border bg-muted/30 p-3 text-xs">
-          <LockIcon className="mt-0.5 h-3.5 w-3.5 shrink-0 text-emerald-700 dark:text-emerald-300" aria-hidden />
+          <LockIcon
+            className="mt-0.5 h-3.5 w-3.5 shrink-0 text-emerald-700 dark:text-emerald-300"
+            aria-hidden
+          />
           <p className="text-muted-foreground">
             <span className="font-medium text-emerald-700 dark:text-emerald-300">
               Read-only enforced
@@ -689,7 +744,7 @@ function AgentTeaserBody({
   onViewSchema,
   onRestudySchema,
 }: AgentTeaserBodyProps) {
-  if (status === 'READY') {
+  if (status === 'completed') {
     const n =
       tablesDocumented !== null && tablesDocumented !== undefined ? tablesDocumented : 'several'
     return (
@@ -712,7 +767,7 @@ function AgentTeaserBody({
       </div>
     )
   }
-  if (status === 'FAILED') {
+  if (status === 'failed') {
     const phaseClause = lastErrorPhase ? ` at phase ${lastErrorPhase}` : ''
     const errorClause = lastErrorMessage ? `: ${lastErrorMessage}` : ''
     return (
@@ -725,17 +780,10 @@ function AgentTeaserBody({
       </div>
     )
   }
-  if (status === 'STALE') {
-    return (
-      <div className="space-y-2">
-        <p className="text-muted-foreground">
-          Drift detected — re-study to refresh the agent&apos;s view.
-        </p>
-        <RestudyButton onRestudySchema={onRestudySchema} />
-      </div>
-    )
-  }
-  // null / QUEUED / STUDYING
+  // FX41 — schema_status never emits 'stale'; drift surfaces in the header
+  // callout (driven by drift_signal_count). The fallback below handles the
+  // remaining null / studying states.
+  // null / studying
   return (
     <div className="space-y-2">
       <p className="text-muted-foreground">
@@ -791,16 +839,11 @@ function FileTypeOverview({ source, stats, documents }: FileTypeOverviewInnerPro
           <div className="rounded-md border">
             <ul className="divide-y">
               {recent.map((doc) => (
-                <li
-                  key={doc.id}
-                  className="flex items-center justify-between px-3 py-2 text-xs"
-                >
+                <li key={doc.id} className="flex items-center justify-between px-3 py-2 text-xs">
                   <span className="truncate font-mono text-muted-foreground" title={doc.id}>
                     {doc.id.slice(0, 12)}…
                   </span>
-                  <span className="text-muted-foreground">
-                    {formatTimestamp(doc.created_at)}
-                  </span>
+                  <span className="text-muted-foreground">{formatTimestamp(doc.created_at)}</span>
                 </li>
               ))}
             </ul>

@@ -4,11 +4,14 @@ import {
   type SchemaDocumentResponse,
   type SourceConnectionConfig,
   type SourceDetail,
+  type SourceIntent,
+  type SourceIntentUpdate,
   type SourceListItem,
   type UpdateSourceRequest,
   autoNameApi,
   cancelSyncJobApi,
   deleteSourceApi,
+  getIntentApi,
   getSchemaDocumentApi,
   getSourceApi,
   getSourceConnectionConfigApi,
@@ -16,6 +19,8 @@ import {
   listSourceDocumentsApi,
   listSourcesApi,
   listSyncJobsApi,
+  proposeIntentApi,
+  putIntentApi,
   refreshDescriptionApi,
   testConnectionApi,
   triggerSyncApi,
@@ -47,6 +52,7 @@ export const sourcesKeys = {
     [...sourcesKeys.all, 'schema-document', id] as const,
   connectionConfig: (id: string) =>
     [...sourcesKeys.all, 'connection-config', id] as const,
+  intent: (id: string) => [...sourcesKeys.all, 'intent', id] as const,
 }
 
 // ---------------------------------------------------------------------------
@@ -110,7 +116,9 @@ export function shouldPollSourceLifecycle(
   if (jobStatus === 'pending' || jobStatus === 'running') return true
   if (source.name_status === 'pending_ai') return true
   if (source.description_status === 'pending_ai') return true
-  if (source.schema_status === 'QUEUED' || source.schema_status === 'STUDYING') {
+  // FX41 — schema_status is lowercase on the wire; 'queued' lives on
+  // study_state (uppercase), not on schema_status.
+  if (source.schema_status === 'studying' || source.study_state === 'QUEUED') {
     return true
   }
   return false
@@ -404,5 +412,92 @@ export function useRefreshDescription(sourceId: string) {
 export function useAutoNameSource(sourceId: string) {
   return useMutation({
     mutationFn: () => autoNameApi(sourceId),
+  })
+}
+
+// ---------------------------------------------------------------------------
+// Source intent (004-agentic-pipeline, T-025 review UI)
+// ---------------------------------------------------------------------------
+
+/**
+ * Read a source's intent metadata (the six intent columns). Focused fetch for
+ * the admin review surface — the same fields also ride on the source detail
+ * payload, but IntentSection owns its own query so a propose/save invalidates
+ * just this slice.
+ */
+export interface UseSourceIntentOptions {
+  /**
+   * FIX 2 — propose→GET staleness. After a successful propose (202) the worker
+   * writes the new draft asynchronously; a single refetch races ahead of it.
+   * When the caller sets this `true` (a regenerate is in flight), poll the
+   * intent slice every 3s — mirroring `useSource`'s refetchInterval pattern —
+   * until `intent_status` leaves `pending_ai` or a bounded number of polls
+   * elapses, so the timer can never run forever if the worker stalls.
+   */
+  pollWhileRegenerating?: boolean
+}
+
+/** Stop polling after this many intervals even if the worker never lands. */
+const INTENT_POLL_MAX = 10
+
+export function useSourceIntent(
+  sourceId: string | undefined,
+  options: UseSourceIntentOptions = {}
+) {
+  const { pollWhileRegenerating = false } = options
+  return useQuery<SourceIntent>({
+    // FIX 1 — keep the disabled-state fallback key inside the sourcesKeys
+    // hierarchy so a bulk `invalidateQueries({ queryKey: sourcesKeys.all })`
+    // still matches it. `intent('')` shares the `['sources','intent']` prefix.
+    queryKey: sourcesKeys.intent(sourceId ?? ''),
+    queryFn: () => getIntentApi(sourceId as string),
+    enabled: Boolean(sourceId),
+    refetchInterval: pollWhileRegenerating
+      ? (query) => {
+          // The draft has landed once the status moves off pending_ai — stop.
+          if (query.state.data?.intent_status !== 'pending_ai') return false
+          // Bounded: give up after INTENT_POLL_MAX intervals so a stalled
+          // worker can't leave the timer running indefinitely.
+          if (query.state.dataUpdateCount >= INTENT_POLL_MAX) return false
+          return 3_000
+        }
+      : false,
+  })
+}
+
+/**
+ * Admin save of source intent. Saving constitutes review: the server flips
+ * `intent_status` → 'user_set' and the response carries the persisted bundle.
+ * We seed that response into the cache and invalidate the source detail (whose
+ * payload also embeds the intent fields) so the badge updates everywhere.
+ *
+ * A 422 (sanitization / cap violation) rejects with a problem+json Error; the
+ * component surfaces the field-named message inline.
+ */
+export function useUpdateIntent(sourceId: string) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (body: SourceIntentUpdate) => putIntentApi(sourceId, body),
+    onSuccess: (updated) => {
+      queryClient.setQueryData(sourcesKeys.intent(sourceId), updated)
+      queryClient.invalidateQueries({ queryKey: sourcesKeys.detail(sourceId) })
+    },
+  })
+}
+
+/**
+ * (Re)generate the AI-proposed intent draft. The proposal runs async on the
+ * worker; we invalidate the intent slice so a subsequent poll/refetch picks up
+ * the new draft. A 409 (`IntentProposalConflictError`) means a study or
+ * proposal is already in flight — the component shows a Sonner toast.
+ */
+export function useProposeIntent(sourceId: string) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: () => proposeIntentApi(sourceId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: sourcesKeys.intent(sourceId) })
+      queryClient.invalidateQueries({ queryKey: sourcesKeys.detail(sourceId) })
+    },
   })
 }

@@ -1,0 +1,11 @@
+{
+  "id": "db-decline-empty-table-09",
+  "source_type": "database",
+  "question": "Which billing invoices are overdue in the dataset?",
+  "expected_kind": "decline",
+  "golden_answer": "There is no billing or invoice data in the dataset, so I can't tell you which invoices are overdue.",
+  "must_include": [],
+  "must_not_fabricate": true,
+  "fixtures": {"seed": "evals/fixtures/cctp-mini.sql"},
+  "data_source": "synthetic"
+}

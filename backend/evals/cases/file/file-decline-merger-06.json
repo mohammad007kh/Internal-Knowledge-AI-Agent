@@ -1,0 +1,11 @@
+{
+  "id": "file-decline-merger-06",
+  "source_type": "file",
+  "question": "Which company is Acme Synthetic Labs planning to merge with next quarter?",
+  "expected_kind": "decline",
+  "golden_answer": "None of the indexed documents mention any planned merger, so I can't answer that.",
+  "must_include": [],
+  "must_not_fabricate": true,
+  "fixtures": null,
+  "data_source": "synthetic"
+}

@@ -73,6 +73,11 @@ jobs:
         run: alembic upgrade head
 
       - name: Run tests with coverage gate
+        # NOTE: the *_KEY / *_SECRET / *_PASSWORD values below are throwaway,
+        # non-sensitive CI-only fixtures against an ephemeral service-container
+        # database — NOT real secrets. They are intentionally inline (not
+        # GitHub Actions secrets) so CI runs on pull requests from forks, which
+        # cannot access repository secrets. Do not put production credentials here.
         env:
           DATABASE_URL: postgresql+asyncpg://test_user:test_password@localhost:5432/test_db
           REDIS_URL: redis://localhost:6379/0

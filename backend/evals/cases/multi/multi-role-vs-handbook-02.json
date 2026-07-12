@@ -1,0 +1,11 @@
+{
+  "id": "multi-role-vs-handbook-02",
+  "source_type": "multi",
+  "question": "Does Bob's assigned role grant the approval permission described in the handbook?",
+  "expected_kind": "answer",
+  "golden_answer": "Bob holds the editor role, and the handbook reserves the approval permission for the admin role, so Bob does not have approval permission.",
+  "must_include": ["editor", "admin"],
+  "must_not_fabricate": true,
+  "fixtures": {"seed": "evals/fixtures/cctp-mini.sql"},
+  "data_source": "synthetic"
+}

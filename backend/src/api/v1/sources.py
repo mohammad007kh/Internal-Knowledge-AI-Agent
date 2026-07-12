@@ -14,9 +14,12 @@ from __future__ import annotations
 
 import logging
 import uuid
-from datetime import datetime, timezone
-from typing import Any, Literal
+from datetime import UTC, datetime
+from typing import TYPE_CHECKING, Any, Literal, Protocol
 from uuid import UUID, uuid4
+
+if TYPE_CHECKING:
+    from src.repositories.source_repository import SourceRepository
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import Response
@@ -33,7 +36,6 @@ from src.schemas.source import (
     DocumentListResponse,
     DocumentResponse,
     PaginatedSources,
-    SourceCreate,
     SourceCreateRequest,
     SourceListItem,
     SourcePublicResponse,
@@ -42,6 +44,7 @@ from src.schemas.source import (
     SourceUpdate,
     TestConnectionResponse,
 )
+from src.schemas.source_intent import SourceIntent, SourceIntentUpdate
 from src.schemas.sync_job import SyncJobListResponse, SyncJobResponse
 from src.services.audit_service import emit_audit
 from src.services.db_introspection.schema_doc import SchemaDocument
@@ -174,6 +177,56 @@ def _assert_ownership_or_admin(owner_id: uuid.UUID, user: User) -> None:
         )
 
 
+class _FailureProjectable(Protocol):
+    """The subset of fields both SourceListItem and SourceResponse expose for
+    connection-failure projection (structural typing — no runtime cost)."""
+
+    failure_category: str | None
+    attempts_made: int | None
+    failure_headline: str | None
+    failure_next_action: str | None
+
+
+def _project_connection_failure(
+    target: _FailureProjectable, latest_study: object
+) -> None:
+    """Project categorised connection-failure fields + server-rendered admin
+    copy from *latest_study* onto *target* (SourceListItem or SourceResponse).
+
+    ``failure_category`` / ``attempts_made`` are set only for study rows whose
+    failure the retry seam classified (NULL otherwise). When the category is a
+    known :class:`DBConnFailureCategory` we also attach the constant,
+    credential-free ``failure_headline`` / ``failure_next_action`` rendered
+    server-side, so every admin surface shows identical wording and no DSN /
+    driver text can ever cross the API boundary.
+    """
+    category = getattr(latest_study, "failure_category", None)
+    if not category:
+        return
+    from src.services.db_safety.connect_retry import (  # noqa: PLC0415
+        DBConnFailureCategory,
+        render_admin_message,
+    )
+
+    # Coerce through the closed enum AT THE BOUNDARY (007 M1): an out-of-enum
+    # stored value is dropped, never echoed — the DTO self-enforces the closed
+    # set regardless of writer discipline, so no free-form string can ride this
+    # field across the API even if a future writer misuses the column.
+    try:
+        cat = DBConnFailureCategory(category)
+    except ValueError:
+        return
+    attempts = getattr(latest_study, "attempts_made", None)
+    target.failure_category = cat.value
+    target.attempts_made = attempts
+    if attempts is None:
+        # Legacy row (category set, count absent): category only, no rendered copy.
+        return
+    msg = render_admin_message(cat, attempts_made=attempts)
+    target.failure_headline = msg.headline
+    target.failure_next_action = msg.next_action
+
+
 def _make_list_item(
     source: object,
     *,
@@ -221,6 +274,7 @@ def _make_list_item(
         item.study_state = getattr(latest_study, "state", None)
         item.last_error_phase = getattr(latest_study, "last_error_phase", None)
         item.last_error_message = getattr(latest_study, "last_error_message", None)
+        _project_connection_failure(item, latest_study)
         doc_json = getattr(latest_study, "schema_document_json", None)
         if isinstance(doc_json, dict):
             tables = doc_json.get("tables")
@@ -471,7 +525,7 @@ async def create_upload_url(
 
     storage = Container.storage_service()
 
-    now = datetime.now(tz=timezone.utc)
+    now = datetime.now(tz=UTC)
     safe_name = body.filename.replace("/", "_").replace("\\", "_")
     object_key = f"uploads/{now.strftime('%Y/%m')}/{uuid4()}-{safe_name}"
 
@@ -607,6 +661,7 @@ async def get_source(
             response.last_error_message = getattr(
                 latest_study, "last_error_message", None
             )
+            _project_connection_failure(response, latest_study)
             doc_json = getattr(latest_study, "schema_document_json", None)
             if isinstance(doc_json, dict):
                 tables = doc_json.get("tables")
@@ -1719,3 +1774,164 @@ async def emit_samples_revealed(
     )
     await db.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+# ---------------------------------------------------------------------------
+# Source intent — read / admin-save / (re)propose (T-023, 004-agentic-pipeline)
+#
+# Three admin-only endpoints under /sources/{id}/intent. SECURITY RULE 3:
+#   * ``require_admin`` on EVERY route (decorator-level) — a non-admin token
+#     gets 403 before any handler body runs.
+#   * Request-session binding (FX41): the SourceRepository is constructed from
+#     ``Depends(get_db)`` inside the handler — never resolved from the DI
+#     container — so the route's ``await db.commit()`` persists the write.
+#   * PUT applies STRICT sanitization (T-021) in the schema validators →
+#     instruction-like / over-cap input surfaces as 422 (RFC7807) naming the
+#     field, never echoing the raw payload.
+#   * propose enqueues ``tasks.propose_intent`` (202); 409 when a study is
+#     already in flight (TOCTOU guard lives in the task's conditional UPDATE).
+#   * NEVER returns config / credentials — only the six intent columns.
+# ---------------------------------------------------------------------------
+
+
+def _get_source_repo(
+    db: AsyncSession = Depends(get_db),
+) -> SourceRepository:
+    """Construct a request-session-bound :class:`SourceRepository` (FX41).
+
+    Built from the per-request ``db`` session so the handler's own
+    ``await db.commit()`` persists the intent write in the same transaction.
+    Deliberately NOT resolved from the DI container — a container-built repo
+    would bind to a separate, never-committed session (the bug the
+    ``_get_source_service`` docstring above describes). Tests override this
+    symbol to inject a mock repo.
+    """
+    from src.repositories.source_repository import SourceRepository  # noqa: PLC0415
+
+    return SourceRepository(db)
+
+
+@router.get(
+    "/{source_id}/intent",
+    response_model=SourceIntent,
+    summary="Read a source's intent metadata",
+    dependencies=[Depends(require_admin)],
+)
+async def get_source_intent(
+    source_id: uuid.UUID,
+    repo: SourceRepository = Depends(_get_source_repo),
+) -> SourceIntent:
+    """Return the six intent fields for *source_id*.
+
+    Admin-only. 404 (RFC7807) when the source is missing or soft-deleted —
+    ``repo.get_intent`` raises :class:`NotFoundError`, which the global
+    handler maps to a 404 problem document. The response carries ONLY the
+    intent columns; no connection config or credentials are ever exposed.
+    """
+    intent = await repo.get_intent(source_id)
+    return SourceIntent.model_validate(intent)
+
+
+@router.put(
+    "/{source_id}/intent",
+    response_model=SourceIntent,
+    summary="Admin review/edit of a source's intent (upgrades status to user_set)",
+    dependencies=[Depends(require_admin)],
+)
+async def update_source_intent(
+    source_id: uuid.UUID,
+    payload: SourceIntentUpdate,
+    repo: SourceRepository = Depends(_get_source_repo),
+    db: AsyncSession = Depends(get_db),
+) -> SourceIntent:
+    """Admin save of source intent — the body is review (status → user_set).
+
+    Admin-only. The body is validated by :class:`SourceIntentUpdate`, whose
+    field validators run the STRICT sanitizer (T-021): an instruction-like
+    leading pattern or a cap violation raises before the handler body, which
+    FastAPI surfaces as 422 (RFC7807) naming the offending field. Only the
+    explicitly-provided fields are written; saving flips
+    ``intent_status`` to ``user_set`` and stamps ``intent_updated_at``.
+
+    404 (RFC7807) when the source does not exist. The handler owns the
+    transaction — ``await db.commit()`` persists the request-session write.
+    """
+    updated = await repo.update_intent(source_id, **payload.to_update_kwargs())
+    if not updated:
+        # Mirror the GET path: raise NotFoundError so the global RFC7807
+        # handler emits the same problem+json envelope both paths share,
+        # rather than a raw httpstatuses.com dict body.
+        from src.core.exceptions import NotFoundError  # noqa: PLC0415
+
+        raise NotFoundError(f"Source {source_id} not found.")
+    await db.commit()
+
+    # Re-read so the response reflects the persisted bundle (including the
+    # newly-stamped intent_status='user_set' and intent_updated_at) rather
+    # than echoing the request body back.
+    intent = await repo.get_intent(source_id)
+    return SourceIntent.model_validate(intent)
+
+
+@router.post(
+    "/{source_id}/intent/propose",
+    status_code=status.HTTP_202_ACCEPTED,
+    summary="(Re)generate the AI-proposed intent draft",
+    dependencies=[Depends(require_admin)],
+)
+async def propose_source_intent(
+    source_id: uuid.UUID,
+    repo: SourceRepository = Depends(_get_source_repo),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, str]:
+    """Enqueue the intent-proposal task (same async pattern as re-study).
+
+    Admin-only. BUNDLE-level: the task itself short-circuits while
+    ``intent_status == 'user_set'`` and writes via a TOCTOU-safe conditional
+    UPDATE (T-022), so it NEVER clobbers an admin save and NEVER writes
+    ``purpose`` / ``cross_source_hints``.
+
+    Flow:
+
+    * 404 (RFC7807) when the source does not exist (``repo.get_intent``
+      raises :class:`NotFoundError`).
+    * 409 (RFC7807) when a schema study is already in flight for this source
+      — re-using the studying agent's ``is_running`` concurrency guard, the
+      same in-flight detection the re-study path uses.
+    * Otherwise enqueue ``tasks.propose_intent`` and return 202.
+    """
+    # Existence check — raises NotFoundError → 404 when the source is gone.
+    await repo.get_intent(source_id)
+
+    from src.repositories.schema_study_repository import (  # noqa: PLC0415
+        SchemaStudyRepository,
+    )
+
+    if await SchemaStudyRepository(db).is_running(source_id):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "type": "https://httpstatuses.com/409",
+                "title": "Conflict",
+                "status": 409,
+                "detail": (
+                    "A study or proposal is already in flight for this source. "
+                    "Wait for it to finish before requesting another."
+                ),
+            },
+        )
+
+    # Dispatch through the project's celery_app singleton (not celery's
+    # current_app proxy) so the call site is a single stable object: unit
+    # tests patch ``celery_app.send_task`` and intercept deterministically
+    # regardless of import order (current_app resolves to whichever app is
+    # pushed, which made the spy patch order-dependent and hit a live broker).
+    from src.tasks import celery_app  # noqa: PLC0415
+
+    celery_app.send_task("tasks.propose_intent", args=[str(source_id)])
+
+    logger.info(
+        "propose_intent enqueued for source_id=%s",
+        source_id,
+    )
+    return {"status": "queued"}

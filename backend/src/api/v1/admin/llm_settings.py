@@ -2,7 +2,7 @@
 
 Per §7 of the design doc:
 
-* ``GET /`` returns 10 stage configs, each enriched with the linked
+* ``GET /`` returns 13 stage configs, each enriched with the linked
   ``ai_model: {id, name, provider, model_id, capabilities}`` plus the
   per-stage overrides ``{temperature, max_tokens, custom_prompt}``.
 * ``PUT /{stage}`` accepts ``{ai_model_id, temperature?, max_tokens?,
@@ -50,6 +50,8 @@ STAGES: list[str] = [
     "input_guard",
     "output_guard",
     "titler",
+    "planner",
+    "retrieval_grader",
 ]
 
 STAGE_META: dict[str, tuple[str, str]] = {
@@ -72,6 +74,14 @@ STAGE_META: dict[str, tuple[str, str]] = {
     "titler": (
         "Auto Titler",
         "Generates short sidebar-style titles for new chat sessions",
+    ),
+    "planner": (
+        "Planner",
+        "Decomposes a question into dependent, executable steps",
+    ),
+    "retrieval_grader": (
+        "Retrieval Grader",
+        "Grades retrieved context for light + heavy verification",
     ),
 }
 
@@ -161,7 +171,7 @@ async def list_stage_configs(
     _admin: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ) -> list[LLMStageConfigPublic]:
-    """Return all 10 stages enriched with their linked AI model record."""
+    """Return all 13 stages enriched with their linked AI model record."""
     repo = LLMConfigRepository(db)
     ai_repo = AIModelRepository(db)
     rows = await repo.get_all()

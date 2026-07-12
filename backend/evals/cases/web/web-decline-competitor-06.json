@@ -1,0 +1,11 @@
+{
+  "id": "web-decline-competitor-06",
+  "source_type": "web",
+  "question": "How does Cinderblock's internal security audit compare to its competitors?",
+  "expected_kind": "decline",
+  "golden_answer": "The indexed pages contain no internal security-audit comparison, so I can't make that comparison.",
+  "must_include": [],
+  "must_not_fabricate": true,
+  "fixtures": null,
+  "data_source": "synthetic"
+}

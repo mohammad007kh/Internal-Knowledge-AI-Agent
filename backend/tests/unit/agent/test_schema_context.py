@@ -232,13 +232,15 @@ def test_render_no_tables_emits_explicit_placeholder() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_chunk_dict_uses_synthetic_chunk_id_and_zero_score() -> None:
+def test_chunk_dict_uses_synthetic_chunk_id_and_omits_score() -> None:
     source = _make_db_source(name="orders-db")
     chunk = _build_chunk_dict(source, "rendered text")
     assert chunk["chunk_id"] == f"schema:{source.id}"
     assert chunk["source_id"] == str(source.id)
     assert chunk["text"] == "rendered text"
-    assert chunk["score"] == 0.0
+    # Pinned schema context carries no score key — it is not a vector hit,
+    # so render_system_prompt's mean-distance detector skips it (FX41).
+    assert "score" not in chunk
     assert chunk["source_name"] == "orders-db"
 
 
@@ -354,7 +356,7 @@ async def test_helper_swallows_db_failure() -> None:
 def test_rendered_chunk_text_flows_through_render_system_prompt() -> None:
     """Defence-in-depth: the chunk shape we emit MUST be readable by the
     synthesizer's prompt template.  If render_system_prompt ever stops
-    rendering ``text`` for chunks with score=0.0 this test catches it.
+    rendering ``text`` for scoreless pinned schema chunks this test catches it.
     """
     from src.agent.prompts import render_system_prompt
 
@@ -371,3 +373,21 @@ def test_rendered_chunk_text_flows_through_render_system_prompt() -> None:
     assert "dwh.journal_entries" in prompt
     # And it's NOT the empty-context branch.
     assert "(No relevant context found)" not in prompt
+
+
+def test_pinned_schema_chunk_excluded_from_mean_distance() -> None:
+    """A scoreless pinned schema chunk MUST NOT influence the low-confidence
+    mean-distance signal (FX41). A schema chunk alone yields None (no numeric
+    scores); mixed with a real vector hit, only the vector score counts.
+    """
+    from src.agent.prompts import _mean_distance
+
+    source = _make_db_source(name="orders-db")
+    schema_chunk = _build_chunk_dict(source, "rendered schema text")
+
+    # Schema-only context: no numeric score → mean is None (normal branch).
+    assert _mean_distance([schema_chunk]) is None
+
+    # Mixed: the pinned chunk is skipped, so the mean is purely the vector hit.
+    vector_chunk = {"chunk_id": "c1", "text": "hit", "score": 0.2}
+    assert _mean_distance([schema_chunk, vector_chunk]) == 0.2

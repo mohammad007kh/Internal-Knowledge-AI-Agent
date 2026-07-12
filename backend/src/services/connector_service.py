@@ -18,7 +18,7 @@ from src.core.config import Settings
 from src.core.exceptions import NotFoundError
 from src.models.connector import Connector
 from src.repositories.connector_repository import ConnectorRepository
-from src.schemas.connector import ConnectorCreate, ConnectorResponse, ConnectorUpdate
+from src.schemas.connector import ConnectorCreate, ConnectorUpdate
 
 
 class ConnectorService:
@@ -168,4 +168,11 @@ class ConnectorService:
         except NotFoundError:
             raise
         except Exception as exc:  # noqa: BLE001
-            return {"success": False, "message": str(exc)}
+            # Returned verbatim to the API client. A connector build /
+            # config-decrypt failure could embed a DSN fragment in
+            # ``str(exc)``; scrub it before it leaves the boundary (FR-020).
+            from src.connectors.database_connector import (  # noqa: PLC0415
+                _sanitise as _sanitise_dsn,
+            )
+
+            return {"success": False, "message": _sanitise_dsn(exc)}

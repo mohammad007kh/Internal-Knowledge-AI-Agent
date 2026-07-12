@@ -23,10 +23,10 @@ from __future__ import annotations
 
 import os
 import uuid
+from datetime import UTC
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-
 
 os.environ.setdefault("DATABASE_URL", "postgresql+asyncpg://test:test@localhost/test")
 os.environ.setdefault("JWT_SECRET_KEY", "test-jwt-secret-key-at-least-32-chars-long!!")
@@ -72,7 +72,7 @@ def _make_db_source() -> MagicMock:
     receives — ``SourceType.DATABASE``. The route's branching reads either
     ``.value`` or ``str(...)``, both of which resolve to ``"database"``.
     """
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     from src.models.enums import SourceType
 
@@ -83,7 +83,7 @@ def _make_db_source() -> MagicMock:
     src.name = "Reporting DB"
     src.is_active = True
     src.deleted_at = None
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     src.created_at = now
     src.updated_at = now
     src.description = None
@@ -111,10 +111,22 @@ def _make_db_source() -> MagicMock:
     src.tables_partial = None
     src.last_error_phase = None
     src.last_error_message = None
+    # Categorised connection-failure fields (Slice 5a) — concrete None so
+    # SourceResponse.model_validate doesn't choke on auto-vivified child mocks.
+    src.failure_category = None
+    src.attempts_made = None
+    src.failure_headline = None
+    src.failure_next_action = None
     # U10 — detail-endpoint enrichment fields (must be concrete, not MagicMock,
     # or SourceResponse.model_validate fails strict typing on the response).
     src.owner_email = "admin@example.com"
     src.schema_summary = None
+    # FX35b — SourceResponse.latest_job is an optional enrichment field
+    # populated by the detail endpoint AFTER model_validate. On a real ORM
+    # row it is absent (getattr → field default None); a MagicMock would
+    # otherwise auto-vivify it into a child mock and fail SyncJobResponse
+    # validation, so pin it to None to match production behaviour.
+    src.latest_job = None
     return src
 
 
@@ -201,7 +213,8 @@ def app(monkeypatch: pytest.MonkeyPatch, db_session):
         submitted: dict,
         connection_uri,
     ):
-        from datetime import UTC, datetime as _dt
+        from datetime import UTC
+        from datetime import datetime as _dt
 
         ok = bool(await connector_stub.test_connection())
         if not ok:

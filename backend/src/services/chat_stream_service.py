@@ -29,18 +29,188 @@ the loading state.
 
 from __future__ import annotations
 
+import html
 import logging
 from collections.abc import AsyncGenerator, Awaitable, Callable
 from typing import Any
 
 from langchain_core.messages import AIMessage, HumanMessage
+from pydantic import ValidationError
 
-from src.schemas.chat import ChatStreamEvent
+from src.agent.activity_summary import build_activity_summary
+from src.schemas.chat import ChatStreamEvent, StreamEventType
 
 logger = logging.getLogger(__name__)
 
 
 SANDBOX_SESSION_ID = "__sandbox__"
+
+# Clarification options surfaced on the wire must obey the 2-4 contract
+# (contracts/sse-events.md §"Extended event: clarification").  Below the
+# minimum we degrade to a legacy free-text clarification rather than emit an
+# under-filled (and contract-violating) option list.
+_CLARIFY_MIN_OPTIONS = 2
+_CLARIFY_MAX_OPTIONS = 4
+
+
+def _build_clarification_frame(
+    *,
+    question: str,
+    raw_options: list[Any] | None,
+    permitted_ids: list[str],
+) -> str:
+    """Build the TERMINAL clarification SSE frame for the agentic path (T-080).
+
+    Decision (b): the agentic graph ends the clarification turn NORMALLY
+    (``planner → handle_clarification → END``) — no ``interrupt()``, no
+    ``GraphInterrupt``.  The planner writes ``clarification_question`` +
+    ``clarification_options`` (shape ``{source_id, source_name}``, already
+    clipped to the permitted set node-side with the ``source_name`` re-keyed to
+    the TRUSTED server-loaded display name of that permitted source); this
+    emitter RE-CLIPS defensively against the requesting user's permitted source
+    set (Security Rule 2 / FX41) before mapping onto the wire shape
+    ``{id, label, recommended?}``.
+
+    Security Rule 2 has TWO clauses, both enforced here (FX41 boundary
+    re-clip parity):
+
+    * **Permission re-clip (clause 1)** — an option whose ``source_id`` is NOT
+      in *permitted_ids* is dropped; an inaccessible source never reaches the
+      wire even if it leaked into state.
+    * **Trusted-name re-clip (clause 2)** — the wire ``label`` is the TRUSTED
+      ``source_name`` the planner keyed to THIS permitted ``source_id`` (never
+      the LLM-authored free-text label, which could NAME an inaccessible
+      source).  A planner ``label`` / ``hint`` are deliberately IGNORED: there
+      is no trusted per-source hint, so ``hint`` is dropped entirely rather than
+      risk passing free text that names another source.  Fallback when the
+      trusted name is absent is the ``source_id`` itself — never LLM text.
+    * **Sanitization** — the trusted name is still HTML-escaped (``quote=True``),
+      mirroring the planner's ``_render_sources_block`` discipline.
+    * **2-4 enforcement** — capped at 4; if fewer than 2 survive the clip we
+      degrade to a legacy free-text clarification (``options`` omitted) rather
+      than emit a contract-violating single option.
+
+    Returns a ready-to-yield SSE string. Never raises: any malformed option or
+    schema failure falls back to the legacy free-text clarification so a bad
+    node delta can never break the user-facing stream.
+    """
+    permitted = set(permitted_ids or [])
+    options_payload: list[dict[str, Any]] = []
+    seen_ids: set[str] = set()
+    for opt in raw_options or []:
+        if not isinstance(opt, dict):
+            continue
+        sid = opt.get("source_id") or opt.get("id")
+        if not isinstance(sid, str) or sid not in permitted or sid in seen_ids:
+            continue
+        seen_ids.add(sid)
+        # Trusted name keyed by the (already re-clipped) permitted source_id.
+        # NEVER the LLM-authored ``label``: it is free text that could NAME an
+        # inaccessible source.  Absent trusted name → fall back to the id, not
+        # to any LLM-provided string.
+        trusted_name = opt.get("source_name")
+        label = trusted_name if isinstance(trusted_name, str) and trusted_name else sid
+        wire_opt: dict[str, Any] = {
+            "id": sid,
+            # Trusted source display name → HTML-escape (planner parity).
+            "label": html.escape(label, quote=True),
+        }
+        # ``hint`` deliberately dropped — no trusted per-source hint exists, and
+        # the planner's free-text hint could name another source.
+        recommended = opt.get("recommended")
+        if isinstance(recommended, bool):
+            wire_opt["recommended"] = recommended
+        options_payload.append(wire_opt)
+        if len(options_payload) >= _CLARIFY_MAX_OPTIONS:
+            break
+
+    # Below the contract minimum → free-text clarification (still terminal).
+    emit_options = options_payload if len(options_payload) >= _CLARIFY_MIN_OPTIONS else None
+    try:
+        return ChatStreamEvent.clarification(
+            question, options=emit_options
+        ).to_sse()
+    except ValidationError:
+        # Defensive: should be unreachable (we already bound 2-4), but never let
+        # a schema edge case break the stream — fall back to free-text.
+        logger.warning(
+            "clarification options failed validation — emitting free-text fallback",
+            exc_info=True,
+        )
+        return ChatStreamEvent.clarification(question).to_sse()
+
+# Intermediate agentic node names whose ``on_chain_end`` output carries the
+# per-node SSE state-deltas (``*_event_data``).  Keyed on the EXACT
+# ``add_node(...)`` names from :func:`src.agent.pipeline._build_agentic_pipeline`
+# so a v2/v1 turn (which never produces these node names) is byte-identical to
+# before — those graphs simply never fire an ``on_chain_end`` for these names.
+_AGENTIC_NODE_NAMES = frozenset(
+    {
+        "planner",
+        "replan",
+        "execute_step",
+        "budget_guard_step",
+        "budget_guard_replan",
+    }
+)
+
+
+def _agentic_frames_from_node_output(output: dict[str, Any]) -> list[str]:
+    """Translate one agentic node's state-delta into ordered SSE frames.
+
+    Maps the per-node ``*_event_data`` deltas written into ``AgentState`` by the
+    planner / executor / budget_guard / replan nodes onto the ``plan`` / ``step``
+    / ``budget`` / ``replan`` wire frames (contract: ``contracts/sse-events.md``).
+    The node deltas are ALREADY in the wire-contract shape, so each is emitted as
+    the SSE ``data`` payload verbatim under the matching event name — never
+    reshaped (reshaping would drop contract fields like ``budget.ceiling_hit``).
+
+    Ordering within a single node delta:
+
+    * ``replan`` node returns BOTH ``replan_event_data`` and a fresh
+      ``plan_event_data`` (revision 1) in one delta — emit ``replan`` THEN
+      ``plan`` (T-056 order).
+    * ``step_event_data`` is a LIST (started / finished / failed) — emit one
+      ``step`` frame per entry in list order.
+
+    Resilient by contract: a missing / malformed field is skipped, never raised,
+    so a single bad node delta can never break the user-facing stream.
+    """
+    frames: list[str] = []
+    if not isinstance(output, dict):
+        return frames
+
+    # replan FIRST, then its fresh plan (T-056 order).  ``replan_event_data`` is
+    # only ever present on a replan node delta.
+    replan_data = output.get("replan_event_data")
+    if isinstance(replan_data, dict):
+        frames.append(
+            ChatStreamEvent(event=StreamEventType.REPLAN, data=replan_data).to_sse()
+        )
+
+    plan_data = output.get("plan_event_data")
+    if isinstance(plan_data, dict):
+        frames.append(
+            ChatStreamEvent(event=StreamEventType.PLAN, data=plan_data).to_sse()
+        )
+
+    step_events = output.get("step_event_data")
+    if isinstance(step_events, list):
+        for step_payload in step_events:
+            if isinstance(step_payload, dict):
+                frames.append(
+                    ChatStreamEvent(
+                        event=StreamEventType.STEP, data=step_payload
+                    ).to_sse()
+                )
+
+    budget_data = output.get("budget_event_data")
+    if isinstance(budget_data, dict):
+        frames.append(
+            ChatStreamEvent(event=StreamEventType.BUDGET, data=budget_data).to_sse()
+        )
+
+    return frames
 
 
 def history_to_lc_messages(
@@ -77,7 +247,7 @@ async def run_pipeline_stream(
     session_id: str,
     langfuse_tracing: Any,
     persist_assistant: bool,
-    on_done: Callable[[str], Awaitable[str]] | None = None,
+    on_done: Callable[..., Awaitable[str]] | None = None,
     pre_yield: list[str] | None = None,
 ) -> AsyncGenerator[str, None]:
     """Drive the LangGraph pipeline and yield SSE frames.
@@ -110,10 +280,13 @@ async def run_pipeline_stream(
         sandbox path: ``message_id`` is emitted as ``""`` and ``on_done``
         is not invoked.
     on_done
-        Async callback that receives ``final_answer`` and returns the
-        persisted ``message_id``.  Required when ``persist_assistant=True``,
-        ignored otherwise. Errors raised by the callback are converted to
-        an SSE ``error`` frame so the frontend can exit its pending state.
+        Async callback invoked as ``on_done(final_answer,
+        activity_summary=...)`` that returns the persisted ``message_id``.
+        ``activity_summary`` is the compact agentic summary (or ``None`` on a
+        non-agentic turn) so the caller can persist it on the same row.
+        Required when ``persist_assistant=True``, ignored otherwise. Errors
+        raised by the callback are converted to an SSE ``error`` frame so the
+        frontend can exit its pending state.
     pre_yield
         Pre-formatted SSE strings to emit BEFORE the pipeline starts (e.g.
         the auto-generated session title). They flow through unchanged.
@@ -130,6 +303,12 @@ async def run_pipeline_stream(
     final_answer = ""
     streamed_answer = ""  # Tokens already shipped via ``on_chat_model_stream``.
     sources: list[Any] = []
+    final_state: dict[str, Any] = {}  # full LangGraph output — read for activity_summary
+    # Dedup guard for the intermediate agentic node frames.  ``astream_events``
+    # gives every node-completion a unique ``run_id``; keying on it guarantees
+    # each node's ``*_event_data`` is translated to wire frames EXACTLY once even
+    # if LangGraph surfaces the same node output more than once.
+    emitted_node_run_ids: set[str] = set()
 
     try:
         async for event in pipeline.astream_events(
@@ -143,8 +322,40 @@ async def run_pipeline_stream(
                     yield ChatStreamEvent.delta(token.content).to_sse()
             elif kind == "on_chain_end" and event.get("name") == "LangGraph":
                 output = event.get("data", {}).get("output", {})
+                if isinstance(output, dict):
+                    final_state = output
                 final_answer = output.get("final_answer", final_answer)
                 sources = output.get("sources", sources)
+            elif (
+                kind == "on_chain_end"
+                and event.get("name") in _AGENTIC_NODE_NAMES
+            ):
+                # Intermediate agentic node finished — translate its state-delta
+                # (``*_event_data``) into ``plan`` / ``step`` / ``budget`` /
+                # ``replan`` frames in natural stream (execution) order.  The v2
+                # / v1 paths never produce these node names, so this branch is a
+                # no-op there and the wire grammar stays byte-identical.
+                run_id = str(event.get("run_id") or "")
+                if run_id and run_id in emitted_node_run_ids:
+                    continue
+                node_output = event.get("data", {}).get("output", {})
+                try:
+                    node_frames = _agentic_frames_from_node_output(node_output)
+                except Exception:  # noqa: BLE001
+                    # Mirror the streamer's defensive hygiene: a malformed node
+                    # delta must never break the user-facing stream.
+                    logger.warning(
+                        "agentic SSE emitter failed for node=%s session=%s — "
+                        "skipping its intermediate frames",
+                        event.get("name"),
+                        session_id,
+                        exc_info=True,
+                    )
+                    node_frames = []
+                if run_id:
+                    emitted_node_run_ids.add(run_id)
+                for frame in node_frames:
+                    yield frame
         # If the synthesizer streamed real tokens, prefer the streamed
         # text — it's the canonical source of truth for what the user
         # actually saw on-wire.  Falling back to the LangGraph
@@ -152,6 +363,37 @@ async def run_pipeline_stream(
         # model entirely (e.g. clarification / handle_clarification).
         if streamed_answer and not final_answer:
             final_answer = streamed_answer
+
+        # ── Terminal clarification (T-080, decision b) ──────────────────────
+        # The agentic graph ends the needs_clarification turn NORMALLY (no
+        # exception): planner → handle_clarification → END, with
+        # ``requires_clarification`` + ``clarification_question`` +
+        # ``clarification_options`` on the final state.  Detect that here and
+        # emit the extended ``clarification`` event TERMINALLY — suppressing the
+        # normal delta/done answer flow (handle_clarification also echoes the
+        # question into final_answer, which we deliberately do NOT ship as an
+        # answer). Options are re-clipped to the requesting user's permitted
+        # source set (Security Rule 2) before emission.  The legacy
+        # GraphInterrupt-string path below stays as the additive fallback.
+        if final_state.get("requires_clarification"):
+            question = (
+                final_state.get("clarification_question")
+                or "Could you clarify your question?"
+            )
+            permitted_ids = list(initial_state.get("source_ids") or [])
+            raw_options = final_state.get("clarification_options")
+            yield _build_clarification_frame(
+                question=str(question),
+                raw_options=raw_options if isinstance(raw_options, list) else None,
+                permitted_ids=permitted_ids,
+            )
+            try:
+                langfuse_tracing.end_trace(trace_id, output="[clarification]")
+            except Exception:  # noqa: BLE001
+                logger.debug(
+                    "end_trace failed after terminal clarification", exc_info=True
+                )
+            return
 
     except Exception as exc:  # noqa: BLE001
         if GraphInterrupt is not None and isinstance(exc, GraphInterrupt):
@@ -220,6 +462,22 @@ async def run_pipeline_stream(
         tail = final_answer[len(streamed_answer):]
         yield ChatStreamEvent.delta(tail).to_sse()
 
+    # Compact agentic activity summary (T-058 / FR-018, FR-021). Built from the
+    # final LangGraph state (past_steps / plan / tokens). Returns None on a
+    # non-agentic (v2 / legacy) turn so the done event + persisted column stay
+    # null and the UI degrades gracefully. Defensive: a builder error must never
+    # break the user-facing stream — fall back to None.
+    activity_summary: dict[str, Any] | None
+    try:
+        activity_summary = build_activity_summary(final_state)
+    except Exception:  # noqa: BLE001
+        logger.warning(
+            "build_activity_summary failed for session=%s — omitting summary",
+            session_id,
+            exc_info=True,
+        )
+        activity_summary = None
+
     # Success path. The session-chat caller passes a ``persist_assistant``
     # callback that writes ``chat_messages`` and returns the new message id.
     # The sandbox caller skips this — its contract explicitly does NOT
@@ -231,7 +489,9 @@ async def run_pipeline_stream(
                 "persist_assistant=True requires an on_done callback"
             )
         try:
-            message_id = await on_done(final_answer)
+            message_id = await on_done(
+                final_answer, activity_summary=activity_summary
+            )
         except Exception:  # noqa: BLE001
             logger.exception(
                 "on_done callback failed for session=%s — emitting error frame",
@@ -256,6 +516,7 @@ async def run_pipeline_stream(
         message_id=message_id,
         trace_id=trace_id,
         sources=sources,
+        activity_summary=activity_summary,
     ).to_sse()
     try:
         langfuse_tracing.end_trace(trace_id, output=final_answer)

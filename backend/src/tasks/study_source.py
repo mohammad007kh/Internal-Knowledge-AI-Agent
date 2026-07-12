@@ -37,17 +37,18 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import re
 import uuid
 from typing import Any
 
 from src.connectors.factory import ConnectorFactory
 from src.core.config import settings
 from src.core.database import AsyncSessionLocal
+from src.models.enums import SourceStatus
 from src.repositories.schema_study_repository import SchemaStudyRepository
 from src.repositories.source_repository import SourceRepository
 from src.services.db_introspection.fingerprint import compute_fingerprint
 from src.services.db_introspection.schema_doc import SchemaDocument
+from src.services.db_safety import redact_dsn
 from src.services.sync_cancellation import (
     clear_sync_cancelled,
     is_sync_cancelled,
@@ -99,13 +100,15 @@ _AGENT_VERSION = "studying-agent@0.3"
 
 
 def _sanitise(message: str) -> str:
-    """Strip credentials from connection-string-like substrings.
+    """Strip credentials / host / db-name fragments from an error message.
 
-    Mirrors the helper in :mod:`sync_source` — the studying-agent's error
+    Thin alias over the single canonical hardened redactor
+    (:func:`src.services.db_safety.redact_dsn`) — the studying-agent's error
     messages MUST never echo a connection string into the audit log or the
-    admin UI's error surface.
+    admin UI's error surface. The previous local regex stopped at the FIRST
+    ``@`` and leaked the tail of ``@``-containing passwords.
     """
-    return re.sub(r"://[^@\s]+@", "://***@", message)
+    return redact_dsn(message)
 
 
 # ---------------------------------------------------------------------------
@@ -208,10 +211,25 @@ async def _run(source_id: uuid.UUID) -> dict[str, Any]:
         except Exception as exc:  # noqa: BLE001 — terminal: persist + re-raise
             sanitised = _sanitise(str(exc))
             phase = _phase_from_exception(exc)
+            # Connection-failure metadata (set only when the seam classified a
+            # DB connect failure; both fields are paired or both None). Read ONLY
+            # off SchemaStudyPhaseError — the type contractually known to carry
+            # credential-free, enum-derived values — rather than duck-typing an
+            # arbitrary exception that might happen to expose these attrs.
+            from src.services.db_introspection._errors import (  # noqa: PLC0415
+                SchemaStudyPhaseError,
+            )
+
+            failure_category: str | None = None
+            attempts_made: int | None = None
+            if isinstance(exc, SchemaStudyPhaseError):
+                failure_category = exc.failure_category
+                attempts_made = exc.attempts_made
             logger.warning(
-                "study_source: study %s failed at phase=%s",
+                "study_source: study %s failed at phase=%s category=%s",
                 study_id,
                 phase,
+                failure_category,
                 exc_info=True,
             )
             async with AsyncSessionLocal() as fail_session:
@@ -219,7 +237,11 @@ async def _run(source_id: uuid.UUID) -> dict[str, Any]:
                     source_id, "failed"
                 )
                 await SchemaStudyRepository(fail_session).mark_failed(
-                    study_id, phase=phase, message=sanitised
+                    study_id,
+                    phase=phase,
+                    message=sanitised,
+                    failure_category=failure_category,
+                    attempts_made=attempts_made,
                 )
                 await fail_session.commit()
             return {
@@ -261,20 +283,69 @@ async def _run(source_id: uuid.UUID) -> dict[str, Any]:
             await source_repo_success.set_schema_status(
                 source_id, "completed"
             )
-            await source_repo_success.set_status(source_id, "ready")
+            await source_repo_success.set_status(source_id, SourceStatus.READY)
             await success_session.commit()
 
-        logger.info(
-            "study_source: completed source_id=%s study_id=%s",
-            source_id,
-            study_id,
-        )
-        return {"source_id": str(source_id), "status": "completed"}
+    # ---- Post-study chain: propose draft intent (T-022). The studying
+    # ---- agent has just persisted a SchemaDocument, which is exactly what
+    # ---- the proposal task reads. Mirrors how a successful sync chains
+    # ---- ``auto_name_source`` off ``SyncJobService.mark_success``. The
+    # ---- proposal task is itself idempotent + TOCTOU-safe (it short-circuits
+    # ---- on ``intent_status='user_set'`` and writes via a conditional
+    # ---- UPDATE), so a duplicate enqueue is harmless. Best-effort: a broker
+    # ---- hiccup here MUST NOT undo the study we just committed, and the API
+    # ---- trigger (POST /intent/propose) remains the guaranteed entry point.
+    _maybe_enqueue_propose_intent(source_id)
+
+    logger.info(
+        "study_source: completed source_id=%s study_id=%s",
+        source_id,
+        study_id,
+    )
+    return {"source_id": str(source_id), "status": "completed"}
 
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+
+def _dispatch_propose_intent(source_id: uuid.UUID) -> None:
+    """Module-level Celery dispatch shim for the post-study intent proposal.
+
+    Wrapping ``celery.current_app.send_task`` in a sync function lets tests
+    monkeypatch this single symbol on the :mod:`src.tasks.study_source`
+    namespace, sidestepping the ``LocalProxy`` quirks of patching
+    ``celery.current_app`` directly. Same idiom as
+    :func:`src.tasks.auto_name_source._dispatch_sync_source`.
+    """
+    from celery import current_app  # noqa: PLC0415
+
+    current_app.send_task("tasks.propose_intent", args=[str(source_id)])
+
+
+def _maybe_enqueue_propose_intent(source_id: uuid.UUID) -> None:
+    """Best-effort enqueue of ``tasks.propose_intent`` after a successful study.
+
+    Errors are swallowed: the schema study committed in the caller is the
+    durable outcome of this task and must not be undone by a transient
+    broker hiccup. The proposal task is idempotent + TOCTOU-safe, and the
+    API trigger (``POST /intent/propose``, T-023) remains the guaranteed
+    entry point, so a dropped enqueue here is recoverable.
+    """
+    try:
+        _dispatch_propose_intent(source_id)
+        logger.info(
+            "study_source: enqueued propose_intent post-study",
+            extra={"source_id": str(source_id)},
+        )
+    except Exception:  # noqa: BLE001 - observability dispatch is best-effort
+        logger.warning(
+            "study_source: propose_intent enqueue failed — study preserved, "
+            "admin can trigger POST /intent/propose manually",
+            extra={"source_id": str(source_id)},
+            exc_info=True,
+        )
 
 
 async def _produce_schema_document(source: Any) -> SchemaDocument:

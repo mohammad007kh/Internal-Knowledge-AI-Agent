@@ -1,0 +1,11 @@
+{
+  "id": "multi-decline-missing-data-04",
+  "source_type": "multi",
+  "question": "Using the onboarding checklist, which steps has the user named Dana not yet completed?",
+  "expected_kind": "decline",
+  "golden_answer": "There is no user named Dana in the dataset, so even though the onboarding checklist exists I can't report Dana's outstanding steps.",
+  "must_include": [],
+  "must_not_fabricate": true,
+  "fixtures": {"seed": "evals/fixtures/cctp-mini.sql"},
+  "data_source": "synthetic"
+}

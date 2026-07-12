@@ -12,14 +12,16 @@ import pytest
 from src.services.db_safety import connection_hardening as ch
 from src.services.db_safety.connection_hardening import (
     DEFAULT_STATEMENT_TIMEOUT_MS,
+    PostgresEngineHardening,
     harden_connection,
     harden_mssql_connection,
     harden_mysql_connection,
     harden_postgres_connection,
+    harden_postgres_engine_kwargs,
     mssql_connect_args,
+    postgres_asyncpg_connect_args,
     read_only_session,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -152,11 +154,27 @@ class TestHardenPostgresConnection:
         assert opts.count("-c default_transaction_read_only=on") == 1
 
     async def test_handles_postgresql_asyncpg_scheme(self) -> None:
+        """asyncpg URLs are returned UNCHANGED — never `options=`-injected.
+
+        asyncpg's ``connect()`` rejects the libpq ``options=`` kwarg
+        (``TypeError: connect() got an unexpected keyword argument 'options'``),
+        which SQLAlchemy's asyncpg dialect would forward verbatim from the URL
+        query string.  Read-only + statement_timeout hardening for asyncpg flows
+        through ``connect_args=postgres_asyncpg_connect_args()`` (server_settings),
+        NOT the URL — see the dedicated test class below.
+        """
         url = "postgresql+asyncpg://user:pw@host/db"
         out = await harden_postgres_connection(url)
-        assert out.startswith("postgresql+asyncpg://")
-        opts = _options_value(out)
-        assert "-c default_transaction_read_only=on" in opts
+        # Returned verbatim — exact equality is the strongest "unchanged" assertion
+        # and guarantees no `options=` (or any other param) was injected.
+        assert out == url
+
+    async def test_asyncpg_url_with_existing_query_preserved(self) -> None:
+        # Pre-existing query params on an asyncpg URL survive untouched — the
+        # function must not append `&options=...` or mangle the query.
+        url = "postgresql+asyncpg://user:pw@host/db?sslmode=require&application_name=svc"
+        out = await harden_postgres_connection(url)
+        assert out == url
 
     async def test_handles_legacy_postgres_scheme(self) -> None:
         url = "postgres://user:pw@host/db"
@@ -191,6 +209,126 @@ class TestHardenPostgresConnection:
             await harden_postgres_connection(
                 "postgresql://u:p@h/db", statement_timeout_ms=-1
             )
+
+
+# ---------------------------------------------------------------------------
+# postgres_asyncpg_connect_args (the asyncpg hardening channel)
+# ---------------------------------------------------------------------------
+
+
+class TestPostgresAsyncpgConnectArgs:
+    """asyncpg can't take libpq ``options=``; hardening flows via server_settings."""
+
+    def test_applies_readonly_and_default_timeout(self) -> None:
+        ss = postgres_asyncpg_connect_args()["server_settings"]
+        assert ss["default_transaction_read_only"] == "on"
+        assert ss["statement_timeout"] == str(DEFAULT_STATEMENT_TIMEOUT_MS)
+
+    def test_respects_custom_timeout(self) -> None:
+        ss = postgres_asyncpg_connect_args(statement_timeout_ms=12_000)["server_settings"]
+        assert ss["statement_timeout"] == "12000"
+
+    def test_all_server_setting_values_are_strings(self) -> None:
+        # asyncpg requires every server_settings value to be a str — an int
+        # statement_timeout would be rejected at connect time (same class of
+        # bug as the libpq options= kwarg).
+        ss = postgres_asyncpg_connect_args()["server_settings"]
+        assert all(isinstance(v, str) for v in ss.values())
+
+    def test_rejects_non_positive_timeout(self) -> None:
+        with pytest.raises(ValueError, match="must be positive"):
+            postgres_asyncpg_connect_args(statement_timeout_ms=0)
+        with pytest.raises(ValueError, match="must be positive"):
+            postgres_asyncpg_connect_args(statement_timeout_ms=-1)
+
+
+# ---------------------------------------------------------------------------
+# harden_postgres_engine_kwargs (atomic url + connect_args pairing)
+# ---------------------------------------------------------------------------
+
+
+class TestHardenPostgresEngineKwargs:
+    """The combined helper that pairs URL + connect_args atomically."""
+
+    async def test_asyncpg_url_unchanged_with_server_settings(self) -> None:
+        url = "postgresql+asyncpg://user:pw@host/db"
+        hardened = await harden_postgres_engine_kwargs(url)
+        # URL must be returned verbatim (asyncpg rejects libpq options=).
+        assert hardened.url == url
+        # connect_args carry the full server_settings hardening.
+        assert hardened.connect_args == {
+            "server_settings": {
+                "default_transaction_read_only": "on",
+                "statement_timeout": str(DEFAULT_STATEMENT_TIMEOUT_MS),
+            }
+        }
+
+    async def test_libpq_url_injects_options_and_empty_connect_args(self) -> None:
+        url = "postgresql://user:pw@host:5432/db"
+        hardened = await harden_postgres_engine_kwargs(url)
+        # libpq drivers harden via the URL's options=, not connect_args.
+        assert hardened.connect_args == {}
+        opts = _options_value(hardened.url)
+        assert "-c default_transaction_read_only=on" in opts
+
+    async def test_legacy_postgres_scheme_like_libpq(self) -> None:
+        url = "postgres://user:pw@host/db"
+        hardened = await harden_postgres_engine_kwargs(url)
+        assert hardened.connect_args == {}
+        opts = _options_value(hardened.url)
+        assert "-c default_transaction_read_only=on" in opts
+
+    async def test_rejects_non_postgres_url(self) -> None:
+        with pytest.raises(ValueError, match="PostgreSQL"):
+            await harden_postgres_engine_kwargs("mysql://user:pw@host/db")
+
+    async def test_rejects_non_positive_timeout(self) -> None:
+        with pytest.raises(ValueError, match="must be positive"):
+            await harden_postgres_engine_kwargs(
+                "postgresql://u:p@h/db", statement_timeout_ms=0
+            )
+        with pytest.raises(ValueError, match="must be positive"):
+            await harden_postgres_engine_kwargs(
+                "postgresql://u:p@h/db", statement_timeout_ms=-5
+            )
+
+    async def test_as_create_async_engine_kwargs_shape_and_fresh_copy(self) -> None:
+        url = "postgresql+asyncpg://user:pw@host/db"
+        hardened = await harden_postgres_engine_kwargs(url)
+        kwargs = hardened.as_create_async_engine_kwargs()
+        assert set(kwargs) == {"url", "connect_args"}
+        assert kwargs["url"] == hardened.url
+        assert kwargs["connect_args"] == hardened.connect_args
+        # Mutating the returned connect_args must NOT affect the dataclass —
+        # the helper hands out a fresh dict.
+        kwargs["connect_args"]["server_settings"] = "tampered"
+        assert hardened.connect_args != kwargs["connect_args"]
+        assert (
+            hardened.connect_args["server_settings"]["default_transaction_read_only"]
+            == "on"
+        )
+
+    async def test_custom_timeout_propagates_to_url_and_connect_args(self) -> None:
+        # asyncpg: timeout lands in connect_args server_settings.
+        asyncpg = await harden_postgres_engine_kwargs(
+            "postgresql+asyncpg://u:p@h/db", statement_timeout_ms=7_000
+        )
+        assert asyncpg.statement_timeout_ms == 7_000
+        assert (
+            asyncpg.connect_args["server_settings"]["statement_timeout"] == "7000"
+        )
+        # libpq: timeout lands in the URL options=.
+        libpq = await harden_postgres_engine_kwargs(
+            "postgresql://u:p@h/db", statement_timeout_ms=7_000
+        )
+        assert "-c statement_timeout=7000" in _options_value(libpq.url)
+        assert libpq.connect_args == {}
+
+    async def test_returns_dataclass_instance(self) -> None:
+        hardened = await harden_postgres_engine_kwargs(
+            "postgresql://u:p@h/db"
+        )
+        assert isinstance(hardened, PostgresEngineHardening)
 
 
 # ---------------------------------------------------------------------------

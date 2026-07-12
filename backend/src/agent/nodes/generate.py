@@ -22,7 +22,12 @@ import tenacity
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
 from openai import APIStatusError, APITimeoutError
 
-from src.agent.prompts import NO_CONTEXT_MESSAGE, render_system_prompt
+from src.agent.budget_guard import inject_diagnostics
+from src.agent.prompts import (
+    NO_CONTEXT_MESSAGE,
+    render_failure_prompt,
+    render_system_prompt,
+)
 from src.agent.state import AgentState
 from src.services.ai_model_resolver import build_chat_model
 
@@ -37,6 +42,37 @@ _STAGE = "synthesizer"
 _MAX_RETRIES = 3
 
 
+def _collect_agentic_chunks(state: AgentState) -> list[dict[str, Any]]:
+    """Flatten ``past_steps[].output_chunks`` into a single context list (T-058).
+
+    Agentic steps keep their retrieval output step-scoped on
+    ``StepResult.output_chunks`` and never merge it into the turn-wide
+    ``retrieved_chunks`` (data-model §2).  The synthesizer collects them here so
+    the grounded answer / partial answer can cite real context.  Falls back to
+    ``retrieved_chunks`` (empty on the agentic path) so the v2 path is unaffected.
+    """
+    collected: list[dict[str, Any]] = []
+    for entry in state.get("past_steps") or []:
+        if not isinstance(entry, dict):
+            continue
+        for chunk in entry.get("output_chunks") or []:
+            if isinstance(chunk, dict):
+                collected.append(chunk)
+    if collected:
+        return collected
+    return list(state.get("retrieved_chunks") or [])
+
+
+def _is_failure_synthesis(state: AgentState) -> bool:
+    """True when the synthesizer must use the honest-failure / budget prompt (T-057).
+
+    Set by the agentic graph on the budget-breach edge (``budget_hit``) or the
+    exhausted-retries/replan honest-failure edge (``_synthesize_failure``).  The
+    v2 / legacy path sets neither, so this is always False there.
+    """
+    return bool(state.get("budget_hit") or state.get("_synthesize_failure"))
+
+
 def _build_messages(
     state: AgentState, custom_prompt: str | None
 ) -> list[BaseMessage]:
@@ -46,11 +82,34 @@ def _build_messages(
     ``LLMConfiguration`` (when set) or the default rendered from the
     retrieved chunks.  Caller-supplied ``SystemMessage`` instances are
     dropped — the agent owns the system prompt.
+
+    Agentic synthesize path (T-058): when the turn carries ``past_steps`` the
+    context is collected from the executed steps; on a budget-hit / honest-failure
+    edge the honest-failure prompt (with a ``<RETRIEVAL_DIAGNOSTICS>`` block) is
+    rendered instead of the standard grounded prompt. The v2 / legacy path has no
+    ``past_steps`` and no failure flag, so its prompt selection is unchanged.
     """
-    if custom_prompt:
+    is_agentic = bool(state.get("past_steps"))
+    if is_agentic:
+        context_chunks = _collect_agentic_chunks(state)
+    else:
+        context_chunks = list(state.get("retrieved_chunks") or [])
+
+    if _is_failure_synthesis(state):
+        # FR-013/FR-020: honest-failure or budget wrap-up. The admin custom
+        # prompt is intentionally NOT used here — the failure framing rules
+        # (lead honest, no fabrication, diagnostics-grounded) must always apply.
+        budget_event = state.get("budget_event_data") or {}
+        system_text = render_failure_prompt(
+            context_chunks,
+            diagnostics=inject_diagnostics(state),
+            budget_hit=bool(state.get("budget_hit")),
+            not_completed=list(budget_event.get("not_completed") or []),
+        )
+    elif custom_prompt:
         system_text = custom_prompt
     else:
-        system_text = render_system_prompt(state.get("retrieved_chunks", []))
+        system_text = render_system_prompt(context_chunks)
     result: list[BaseMessage] = [SystemMessage(content=system_text)]
 
     for msg in state.get("messages", []):
@@ -99,6 +158,9 @@ async def generate_response(
             "provider": client.provider,
             "chunk_count": len(state.get("retrieved_chunks", [])),
             "query": state.get("query", "")[:200],
+            # Estimate-then-reconcile (FR-021): record configured max_tokens as
+            # the pre-call output budget estimate; actuals replace it post-stream.
+            "estimated_output_tokens": client.max_tokens,
         },
     )
 
@@ -119,6 +181,8 @@ async def generate_response(
         return {
             "final_answer": NO_CONTEXT_MESSAGE,
             "error": "generation_failed",
+            "total_input_tokens": 0,
+            "total_output_tokens": 0,
         }
 
     # Once the first token has streamed to the client, we MUST NOT retry —
@@ -172,14 +236,28 @@ async def generate_response(
 
     try:
         answer, usage = await _call()
+        in_tok = usage["input_tokens"]
+        out_tok = usage["output_tokens"]
         span.update(output={"answer_length": len(answer), **usage})
         logger.info(
             "generate_response: model=%s tokens in=%d out=%d",
             client.model_id,
-            usage["input_tokens"],
-            usage["output_tokens"],
+            in_tok,
+            out_tok,
         )
-        return {"final_answer": answer}
+        # Emit accumulated turn cost as a Langfuse score (Constitution II).
+        prior_in = state.get("total_input_tokens") or 0
+        prior_out = state.get("total_output_tokens") or 0
+        langfuse.score(  # type: ignore[attr-defined]
+            trace_id=state["trace_id"],
+            name="turn_token_cost",
+            value=float(prior_in + prior_out + in_tok + out_tok),
+        )
+        return {
+            "final_answer": answer,
+            "total_input_tokens": in_tok,
+            "total_output_tokens": out_tok,
+        }
 
     except Exception as exc:
         logger.exception("generate_response failed after retries: %s", exc)
@@ -187,6 +265,8 @@ async def generate_response(
         return {
             "final_answer": NO_CONTEXT_MESSAGE,
             "error": "generation_failed",
+            "total_input_tokens": 0,
+            "total_output_tokens": 0,
         }
     finally:
         span.end()

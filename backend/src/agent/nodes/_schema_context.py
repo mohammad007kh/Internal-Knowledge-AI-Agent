@@ -27,6 +27,7 @@ from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import select
 
+from src.agent.nodes._intent_render import render_intent_block
 from src.models.enums import SourceType
 from src.models.schema_study import SchemaStudy
 from src.models.source import Source
@@ -80,8 +81,26 @@ def _render_chunk_text(source: Source, doc: SchemaDocument) -> str:
     The format is deliberately deterministic so prompt tokens stay stable
     across runs; the LLM should treat this as the authoritative schema
     description for the source.
+
+    Source *intent* (purpose / example questions / out-of-scope) renders
+    ABOVE the schema block — inside the same pinned chunk — so the answer
+    synthesizer always sees the source's purpose even when the table list is
+    truncated past ``_MAX_TABLES`` (FR-004). Intent is delimiter-wrapped and
+    flagged as data, never instructions (security rule 1).
     """
     lines: list[str] = []
+
+    # -- Intent block FIRST (survives _MAX_TABLES truncation, FR-004) --------
+    intent_block = render_intent_block(
+        purpose=getattr(source, "purpose", None),
+        example_questions=getattr(source, "example_questions", None),
+        out_of_scope=getattr(source, "out_of_scope", None),
+        intent_status=getattr(source, "intent_status", None),
+    )
+    if intent_block:
+        lines.append(intent_block)
+        lines.append("")  # blank line separates intent from the schema render
+
     lines.append(
         f"Database source: {source.name} (dialect: {doc.dialect})"
     )
@@ -145,18 +164,20 @@ async def _load_latest_study(
 def _build_chunk_dict(source: Source, text: str) -> dict[str, Any]:
     """Package the rendered text in the same shape `retrieve_context` emits.
 
-    The ``score`` field is set to 0.0 (perfect match) so the
-    ``render_system_prompt`` low-confidence detector doesn't gate the
-    grounded-answer branch on it.  ``chunk_id`` is namespaced with a
-    ``schema:`` prefix so persist / citation code can recognise the
-    synthetic origin if it ever wants to render a different citation
-    label.
+    Schema context is a *pinned* grounding channel, not a vector hit: it must
+    always be present for a studied DB source regardless of similarity. So we
+    deliberately omit the ``score`` key rather than fake a perfect-match
+    distance (the old ``score=0.0`` hack). ``render_system_prompt``'s
+    low-confidence detector uses ``chunk.get("score")`` and skips chunks whose
+    score is non-numeric, so a missing key cleanly excludes pinned schema
+    context from the mean-distance confidence signal. ``chunk_id`` is
+    namespaced with a ``schema:`` prefix so persist / citation code can
+    recognise the synthetic origin.
     """
     return {
         "chunk_id": f"schema:{source.id}",
         "source_id": str(source.id),
         "text": text,
-        "score": 0.0,
         "document_title": f"{source.name} — schema overview",
         "page_number": None,
         "source_name": source.name,

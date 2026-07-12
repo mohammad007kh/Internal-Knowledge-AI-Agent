@@ -37,14 +37,21 @@ from typing import TYPE_CHECKING, Any
 import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import create_async_engine
 
+from src.agent.nodes._intent_render import render_intent_block
 from src.agent.state import AgentState
 from src.core.crypto import decrypt
 from src.models.enums import SourceType
 from src.prompts import load_prompt
 from src.services.db_safety import (
-    harden_postgres_connection,
+    harden_postgres_engine_kwargs,
     inject_limit,
+    redact_dsn,
     validate_sql,
+)
+from src.services.db_safety.connect_retry import (
+    INTERACTIVE_POLICY,
+    DBConnectionFailed,
+    connect_with_retry,
 )
 
 if TYPE_CHECKING:
@@ -58,6 +65,18 @@ logger = logging.getLogger(__name__)
 
 _STAGE = "text_to_query"
 _LIMIT = 100
+
+# ---------------------------------------------------------------------------
+# Credential / DSN redaction (FR-020)
+# ---------------------------------------------------------------------------
+# ``_execute`` opens an engine from the source's decrypted ``connection_string``.
+# A driver (asyncpg / SQLAlchemy) failure can embed that DSN
+# (``scheme://user:pass@host`` URL, ``password=...`` key-value, bare
+# ``host:port``) in ``str(exc)``. We log the *sanitised* message instead of a
+# raw traceback, delegating to the single canonical hardened redactor
+# (:func:`src.services.db_safety.redact_dsn`). The module-local alias preserves
+# the existing call sites / test imports.
+_sanitise = redact_dsn
 
 # Map ``config["db_type"]`` to a sqlglot dialect name.  ``mssql`` is sqlglot's
 # ``tsql``; everything else falls back to ``postgres`` (the strictest parser
@@ -97,7 +116,7 @@ async def _generate_sql(
     query: str,
     schema_sketch: str,
     ai_model_resolver: AIModelResolver,
-) -> str:
+) -> tuple[str, int, int]:
     client = await ai_model_resolver.resolve(_STAGE)
     prompt = load_prompt(_STAGE, custom=client.custom_prompt)
     user_payload = (
@@ -113,7 +132,9 @@ async def _generate_sql(
         temperature=client.temperature,
         max_tokens=client.max_tokens,
     )
-    return (response.choices[0].message.content or "").strip()
+    in_tok = int(response.usage.prompt_tokens) if response.usage else 0
+    out_tok = int(response.usage.completion_tokens) if response.usage else 0
+    return (response.choices[0].message.content or "").strip(), in_tok, out_tok
 
 
 def _decrypt_source_config(source: Any) -> dict[str, Any] | None:
@@ -150,26 +171,37 @@ async def _execute(
     ``validate_sql``. Other dialects fall back to the raw string until Phase 2
     ships their hardening helpers.
     """
-    connect_args: dict[str, Any] = {}
     if db_type == "postgresql":
-        connection_string = await harden_postgres_connection(connection_string)
-        # asyncpg refuses libpq ?options=; harden via server_settings.
-        if connection_string.startswith("postgresql+asyncpg"):
-            from src.services.db_safety import (  # noqa: PLC0415
-                postgres_asyncpg_connect_args,
-            )
-
-            connect_args = postgres_asyncpg_connect_args()
-    engine = create_async_engine(
-        connection_string,
-        pool_size=1,
-        max_overflow=0,
-        connect_args=connect_args,
-    )
+        hardened = await harden_postgres_engine_kwargs(connection_string)
+        engine = create_async_engine(
+            **hardened.as_create_async_engine_kwargs(),
+            pool_size=1,
+            max_overflow=0,
+        )
+    else:
+        engine = create_async_engine(
+            connection_string,
+            pool_size=1,
+            max_overflow=0,
+        )
     try:
-        async with engine.connect() as conn:
+        # Retry ONLY the connect handshake (INTERACTIVE: 1 quick retry, ~3s,
+        # permanent fails fast). `engine.connect()` performs the real DBAPI
+        # connect/auth eagerly, so connect failures raise here and are
+        # classified by the seam; the SQL query runs ONCE outside the seam so a
+        # bad-query error is never misclassified/retried as a connect failure.
+        # NB: the deadline bounds retry *scheduling*, not a single connect's own
+        # TCP timeout — an unreachable host can still take the driver's connect
+        # timeout per attempt. Acceptable for v1; the source is skipped on
+        # failure (see the node's DBConnectionFailed handler).
+        conn = await connect_with_retry(
+            lambda: engine.connect(), policy=INTERACTIVE_POLICY
+        )
+        try:
             result = await conn.execute(sa.text(sql))
             return list(result.mappings().all())
+        finally:
+            await conn.close()
     finally:
         await engine.dispose()
 
@@ -201,6 +233,8 @@ async def text_to_query(
     new_chunks: list[dict[str, Any]] = []
     generated_sql: dict[str, str] = {}
     skipped: list[str] = []
+    total_in = 0
+    total_out = 0
 
     try:
         # Resolve sources by id (defensive — bad inputs just get skipped).
@@ -242,11 +276,13 @@ async def text_to_query(
             schema_sketch = await _load_schema_sketch(db_session, source)
 
             try:
-                raw_sql = await _generate_sql(
+                raw_sql, in_tok, out_tok = await _generate_sql(
                     query=query,
                     schema_sketch=schema_sketch,
                     ai_model_resolver=ai_model_resolver,
                 )
+                total_in += in_tok
+                total_out += out_tok
             except Exception:  # noqa: BLE001
                 logger.warning(
                     "text_to_query: LLM call failed for source=%s", sid,
@@ -286,11 +322,48 @@ async def text_to_query(
                     wrapped,
                     db_type=str(config.get("db_type", "")),
                 )
-            except Exception:  # noqa: BLE001
+            except DBConnectionFailed as exc:
+                # Connect officially failed after the retry budget. Tag the span
+                # with the CLOSED category + attempt count for admin observability
+                # (both are a fixed enum token + an int — never any DSN / driver
+                # text, so FR-020 holds; do NOT tag str(exc)). User-facing
+                # behaviour is unchanged: skip this source (NEVER flip
+                # Source.status — a transient blip on one query must not mark a
+                # healthy source broken).
+                try:
+                    span.update(
+                        metadata={
+                            "db_connect_failed_source": sid,
+                            "db_connect_category": exc.category.value,
+                            "db_connect_attempts": exc.attempts_made,
+                        }
+                    )
+                except Exception:  # noqa: BLE001 - observability is best-effort
+                    # Never break the chat turn on a telemetry hiccup, but leave
+                    # a thread to pull if span updates start failing.
+                    logger.debug(
+                        "text_to_query: span.update failed", exc_info=True
+                    )
                 logger.warning(
-                    "text_to_query: execution failed for source=%s — skipping",
+                    "text_to_query: connect failed for source=%s — skipping "
+                    "[category=%s attempts=%d]",
                     sid,
-                    exc_info=True,
+                    exc.category.value,
+                    exc.attempts_made,
+                )
+                skipped.append(sid)
+                continue
+            except Exception as exc:  # noqa: BLE001
+                # ``exc_info`` is intentionally OMITTED: the traceback's final
+                # line renders ``str(exc)``, and a driver (asyncpg/SQLAlchemy)
+                # connection failure can embed the DSN there. Log the exception
+                # type + a *sanitised* message instead (FR-020).
+                logger.warning(
+                    "text_to_query: execution failed for source=%s — skipping "
+                    "[%s: %s]",
+                    sid,
+                    type(exc).__name__,
+                    _sanitise(exc),
                 )
                 skipped.append(sid)
                 continue
@@ -326,6 +399,8 @@ async def text_to_query(
         return {
             "retrieved_chunks": merged,
             "generated_sql": generated_sql,
+            "total_input_tokens": total_in,
+            "total_output_tokens": total_out,
         }
     finally:
         span.end()
@@ -341,16 +416,41 @@ _MAX_TABLES_FOR_SKETCH = 30
 the LLM stops paying attention; truncation is documented in the prompt."""
 
 
+def _description_fallback(source: Any) -> str:
+    """Render the schema-sketch fallback when no usable SchemaDocument exists.
+
+    The source's *purpose* takes precedence over the bare ``description``
+    (T-024 / FR-004): a delimiter-wrapped, treat-as-data intent block leads,
+    followed by the freeform description as supplementary context. Falls back
+    to the bare description when no intent is authored, and to an empty string
+    when neither is present.
+    """
+    intent_block = render_intent_block(
+        purpose=getattr(source, "purpose", None),
+        example_questions=getattr(source, "example_questions", None),
+        out_of_scope=getattr(source, "out_of_scope", None),
+        intent_status=getattr(source, "intent_status", None),
+    )
+    description = (getattr(source, "description", None) or "").strip()
+
+    if not intent_block:
+        return description
+    if not description:
+        return intent_block
+    return f"{intent_block}\n\n{description}"
+
+
 async def _load_schema_sketch(
-    db: "AsyncSession",  # noqa: F821 — forward ref under TYPE_CHECKING
+    db: AsyncSession,  # noqa: F821 — forward ref under TYPE_CHECKING
     source: Any,
 ) -> str:
     """Render the latest persisted SchemaDocument as a compact text block
     suitable for the text-to-SQL prompt.
 
-    Falls back to ``source.description`` when no SchemaStudy exists yet
-    (e.g., source created before Wave 1 shipped, or studying agent hasn't
-    finished its first run).
+    Falls back to the source's intent (purpose-first, delimiter-wrapped) and
+    then its bare ``description`` when no SchemaStudy exists yet (e.g., source
+    created before Wave 1 shipped, or the studying agent hasn't finished its
+    first run). See :func:`_description_fallback`.
 
     The shape we emit is deliberately deterministic so prompt tokens stay
     stable — one line per table with type/PK/columns and a trailing
@@ -370,23 +470,23 @@ async def _load_schema_sketch(
     )
     study = (await db.execute(stmt)).scalar_one_or_none()
     if study is None or study.schema_document_json is None:
-        return source.description or ""
+        return _description_fallback(source)
 
     try:
         doc = SchemaDocument.model_validate(study.schema_document_json)
     except Exception:  # noqa: BLE001 — bad JSON shape is recoverable
         logger.warning(
             "text_to_query: schema_document_json failed strict validation — "
-            "falling back to source.description",
+            "falling back to source intent / description",
             extra={"source_id": str(source.id)},
             exc_info=True,
         )
-        return source.description or ""
+        return _description_fallback(source)
 
     return _render_schema_sketch(doc)
 
 
-def _render_schema_sketch(doc: "SchemaDocument") -> str:  # noqa: F821
+def _render_schema_sketch(doc: SchemaDocument) -> str:  # noqa: F821
     """Format a :class:`SchemaDocument` into a compact text block the LLM
     can read efficiently.
 

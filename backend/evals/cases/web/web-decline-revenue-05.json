@@ -1,0 +1,11 @@
+{
+  "id": "web-decline-revenue-05",
+  "source_type": "web",
+  "question": "What was Cinderblock's total annual revenue last year?",
+  "expected_kind": "decline",
+  "golden_answer": "I don't see any revenue figures on the indexed Cinderblock pages, so I can't answer that.",
+  "must_include": [],
+  "must_not_fabricate": true,
+  "fixtures": null,
+  "data_source": "synthetic"
+}

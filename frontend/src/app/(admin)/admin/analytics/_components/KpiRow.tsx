@@ -124,8 +124,11 @@ function SchemaStudiesTile({ ready, failed }: { ready: number; failed: number })
   const value = `${ready} ready`
   const sub = failed > 0 ? `${failed} failed` : 'none failed'
   // The KpiTile is presentational; wrap a relative-positioned overlay link so
-  // clicking the card jumps to the filtered sources list.
-  const href = failed > 0 ? '/admin/sources?schema_status=FAILED' : '/admin/sources?schema_status=READY'
+  // clicking the card jumps to the sources list. FX41 — the previous
+  // ?schema_status=FAILED|READY filter was never honoured (the backend
+  // GET /sources accepts no schema_status query, and the page never read it).
+  // Drop the bogus query until a real filter is wired end-to-end.
+  const href = '/admin/sources'
   return (
     <div className="relative">
       <KpiTile

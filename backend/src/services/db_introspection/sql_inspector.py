@@ -30,8 +30,8 @@ import json
 import logging
 import re
 import time
-from datetime import datetime, timezone
-from typing import TYPE_CHECKING, Any, Final
+from datetime import UTC, datetime
+from typing import TYPE_CHECKING, Any
 
 import sqlalchemy as sa
 from sqlalchemy.engine import Inspector
@@ -40,13 +40,15 @@ from sqlalchemy.types import (
     Boolean,
     Date,
     DateTime,
-    Enum as SAEnum,
     Integer,
     LargeBinary,
     Numeric,
     SmallInteger,
     String,
     Time,
+)
+from sqlalchemy.types import (
+    Enum as SAEnum,
 )
 
 from src.services.db_introspection._errors import SchemaStudyPhaseError
@@ -67,10 +69,15 @@ from src.services.db_introspection.schema_doc import (
 )
 from src.services.db_safety import (
     harden_connection,
-    harden_postgres_connection,
+    harden_postgres_engine_kwargs,
     mssql_connect_args,
-    postgres_asyncpg_connect_args,
+    redact_dsn,
     validate_sql,
+)
+from src.services.db_safety.connect_retry import (
+    BACKGROUND_POLICY,
+    DBConnectionFailed,
+    connect_with_retry,
 )
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
@@ -145,39 +152,13 @@ _SQLGLOT_DIALECT_BY_DB_TYPE: dict[str, str] = {
 # --- Error-message sanitisation -------------------------------------------
 #
 # Anything headed for a persisted PhaseError (and thus the audit log / admin
-# UI) must not leak DB topology or credentials. Driver exceptions are noisy:
-# asyncpg / psycopg embed ``host=...`` / ``dbname=...`` / ``password=...``
-# DSN fragments, SQLAlchemy embeds ``scheme://user:pass@host`` URLs, and a
-# bare ``host:port`` can show up anywhere. We over-redact on purpose — a
-# scrubbed error message is fine; a leaked one is not.
-
-#: ``scheme://user:pass@host`` → ``scheme://***@host``
-_CRED_URL_RE: Final[re.Pattern[str]] = re.compile(r"://[^@\s/]+@")
-
-#: DSN-style ``key=value`` fragments that name the host/db/user/credentials.
-_DSN_KV_RE: Final[re.Pattern[str]] = re.compile(
-    r"\b(host|hostaddr|port|dbname|database|user|username|password|passwd)\s*=\s*"
-    r"('[^']*'|\"[^\"]*\"|\S+)",
-    re.IGNORECASE,
-)
-
-#: A bare ``hostname:port`` (2-5 digit port). Conservative — only fires when a
-#: colon-separated port is present, so we don't eat ``"line 12:34"``.
-_HOST_PORT_RE: Final[re.Pattern[str]] = re.compile(r"\b[\w.-]+:\d{2,5}\b")
-
-
-def _sanitise(message: str) -> str:
-    """Redact credentials / host / db-name fragments from an error message.
-
-    Mirrors (and tightens) ``study_source._sanitise``. Order matters: strip
-    DSN ``key=value`` fragments first (they may contain a ``host:port``),
-    then collapse any remaining bare ``host:port``, then the URL form.
-    """
-    text = str(message)
-    text = _DSN_KV_RE.sub(lambda m: f"{m.group(1).lower()}=<redacted>", text)
-    text = _HOST_PORT_RE.sub("<host>:<port>", text)
-    text = _CRED_URL_RE.sub("://***@", text)
-    return text
+# UI) must not leak DB topology or credentials. Delegates to the single
+# canonical hardened redactor (:func:`src.services.db_safety.redact_dsn`),
+# which redacts URL credentials FIRST (greedy to the last ``@`` so
+# ``@``-containing passwords are fully stripped — the previous local URL regex
+# stopped at the first ``@``). The module-local alias preserves the existing
+# call sites / test imports.
+_sanitise = redact_dsn
 
 
 # ---------------------------------------------------------------------------
@@ -270,9 +251,11 @@ async def _build_engine(connection_string: str, db_type: str) -> AsyncEngine:
     connect_args: dict[str, Any] = {}
     if db_type == "postgresql" or conn_str.startswith(("postgresql", "postgres")):
         try:
-            conn_str = await harden_postgres_connection(
+            hardened = await harden_postgres_engine_kwargs(
                 conn_str, statement_timeout_ms=_STATEMENT_TIMEOUT_MS
             )
+            conn_str = hardened.url
+            connect_args = hardened.connect_args
         except ValueError:
             # Fall back to the raw URL — the connect probe below still
             # protects us, and we don't widen the blast radius.
@@ -280,10 +263,6 @@ async def _build_engine(connection_string: str, db_type: str) -> AsyncEngine:
                 "sql_inspector: postgres hardening rejected the URL — "
                 "falling back to raw connection string"
             )
-        # asyncpg refuses libpq `?options=`; harden via server_settings
-        # connect_args instead. See postgres_asyncpg_connect_args docstring.
-        if conn_str.startswith("postgresql+asyncpg"):
-            connect_args = postgres_asyncpg_connect_args(_STATEMENT_TIMEOUT_MS)
     elif db_type == "mssql":
         connect_args = mssql_connect_args(_STATEMENT_TIMEOUT_MS)
 
@@ -329,26 +308,31 @@ async def _reflect(engine: AsyncEngine, fn: Any) -> Any:
 
 
 async def _phase_connecting(engine: AsyncEngine) -> None:
-    try:
+    """Open the connection and run ``SELECT 1`` under the shared retry seam.
+
+    Transient connect failures retry with full-jitter backoff under a deadline;
+    permanent ones (auth / permission / db-not-found / TLS) fail fast. On
+    exhaustion the categorised, credential-free :class:`DBConnectionFailed` is
+    mapped to a ``CONNECTING`` :class:`SchemaStudyPhaseError` carrying the closed
+    failure category + the honest attempt count, which the orchestrator persists
+    on the study row.
+    """
+
+    async def _acquire() -> None:
+        # Fresh connection per attempt (the seam re-invokes this). NEVER dispose
+        # the engine here — it is pre-built once and reused by later phases.
         async with engine.connect() as conn:
             await conn.execute(sa.text("SELECT 1"))
-    except Exception as exc:  # noqa: BLE001 - classify + re-raise sanitised
-        message = _sanitise(str(exc)).lower()
-        if "timeout" in message or "timed out" in message:
-            error_key = "CONNECT_TIMEOUT"
-        elif (
-            "password" in message
-            or "authentication" in message
-            or "auth failed" in message
-            or "role" in message
-        ):
-            error_key = "AUTH_FAILED"
-        else:
-            error_key = "CONNECT_REFUSED"
+
+    try:
+        await connect_with_retry(_acquire, policy=BACKGROUND_POLICY)
+    except DBConnectionFailed as exc:
         raise SchemaStudyPhaseError(
             phase="CONNECTING",
-            error_key=error_key,
+            error_key=exc.category.value,
             message="Could not connect to the source database (see server logs).",
+            failure_category=exc.category.value,
+            attempts_made=exc.attempts_made,
         ) from None
 
 
@@ -1195,7 +1179,7 @@ async def study_sql_schema(
         doc = SchemaDocument(
             dialect=dialect,
             fingerprint="0" * 64,  # placeholder, replaced below
-            generated_at=datetime.now(tz=timezone.utc),
+            generated_at=datetime.now(tz=UTC),
             agent_version=AGENT_VERSION,
             study_duration_ms=duration_ms,
             partial=partial,

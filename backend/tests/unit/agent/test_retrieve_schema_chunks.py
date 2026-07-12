@@ -38,11 +38,12 @@ from src.agent.nodes.retrieve import retrieve_context  # noqa: E402
 
 
 def _schema_chunk(source_id: str, text: str = "schema text") -> dict:
+    # Pinned schema context carries no score key (FX41) — mirrors
+    # _build_chunk_dict in src/agent/nodes/_schema_context.py.
     return {
         "chunk_id": f"schema:{source_id}",
         "source_id": source_id,
         "text": text,
-        "score": 0.0,
         "document_title": "x — schema overview",
         "page_number": None,
         "source_name": "x",

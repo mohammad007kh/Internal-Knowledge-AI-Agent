@@ -203,11 +203,12 @@ describe('Documents tab — empty-state copy per type', () => {
     await waitFor(() => expect(screen.getByRole('tab', { name: /^Schema/i })).toBeInTheDocument())
     await user.click(screen.getByRole('tab', { name: /^Schema/i }))
 
-    // Empty state copy from the SchemaViewer's not-yet-documented branch.
-    expect(await screen.findByTestId('schema-empty-state')).toHaveTextContent(
-      /Schema not yet documented/i
-    )
-    // Old placeholder copy must NOT come back.
-    expect(screen.queryByText(/Schema details require the studying agent/i)).toBeNull()
+    // This test owns ONE assertion: the Schema tab mounts the live
+    // SchemaViewer (here, its empty-state branch via the file-scope
+    // `SchemaDocumentNotFoundError` mock above). The exact empty-state copy
+    // is FX41-era and is asserted in _components/__tests__/SchemaViewer.test.tsx
+    // — duplicating it here only drifts (it already did: the old assertion
+    // expected pre-FX41 copy that the viewer never rendered).
+    expect(await screen.findByTestId('schema-empty-state')).toBeInTheDocument()
   })
 })
