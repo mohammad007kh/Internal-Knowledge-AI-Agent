@@ -95,7 +95,7 @@ docker cp backend/tests/. internalknowledgeaiagent-backend-1:/app/tests/
 docker exec internalknowledgeaiagent-backend-1 python -m pytest tests/unit/ --no-cov -p no:cacheprovider -q
 ```
 
-- **Cross-check the collected count** — the full backend unit suite is ≈ 1700 tests. A much lower number means the container is stale; re-sync the full dirs.
+- **Cross-check the collected count** — the full backend unit suite is ≈ 1,900 tests. A much lower number means the container is stale; re-sync the full dirs.
 - Lint on the **host** (not the container): `cd backend && python -m ruff check <changed files>` (and `--fix` for import-sort).
 - For a single module, sync the full dirs anyway, then target the file: `pytest tests/unit/<path> -q`.
 
@@ -106,4 +106,8 @@ docker exec internalknowledgeaiagent-backend-1 python -m pytest tests/unit/ --no
 - PostgreSQL 16 + pgvector (2 expand-only migrations: source-intent columns, message activity_summary JSONB); Redis (unchanged); MinIO (unchanged) (004-agentic-pipeline)
 
 ## Recent Changes
-- 004-agentic-pipeline: Added Python 3.12 (backend), TypeScript 5.6 (frontend) + FastAPI, LangChain+LangGraph (existing pins), SQLAlchemy 2 async, Next.js 15, shadcn/ui, TanStack Query v5 — NO new runtime dependencies
+- **DB connection-retry & honest failure**: classify → retry → officially-fail with a categorised, secret-safe admin message (no DSN / host / port / user / password in messages, logs, API responses, or Langfuse traces); wired into the DB connector, schema-study, chat text-to-query, and the sources API + admin UI. Two expand-only migrations.
+- **Guardrail session-scoping**: `GuardrailService` owns a `session_factory` and opens a short-lived session per DB touch (closed before the LLM eval) — scoping lives in the DI graph, not the API edge. SSE pipeline session-leak fixed.
+- **CPU-only backend image**: ships CPU-only torch (dropped the ~2 GB CUDA stack); the runtime needs no GPU.
+- **Feedback endpoint contract fix**: `raise` (not `return`) `problem()` so bad-rating / forbidden / not-found return 422 / 403 / 404 instead of 500.
+- **004-agentic-pipeline**: plan-and-execute agentic graph behind `PIPELINE_AGENTIC_ENABLED` (default-off; admin-sandbox only, v2 graph is the rollback), replan / budget-guard / honest-failure nodes — NO new runtime dependencies.
